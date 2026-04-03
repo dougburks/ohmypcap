@@ -14,14 +14,14 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-Once Docker is installed and configured, all you have to do is create a directory and run the Docker image:
+Once Docker is installed and configured, all you have to do is create a directory and then run OhMyPCAP:
 
 ```bash
 mkdir -p ~/ohmypcap
 docker run -v ~/ohmypcap:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main
 ```
 
-It will update its NIDS rules and then prompt you to open http://localhost:8000/ohmypcap.html in your browser.
+OhMyPCAP will update its NIDS rules and then prompt you to open http://localhost:8000/ohmypcap.html in your browser.
 
 ## Usage
 
