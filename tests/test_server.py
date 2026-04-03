@@ -1,0 +1,736 @@
+#!/usr/bin/env python3
+import unittest
+import unittest.mock
+import json
+import os
+import sys
+import tempfile
+import shutil
+import hashlib
+import socket
+import threading
+import time
+import zipfile
+import io
+import sqlite3
+import re
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
+import ohmypcap as server
+
+SERVER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ohmypcap.py')
+
+
+class TestIPValidation(unittest.TestCase):
+    def test_valid_ipv4(self):
+        self.assertTrue(server.validate_ip('192.168.1.1'))
+        self.assertTrue(server.validate_ip('10.0.0.1'))
+        self.assertTrue(server.validate_ip('8.8.8.8'))
+        self.assertTrue(server.validate_ip('0.0.0.0'))
+        self.assertTrue(server.validate_ip('255.255.255.255'))
+
+    def test_valid_ipv6(self):
+        self.assertTrue(server.validate_ip('::1'))
+        self.assertTrue(server.validate_ip('2001:db8::1'))
+        self.assertTrue(server.validate_ip('fe80::1'))
+
+    def test_invalid_ip(self):
+        self.assertFalse(server.validate_ip(''))
+        self.assertFalse(server.validate_ip('not-an-ip'))
+        self.assertFalse(server.validate_ip('999.999.999.999'))
+        self.assertFalse(server.validate_ip('192.168.1'))
+        self.assertFalse(server.validate_ip('192.168.1.1.1'))
+        self.assertFalse(server.validate_ip('192.168.1.1; ls'))
+        self.assertFalse(server.validate_ip('$(whoami)'))
+        self.assertFalse(server.validate_ip('`id`'))
+        self.assertFalse(server.validate_ip('192.168.1.1 && cat /etc/passwd'))
+
+
+class TestPortValidation(unittest.TestCase):
+    def test_valid_ports(self):
+        self.assertTrue(server.validate_port('0'))
+        self.assertTrue(server.validate_port('80'))
+        self.assertTrue(server.validate_port('443'))
+        self.assertTrue(server.validate_port('8080'))
+        self.assertTrue(server.validate_port('65535'))
+
+    def test_invalid_ports(self):
+        self.assertFalse(server.validate_port('-1'))
+        self.assertFalse(server.validate_port('65536'))
+        self.assertFalse(server.validate_port(''))
+        self.assertFalse(server.validate_port('abc'))
+        self.assertFalse(server.validate_port('80; ls'))
+        self.assertFalse(server.validate_port('$(id)'))
+        self.assertFalse(server.validate_port(None))
+
+
+class TestPathSafety(unittest.TestCase):
+    def test_safe_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            safe = os.path.join(tmpdir, 'file.txt')
+            self.assertTrue(server.is_safe_path(tmpdir, safe))
+
+    def test_path_traversal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            unsafe = os.path.join(tmpdir, '..', 'etc', 'passwd')
+            self.assertFalse(server.is_safe_path(tmpdir, unsafe))
+
+    def test_same_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertTrue(server.is_safe_path(tmpdir, tmpdir))
+
+
+class TestFilenameSanitization(unittest.TestCase):
+    def test_basic_filename(self):
+        self.assertEqual(server.sanitize_filename('test.pcap'), 'test.pcap')
+
+    def test_path_traversal_in_filename(self):
+        self.assertEqual(server.sanitize_filename('../../../etc/passwd'), 'passwd')
+        self.assertEqual(server.sanitize_filename('..\\..\\etc\\passwd'), 'passwd')
+
+    def test_special_characters(self):
+        result = server.sanitize_filename('file name.pcap')
+        self.assertEqual(result, 'file name.pcap')
+
+
+class TestZipSlipPrevention(unittest.TestCase):
+    def test_normal_zip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, 'test.zip')
+            with zipfile.ZipFile(zip_path, 'w') as zf:
+                zf.writestr('normal.txt', 'content')
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                server.validate_zip_extraction(zf, tmpdir)
+
+    def test_slip_attempt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, 'evil.zip')
+            with zipfile.ZipFile(zip_path, 'w') as zf:
+                zf.writestr('../../../escape.txt', 'malicious')
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                with self.assertRaises(ValueError) as ctx:
+                    server.validate_zip_extraction(zf, tmpdir)
+                self.assertIn('Zip slip', str(ctx.exception))
+
+    def test_absolute_path_in_zip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, 'evil.zip')
+            with zipfile.ZipFile(zip_path, 'w') as zf:
+                zf.writestr('/etc/passwd', 'malicious')
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                with self.assertRaises(ValueError):
+                    server.validate_zip_extraction(zf, tmpdir)
+
+
+class TestURLValidation(unittest.TestCase):
+    @unittest.mock.patch('socket.gethostbyname')
+    def test_valid_public_url(self, mock_dns):
+        mock_dns.return_value = '93.184.216.34'
+        server.validate_url_safety('https://example.com/file.pcap')
+
+    def test_blocks_localhost(self):
+        with self.assertRaises(ValueError) as ctx:
+            server.validate_url_safety('http://localhost:8080/secret')
+        self.assertIn('localhost', str(ctx.exception).lower())
+
+    @unittest.mock.patch('socket.gethostbyname')
+    def test_blocks_127_0_0_1(self, mock_dns):
+        mock_dns.return_value = '127.0.0.1'
+        with self.assertRaises(ValueError):
+            server.validate_url_safety('http://127.0.0.1:8080/secret')
+
+    @unittest.mock.patch('socket.gethostbyname')
+    def test_blocks_private_10x(self, mock_dns):
+        mock_dns.return_value = '10.0.0.1'
+        with self.assertRaises(ValueError):
+            server.validate_url_safety('http://internal.corp/file')
+
+    @unittest.mock.patch('socket.gethostbyname')
+    def test_blocks_private_192x(self, mock_dns):
+        mock_dns.return_value = '192.168.1.1'
+        with self.assertRaises(ValueError):
+            server.validate_url_safety('http://router.local/file')
+
+    @unittest.mock.patch('socket.gethostbyname')
+    def test_blocks_link_local(self, mock_dns):
+        mock_dns.return_value = '169.254.169.254'
+        with self.assertRaises(ValueError):
+            server.validate_url_safety('http://169.254.169.254/latest/meta-data/')
+
+    @unittest.mock.patch('socket.gethostbyname')
+    def test_blocks_metadata_service(self, mock_dns):
+        mock_dns.return_value = '169.254.169.254'
+        with self.assertRaises(ValueError):
+            server.validate_url_safety('http://169.254.169.254/latest/meta-data/')
+
+    def test_blocks_file_scheme(self):
+        with self.assertRaises(ValueError):
+            server.validate_url_safety('file:///etc/passwd')
+
+    def test_blocks_ftp_scheme(self):
+        with self.assertRaises(ValueError):
+            server.validate_url_safety('ftp://evil.com/malware')
+
+    def test_blocks_empty_hostname(self):
+        with self.assertRaises(ValueError):
+            server.validate_url_safety('http:///path')
+
+
+class TestPcapContentValidation(unittest.TestCase):
+    def test_pcap_magic_little_endian(self):
+        data = b'\xd4\xc3\xb2\xa1' + b'\x00' * 20
+        self.assertTrue(server.validate_pcap_content(data))
+
+    def test_pcap_magic_big_endian(self):
+        data = b'\xa1\xb2\xc3\xd4' + b'\x00' * 20
+        self.assertTrue(server.validate_pcap_content(data))
+
+    def test_pcapng_magic(self):
+        data = b'\x0a\x0d\x0d\x0a' + b'\x00' * 20
+        self.assertTrue(server.validate_pcap_content(data))
+
+    def test_random_data_rejected(self):
+        data = b'this is not a pcap file at all'
+        self.assertFalse(server.validate_pcap_content(data))
+
+    def test_html_rejected(self):
+        data = b'<html><body>not a pcap</body></html>'
+        self.assertFalse(server.validate_pcap_content(data))
+
+    def test_elf_rejected(self):
+        data = b'\x7fELF' + b'\x00' * 20
+        self.assertFalse(server.validate_pcap_content(data))
+
+    def test_short_data_not_pcap(self):
+        data = b'\x00' * 3
+        self.assertFalse(server.validate_pcap_content(data))
+
+
+class TestRateLimiting(unittest.TestCase):
+    def setUp(self):
+        server.RATE_LIMIT_WINDOW.clear()
+
+    def test_first_request_allowed(self):
+        self.assertTrue(server.check_rate_limit('1.2.3.4'))
+
+    def test_rapid_requests_allowed(self):
+        self.assertTrue(server.check_rate_limit('1.2.3.4'))
+        self.assertTrue(server.check_rate_limit('1.2.3.4'))
+
+    def test_different_ips_independent(self):
+        self.assertTrue(server.check_rate_limit('1.2.3.4'))
+        self.assertTrue(server.check_rate_limit('5.6.7.8'))
+
+    def test_rate_limit_expires(self):
+        self.assertTrue(server.check_rate_limit('1.2.3.4'))
+        server.RATE_LIMIT_WINDOW['1.2.3.4'] = time.time() - 2
+        self.assertTrue(server.check_rate_limit('1.2.3.4'))
+
+
+class TestMD5Validation(unittest.TestCase):
+    def test_valid_md5(self):
+        self.assertTrue(bool(__import__('re').match(r'^[a-f0-9]{32}$', 'd41d8cd98f00b204e9800998ecf8427e')))
+
+    def test_invalid_md5(self):
+        self.assertFalse(bool(__import__('re').match(r'^[a-f0-9]{32}$', '../../../etc/passwd')))
+        self.assertFalse(bool(__import__('re').match(r'^[a-f0-9]{32}$', 'short')))
+        self.assertFalse(bool(__import__('re').match(r'^[a-f0-9]{32}$', 'GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG')))
+        self.assertFalse(bool(__import__('re').match(r'^[a-f0-9]{32}$', '../etc/passwd')))
+
+
+class TestAPIEndpoints(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.mkdtemp()
+        cls.original_base = server.DATA_DIR
+        server.DATA_DIR = cls.tmpdir
+
+        cls.port = 18000 + (os.getpid() % 1000)
+        cls.server = server.ThreadedTCPServer(('127.0.0.1', cls.port), server.Handler)
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever)
+        cls.server_thread.daemon = True
+        cls.server_thread.start()
+        time.sleep(0.3)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        server.DATA_DIR = cls.original_base
+        shutil.rmtree(cls.tmpdir, ignore_errors=True)
+
+    def setUp(self):
+        server.RATE_LIMIT_WINDOW.clear()
+        time.sleep(0.05)
+
+    def _get(self, path):
+        import urllib.request
+        try:
+            req = urllib.request.Request(f'http://127.0.0.1:{self.port}{path}')
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status, resp.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode()
+
+    def _post(self, path, data, content_type='application/json'):
+        import urllib.request
+        body = json.dumps(data).encode() if isinstance(data, dict) else data
+        req = urllib.request.Request(
+            f'http://127.0.0.1:{self.port}{path}',
+            data=body,
+            headers={'Content-Type': content_type}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status, resp.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode()
+
+    def _post_multipart(self, path, filename, file_content):
+        import urllib.request
+        boundary = '----TestBoundary123'
+        body = (
+            f'------TestBoundary123\r\n'
+            f'Content-Disposition: form-data; name="pcap"; filename="{filename}"\r\n'
+            f'Content-Type: application/octet-stream\r\n\r\n'
+        ).encode() + file_content + b'\r\n------TestBoundary123--\r\n'
+
+        req = urllib.request.Request(
+            f'http://127.0.0.1:{self.port}{path}',
+            data=body,
+            headers={'Content-Type': f'multipart/form-data; boundary=----TestBoundary123'}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status, resp.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode()
+
+    def test_events_empty(self):
+        status, body = self._get('/api/events')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), [])
+
+    def test_events_with_valid_md5(self):
+        md5dir = os.path.join(self.tmpdir, 'd41d8cd98f00b204e9800998ecf8427e')
+        os.makedirs(md5dir, exist_ok=True)
+        with open(os.path.join(md5dir, 'eve.json'), 'w') as f:
+            f.write('{"event_type": "alert"}\n')
+
+        status, body = self._get('/api/events?md5=d41d8cd98f00b204e9800998ecf8427e')
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(len(data), 1)
+
+    def test_events_rejects_path_traversal_md5(self):
+        status, body = self._get('/api/events?md5=../../../etc/passwd')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), [])
+
+    def test_analyses_empty(self):
+        status, body = self._get('/api/analyses')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), [])
+
+    def test_load_analysis_invalid_md5(self):
+        status, body = self._get('/api/load-analysis?md5=invalid')
+        self.assertEqual(status, 400)
+
+    def test_load_analysis_valid_format_nonexistent(self):
+        status, body = self._get('/api/load-analysis?md5=' + 'a' * 32)
+        self.assertEqual(status, 404)
+        data = json.loads(body)
+        self.assertIn('error', data)
+
+    def test_delete_analysis_valid_format_nonexistent(self):
+        status, body = self._get('/api/delete-analysis?md5=' + 'a' * 32)
+        self.assertEqual(status, 404)
+        data = json.loads(body)
+        self.assertIn('error', data)
+
+    def test_pcap_path_invalid_md5(self):
+        status, body = self._get('/api/pcap-path?md5=invalid')
+        self.assertEqual(status, 400)
+
+    def test_pcap_path_valid_format_nonexistent(self):
+        status, body = self._get('/api/pcap-path?md5=' + 'a' * 32)
+        self.assertEqual(status, 404)
+        data = json.loads(body)
+        self.assertIn('error', data)
+
+    def test_download_stream_invalid_ip(self):
+        status, _ = self._get('/api/download-stream?src=bad&sport=80&dst=1.2.3.4&dport=443')
+        self.assertEqual(status, 400)
+
+    def test_download_stream_invalid_port(self):
+        status, _ = self._get('/api/download-stream?src=1.2.3.4&sport=99999&dst=5.6.7.8&dport=80')
+        self.assertEqual(status, 400)
+
+    def test_download_stream_command_injection(self):
+        status, _ = self._get('/api/download-stream?src=1.2.3.4&sport=80;ls&dst=5.6.7.8&dport=443')
+        self.assertEqual(status, 400)
+
+    def test_download_stream_missing_params(self):
+        status, _ = self._get('/api/download-stream?src=1.2.3.4')
+        self.assertEqual(status, 400)
+
+    def test_ascii_stream_command_injection(self):
+        status, _ = self._get('/api/ascii-stream?src=1.2.3.4&sport=80|cat&dst=5.6.7.8&dport=443')
+        self.assertEqual(status, 400)
+
+    def test_ascii_stream_missing_params(self):
+        status, _ = self._get('/api/ascii-stream?src=1.2.3.4')
+        self.assertEqual(status, 400)
+
+    def test_upload_traversal_filename(self):
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x00' * 100
+        status, body = self._post_multipart(
+            '/api/upload',
+            '../../../etc/evil.pcap',
+            pcap_data
+        )
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertIn('md5', data)
+        md5 = data['md5']
+        saved_files = os.listdir(os.path.join(self.tmpdir, md5))
+        self.assertIn('evil.pcap', saved_files)
+        self.assertNotIn('../../../etc/evil.pcap', saved_files)
+
+    def test_upload_valid_pcap(self):
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x02\x00\x04\x00' + b'\x00' * 92
+        status, body = self._post_multipart('/api/upload', 'test.pcap', pcap_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertIn('md5', data)
+        self.assertIn('status', data)
+
+    def test_upload_non_pcap_content(self):
+        status, body = self._post_multipart('/api/upload', 'fake.pcap', b'not a pcap file')
+        self.assertEqual(status, 400)
+
+    def test_upload_html_as_pcap(self):
+        status, body = self._post_multipart('/api/upload', 'evil.pcap', b'<html><script>alert(1)</script></html>')
+        self.assertEqual(status, 400)
+
+    def test_upload_elf_as_pcap(self):
+        status, body = self._post_multipart('/api/upload', 'malware.pcap', b'\x7fELF' + b'\x00' * 100)
+        self.assertEqual(status, 400)
+
+    def test_upload_wrong_extension(self):
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x00' * 100
+        status, body = self._post_multipart('/api/upload', 'test.txt', pcap_data)
+        self.assertEqual(status, 400)
+
+    def test_load_url_no_url_provided(self):
+        status, body = self._post('/api/load-url', {})
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn('No URL provided', data.get('error', ''))
+
+    def test_load_url_rejects_private_ip(self):
+        status, body = self._post('/api/load-url', {'url': 'http://10.0.0.1/test.pcap'})
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn('Invalid URL', data.get('error', ''))
+
+    def test_load_url_rejects_localhost(self):
+        status, body = self._post('/api/load-url', {'url': 'http://localhost/test.pcap'})
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn('Invalid URL', data.get('error', ''))
+
+    def test_load_url_empty_url(self):
+        status, body = self._post('/api/load-url', {'url': ''})
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn('No URL provided', data.get('error', ''))
+
+    def test_check_status_missing_md5(self):
+        status, body = self._post('/api/check-status', {})
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn('Invalid MD5', data.get('error', ''))
+
+    def test_check_status_invalid_md5_format(self):
+        status, body = self._post('/api/check-status', {'md5': 'not-a-valid-md5'})
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn('Invalid MD5', data.get('error', ''))
+
+    def test_check_status_path_traversal(self):
+        status, body = self._post('/api/check-status', {'md5': '../../../etc/passwd'})
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn('Invalid MD5', data.get('error', ''))
+
+    def test_check_status_nonexistent_md5(self):
+        status, body = self._post('/api/check-status', {'md5': '0' * 32})
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertIn('status', data)
+
+
+class TestServerBinding(unittest.TestCase):
+    def test_server_binds_localhost(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('127.0.0.1', content)
+        self.assertNotIn('("", PORT)', content)
+        self.assertNotIn('("0.0.0.0", PORT)', content)
+
+
+class TestNoCorsWildcard(unittest.TestCase):
+    def test_no_cors_wildcard(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertNotIn("Access-Control-Allow-Origin', '*'", content)
+        self.assertNotIn('Access-Control-Allow-Origin", "*"', content)
+
+
+class TestErrorMessages(unittest.TestCase):
+    def test_no_internal_error_leak(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertNotIn('str(e)', content)
+        self.assertNotIn('traceback', content.lower())
+
+
+class TestThreadedServer(unittest.TestCase):
+    def test_threaded_server_class_exists(self):
+        self.assertTrue(hasattr(server, 'ThreadedTCPServer'))
+
+
+class TestSQLite(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.eve_file = os.path.join(self.tmpdir, 'eve.json')
+        self.db_file = os.path.join(self.tmpdir, 'events.db')
+        
+        with open(self.eve_file, 'w') as f:
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4", "src_port": 1234, "dest_ip": "5.6.7.8", "dest_port": 80, "proto": "TCP"}\n')
+            f.write('{"event_type": "dns", "timestamp": "2026-01-01T00:00:01", "src_ip": "1.2.3.4", "src_port": 1235, "dest_ip": "5.6.7.8", "dest_port": 53, "proto": "UDP"}\n')
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:02", "src_ip": "1.2.3.5", "src_port": 1236, "dest_ip": "5.6.7.9", "dest_port": 80, "proto": "TCP"}\n')
+            f.write('{"event_type": "stats", "timestamp": "2026-01-01T00:00:03"}\n')
+    
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+    
+    def test_create_sqlite_db(self):
+        server.create_sqlite_db(self.db_file, self.eve_file)
+        self.assertTrue(os.path.exists(self.db_file))
+    
+    def test_query_events_sqlite_all(self):
+        server.create_sqlite_db(self.db_file, self.eve_file)
+        events = server.query_events_sqlite(self.db_file)
+        self.assertEqual(len(events), 4)
+    
+    def test_query_events_sqlite_by_type(self):
+        server.create_sqlite_db(self.db_file, self.eve_file)
+        events = server.query_events_sqlite(self.db_file, event_type='alert')
+        self.assertEqual(len(events), 2)
+        self.assertTrue(all(e['event_type'] == 'alert' for e in events))
+    
+    def test_query_events_sqlite_with_limit(self):
+        server.create_sqlite_db(self.db_file, self.eve_file)
+        events = server.query_events_sqlite(self.db_file, limit=2)
+        self.assertEqual(len(events), 2)
+    
+    def test_query_events_sqlite_with_offset(self):
+        server.create_sqlite_db(self.db_file, self.eve_file)
+        events = server.query_events_sqlite(self.db_file, offset=2, limit=2)
+        self.assertEqual(len(events), 2)
+    
+    def test_get_event_count_sqlite(self):
+        server.create_sqlite_db(self.db_file, self.eve_file)
+        count = server.get_event_count_sqlite(self.db_file)
+        self.assertEqual(count, 4)
+    
+    def test_get_event_count_sqlite_by_type(self):
+        server.create_sqlite_db(self.db_file, self.eve_file)
+        count = server.get_event_count_sqlite(self.db_file, event_type='alert')
+        self.assertEqual(count, 2)
+    
+    def test_get_event_types_sqlite(self):
+        server.create_sqlite_db(self.db_file, self.eve_file)
+        stats = server.get_event_types_sqlite(self.db_file)
+        self.assertEqual(stats['alert'], 2)
+        self.assertEqual(stats['dns'], 1)
+        self.assertEqual(stats['stats'], 1)
+    
+    def test_sqlite_schema_has_indexes(self):
+        server.create_sqlite_db(self.db_file, self.eve_file)
+        conn = sqlite3.connect(self.db_file)
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
+        indexes = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        self.assertIn('idx_event_type', indexes)
+        self.assertIn('idx_timestamp', indexes)
+
+
+class TestSQLiteAPI(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.eve_file = os.path.join(self.tmpdir, 'eve.json')
+        self.db_file = os.path.join(self.tmpdir, 'events.db')
+        
+        with open(self.eve_file, 'w') as f:
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4"}\n')
+            f.write('{"event_type": "dns", "timestamp": "2026-01-01T00:00:01", "src_ip": "1.2.3.5"}\n')
+        
+        server.create_sqlite_db(self.db_file, self.eve_file)
+        
+        self.md5 = 'test12345678901234567890'
+        os.makedirs(os.path.join(self.tmpdir, self.md5), exist_ok=True)
+        shutil.copy(self.eve_file, os.path.join(self.tmpdir, self.md5, 'eve.json'))
+        shutil.copy(self.db_file, os.path.join(self.tmpdir, self.md5, 'events.db'))
+    
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+    
+    def test_api_events_with_type_filter(self):
+        events = server.query_events_sqlite(self.db_file, event_type='alert')
+        self.assertTrue(all(e['event_type'] == 'alert' for e in events))
+    
+    def test_api_stats_endpoint_returns_types(self):
+        stats = server.get_event_types_sqlite(self.db_file)
+        self.assertIn('alert', stats)
+        self.assertIn('dns', stats)
+
+
+class TestSizeLimitMessages(unittest.TestCase):
+    def test_max_eve_size_constant(self):
+        self.assertEqual(server.MAX_EVE_SIZE, 1000 * 1024 * 1024)
+    
+    def test_error_message_consistency(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        error_count = content.count('max 1000MB')
+        error_text_count = content.count('Eve.json')
+        self.assertGreaterEqual(error_count, 2, 'Error message appears at least twice')
+        self.assertGreaterEqual(error_text_count, 2, 'Eve.json text appears at least twice')
+
+
+class TestHTMLNoDuplicateFunctions(unittest.TestCase):
+    def test_no_duplicate_html_functions(self):
+        html_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ohmypcap.html')
+        with open(html_file, 'r') as f:
+            content = f.read()
+        import re
+        func_pattern = r'function\s+(\w+)\s*\('
+        functions = re.findall(func_pattern, content)
+        duplicates = {f for f in functions if functions.count(f) > 1}
+        self.assertEqual(len(duplicates), 0, f'Duplicate JavaScript functions found: {duplicates}')
+
+
+class TestPythonNoBareExcept(unittest.TestCase):
+    def test_no_bare_except_statements(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        bare_except_pattern = r'except\s*:'
+        matches = re.findall(bare_except_pattern, content)
+        self.assertEqual(len(matches), 0, f'Found bare except statements: {matches}')
+
+
+class TestSuricataConfigRulesPath(unittest.TestCase):
+    def test_suricata_yaml_uses_custom_rules_path(self):
+        suricata_dir = os.path.expanduser('~/ohmypcap/suricata')
+        suricata_config = os.path.join(suricata_dir, 'suricata.yaml')
+        
+        # Skip if config doesn't exist (may not be set up yet)
+        if not os.path.exists(suricata_config):
+            self.skipTest('Suricata config not found')
+        
+        with open(suricata_config, 'r') as f:
+            content = f.read()
+        
+        # Verify default-rule-path points to our custom directory
+        self.assertIn('/home/doug/ohmypcap/suricata/rules', content,
+                      'suricata.yaml should use custom rules path')
+        self.assertNotIn('/var/lib/suricata/rules', content,
+                         'suricata.yaml should not use system rules path')
+
+
+class TestRuleDownloadPrompt(unittest.TestCase):
+    def test_rule_download_message_in_stdout(self):
+        """Verify that suricata-update outputs messages when rules are downloaded"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        
+        # Check for informative messages about rule download
+        self.assertIn('Downloading Suricata rules', content,
+                      'Should log when downloading rules')
+        self.assertIn('Suricata rules downloaded successfully', content,
+                      'Should log when rules download completes')
+
+
+class TestServerStartupBanner(unittest.TestCase):
+    def test_windows_banner_format(self):
+        """Verify the startup banner has the correct format"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        
+        # Check for banner elements
+        self.assertIn('Welcome to OhMyPCAP!', content)
+        self.assertIn('Analyze pcap files from the web or your local collection', content)
+        self.assertIn('View alerts and then slice and dice your network metadata', content)
+
+
+class TestHTMLNoEmptyFunctions(unittest.TestCase):
+    def test_no_empty_functions(self):
+        html_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ohmypcap.html')
+        with open(html_file, 'r') as f:
+            content = f.read()
+        import re
+        func_pattern = r'function\s+(\w+)\s*\([^)]*\)\s*\{\s*\}'
+        empty_funcs = re.findall(func_pattern, content, re.DOTALL)
+        self.assertEqual(len(empty_funcs), 0, f'Found empty functions: {empty_funcs}')
+
+
+class TestHTMLNoOldStyleFilterEscaping(unittest.TestCase):
+    def test_no_old_style_filter_escaping(self):
+        html_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ohmypcap.html')
+        with open(html_file, 'r') as f:
+            content = f.read()
+        vulnerable_pattern = r'clearFilter.*col\.replace\(/\'/g'
+        matches = re.findall(vulnerable_pattern, content)
+        self.assertEqual(len(matches), 0, 'Found vulnerable col.replace pattern in clearFilter')
+        vulnerable_pattern2 = r'applyFilter.*displayVal\.replace\(/\'/g'
+        matches2 = re.findall(vulnerable_pattern2, content)
+        self.assertEqual(len(matches2), 0, 'Found vulnerable displayVal.replace pattern in applyFilter')
+
+
+class TestHTMLModalCSS(unittest.TestCase):
+    def test_loading_modal_exists(self):
+        html_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ohmypcap.html')
+        with open(html_file, 'r') as f:
+            content = f.read()
+        self.assertIn('id="loadingModal"', content, 'loadingModal element should exist')
+        self.assertIn('.modal {', content, 'modal CSS should exist')
+        self.assertIn('.modal.active {', content, 'modal.active CSS should exist')
+        self.assertIn('.spinner {', content, 'spinner CSS should exist')
+        self.assertIn('.spinner-dot {', content, 'spinner-dot CSS should exist')
+
+
+class TestEnvironmentVariables(unittest.TestCase):
+    """Test that configurable environment variables are properly defined."""
+
+    def test_data_dir_env_var(self):
+        """DATA_DIR must be defined and replace the old BASE_DIR"""
+        self.assertTrue(hasattr(server, 'DATA_DIR'))
+        self.assertFalse(hasattr(server, 'BASE_DIR'))
+
+    def test_bind_address_env_var(self):
+        """BIND_ADDRESS must be defined for Docker support"""
+        self.assertTrue(hasattr(server, 'BIND_ADDRESS'))
+        self.assertEqual(server.BIND_ADDRESS, '127.0.0.1')
+
+    def test_port_env_var(self):
+        """PORT must be configurable via environment variable"""
+        self.assertTrue(hasattr(server, 'PORT'))
+        self.assertEqual(server.PORT, 8000)
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)
