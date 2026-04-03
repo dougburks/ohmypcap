@@ -10,9 +10,11 @@ If you don't already have Docker installed and are running [OhMyDebn](https://oh
 
 ```bash
 sudo apt -y install docker.io
+sudo usermod -aG docker $USER
+newgrp docker
 ```
 
-Once you have Docker installed, all you have to do is:
+Once you have Docker installed, all you have to do is create a directory and run the Docker image:
 
 ```bash
 mkdir -p ~/ohmypcap
