@@ -46,7 +46,6 @@ current_pcap_file = None
 current_eve_file = None
 
 os.makedirs(DATA_DIR, exist_ok=True)
-# os.chdir('/home/doug/Downloads')
 
 PCAP_EXTENSIONS = ('.pcap', '.pcapng', '.cap', '.trace')
 
