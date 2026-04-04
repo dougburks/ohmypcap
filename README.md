@@ -70,8 +70,8 @@ All analyzed PCAPs are stored in `~/ohmypcap-data/`. Each analysis gets a subdir
 If you prefer to build your own Docker image, you can clone this github repo and then build the image:
 
 ```bash
-git clone https://github.com/dougburks/ohmypcap ohmypcap-git
-cd ohmypcap-git
+git clone https://github.com/dougburks/ohmypcap
+cd ohmypcap
 docker build -t ohmypcap .
 mkdir -p ~/ohmypcap-data
 docker run -v ~/ohmypcap-data:/data -p 8000:8000 ohmypcap
