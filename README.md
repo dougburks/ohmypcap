@@ -4,7 +4,7 @@ A standalone web application for analyzing PCAP files using Suricata. View secur
 
 ## Quick Start
 
-Most users will want to use our pre-built Docker image. If you prefer not to use our pre-built Docker image, then there are other options shown [below](#build-your-own-docker-image).
+Most folks will want to use our pre-built Docker image. If you prefer not to use our pre-built Docker image, then there are other options shown [below](#build-your-own-docker-image).
 
 ### Install Docker
 
