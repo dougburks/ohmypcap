@@ -6,6 +6,8 @@ A standalone web application for analyzing PCAP files using Suricata. View secur
 
 Most users will want to use our pre-built Docker image. If you prefer not to use our pre-built Docker image, then there are other options shown [below](#build-your-own-docker-image).
 
+### Install Docker
+
 If you don't already have Docker installed and are running [OhMyDebn](https://ohmydebn.org) or another Debian-based distro, then you can install and configure Docker like this:
 
 ```bash
@@ -14,7 +16,9 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-Once Docker is installed and configured, all you have to do is create a directory and then run OhMyPCAP:
+### Use Docker to run OhMyPCAP
+
+Once Docker is installed and configured, all you have to do is create a data directory and then run our OhMyPCAP Docker image with that data directory mounted as a volume:
 
 ```bash
 mkdir -p ~/ohmypcap-data
