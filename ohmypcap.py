@@ -101,7 +101,7 @@ def setup_suricata_config():
     
     try:
         subprocess.run(
-            ['suricata-update', '-c', suricata_config, '--data-dir', SURICATA_DIR, '--disable-conf', disable_conf, '--output', SURICATA_RULES_DIR],
+            ['suricata-update', '--no-test', '-c', suricata_config, '--data-dir', SURICATA_DIR, '--disable-conf', disable_conf, '--output', SURICATA_RULES_DIR],
             timeout=60
         )
         if not rules_exist:
