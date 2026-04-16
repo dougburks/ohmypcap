@@ -382,6 +382,14 @@ class TestUXFeatures(unittest.TestCase):
         self.assertIn('ASCII Transcript', JS_CONTENT)
         self.assertIn('downloadPcap', JS_CONTENT)
 
+    def test_ascii_transcript_colored_bars(self):
+        self.assertIn('#ff6b6b', JS_CONTENT)
+        self.assertIn('#58a6ff', JS_CONTENT)
+
+    def test_ascii_transcript_direction_grouping(self):
+        self.assertIn("direction === 'src'", JS_CONTENT)
+        self.assertIn("line.direction", JS_CONTENT)
+
     def test_table_sorting_ui(self):
         self.assertIn('cursor: pointer', HTML_CONTENT)
         self.assertIn('sort-arrow', JS_CONTENT)

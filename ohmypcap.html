@@ -265,11 +265,25 @@
                 try {
                     const data = JSON.parse(text);
                     if (data.lines && data.lines.length > 0) {
-                        pre.innerHTML = data.lines.map(line => {
-                            const color = line.direction === 'src' ? '#ff6b6b' : '#58a6ff';
-                            const bar = `<span style="display:inline-block;width:3px;background:${color};margin-right:8px;vertical-align:middle;flex-shrink:0;"></span>`;
-                            return `<div style="display:flex;align-items:flex-start;">${bar}<span style="flex:1;">${escapeHtml(line.text).replace(/\n/g, '<br>')}</span></div>`;
-                        }).join('');
+                        let html = '';
+                        let groupHtml = '';
+                        let lastDirection = '';
+                        for (const line of data.lines) {
+                            const direction = line.direction;
+                            const color = direction === 'src' ? '#ff6b6b' : '#58a6ff';
+                            if (direction !== lastDirection && groupHtml) {
+                                const bar = `<span style="display:inline-block;width:3px;background:${lastDirection === 'src' ? '#ff6b6b' : '#58a6ff'};margin-right:8px;flex-shrink:0;"></span>`;
+                                html += `<div style="display:flex;align-items:stretch;">${bar}<div style="flex:1;">${groupHtml}</div></div>`;
+                                groupHtml = '';
+                            }
+                            groupHtml += line.text.split('\n').map(t => `<div>${escapeHtml(t)}</div>`).join('');
+                            lastDirection = direction;
+                        }
+                        if (groupHtml) {
+                            const bar = `<span style="display:inline-block;width:3px;background:${lastDirection === 'src' ? '#ff6b6b' : '#58a6ff'};margin-right:8px;flex-shrink:0;"></span>`;
+                            html += `<div style="display:flex;align-items:stretch;">${bar}<div style="flex:1;">${groupHtml}</div></div>`;
+                        }
+                        pre.innerHTML = html;
                         if (data.truncated) {
                             pre.innerHTML += '<div style="margin-top:10px;color:#8b949e;font-style:italic;">[Truncated - stream too large. Use Download PCAP to view full capture.]</div>';
                         }
