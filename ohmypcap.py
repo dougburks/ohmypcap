@@ -317,19 +317,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if db_file and os.path.exists(db_file):
                 events = query_events_sqlite(db_file, event_type, offset, limit)
                 self.wfile.write(json.dumps(events).encode())
-            elif os.path.exists(eve_file):
-                eve_size = os.path.getsize(eve_file)
-                if eve_size > MAX_EVE_SIZE:
-                    self.wfile.write(json.dumps({'error': f'Eve.json file too large ({eve_size // (1024*1024)}MB, max 1000MB)'}).encode())
-                    return
-                with open(eve_file, 'r') as f:
-                    all_events = [json.loads(line) for line in f]
-                    if event_type:
-                        events = [e for e in all_events if e.get('event_type') == event_type]
-                        events = events[offset:offset+limit]
-                    else:
-                        events = all_events[offset:offset+limit]
-                self.wfile.write(json.dumps(events).encode())
             else:
                 self.wfile.write(b'[]')
 
@@ -357,18 +344,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             stats = {}
             if os.path.exists(db_file):
                 stats = get_event_types_sqlite(db_file)
-            elif os.path.exists(eve_file):
-                with open(eve_file, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            event = json.loads(line)
-                            etype = event.get('event_type', 'unknown')
-                            stats[etype] = stats.get(etype, 0) + 1
-                        except Exception:
-                            continue
             self.wfile.write(json.dumps(stats).encode())
 
         elif path == '/api/count':
