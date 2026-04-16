@@ -856,16 +856,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             is_ready = False
             if os.path.exists(db_file):
                 is_ready = True
-            elif os.path.exists(eve_path):
-                try:
-                    file_size = os.path.getsize(eve_path)
-                    if file_size > 10:
-                        with open(eve_path, 'r') as f:
-                            first_line = f.readline()
-                            if first_line.strip():
-                                is_ready = True
-                except Exception:
-                    pass
 
             if is_ready:
                 self.send_response(200)

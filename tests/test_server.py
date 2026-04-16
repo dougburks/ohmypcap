@@ -515,7 +515,7 @@ class TestAPIEndpoints(unittest.TestCase):
         data = json.loads(body)
         self.assertEqual(data.get('status'), 'ready')
 
-    def test_check_status_ready_with_eve_json(self):
+    def test_check_status_ready_with_eve_json_only(self):
         md5dir = os.path.join(self.tmpdir, 'abcdef12345678901234567890123456')
         os.makedirs(md5dir, exist_ok=True)
         with open(os.path.join(md5dir, 'eve.json'), 'w') as f:
@@ -524,7 +524,7 @@ class TestAPIEndpoints(unittest.TestCase):
         status, body = self._post('/api/check-status', {'md5': 'abcdef12345678901234567890123456'})
         self.assertEqual(status, 200)
         data = json.loads(body)
-        self.assertEqual(data.get('status'), 'ready')
+        self.assertEqual(data.get('status'), 'processing')
 
     def test_check_status_processing_empty_eve_json(self):
         md5dir = os.path.join(self.tmpdir, 'aaa123def45678901234567890123456')
