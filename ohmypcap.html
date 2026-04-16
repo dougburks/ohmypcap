@@ -244,8 +244,8 @@
                             const srcPort = parts[1];
                             const dstIp = parts[2];
                             const dstPort = parts[3];
-                            const pre = asciiDiv.querySelector('pre');
-                            if (pre && !pre.textContent) {
+                            const pre = asciiDiv.querySelector('.ascii-transcript');
+                            if (pre && !pre.innerHTML) {
                                 loadAsciiTranscript(srcIp, srcPort, dstIp, dstPort, pre);
                             }
                         }
@@ -388,7 +388,7 @@
             html += `</div>`;
             
             if (e.src_ip && e.src_port && e.dest_ip && e.dest_port) {
-                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 10px;"><span style="color: #8b949e;">ASCII Transcript</span><button class="stream-btn" onclick="downloadPcap('${e.src_ip}', '${e.src_port}', '${e.dest_ip}', '${e.dest_port}')" style="margin-left: 10px; padding: 4px 10px;">Download PCAP</button></div><pre class="ascii-transcript" style="background: #0d1117; padding: 15px; border-radius: 8px;  font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre></div>`;
+                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 10px;"><span style="color: #8b949e;">ASCII Transcript</span><button class="stream-btn" onclick="downloadPcap('${e.src_ip}', '${e.src_port}', '${e.dest_ip}', '${e.dest_port}')" style="margin-left: 10px; padding: 4px 10px;">Download PCAP</button></div><div class="ascii-transcript" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0;"></div></div>`;
             }
             
             return html;

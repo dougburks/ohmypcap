@@ -553,7 +553,7 @@ class TestPerformance(unittest.TestCase):
 
     def test_lazy_loads_ascii_transcripts(self):
         self.assertIn('loadAsciiTranscript', JS_CONTENT)
-        self.assertIn('!pre.textContent', JS_CONTENT)
+        self.assertIn('!pre.innerHTML', JS_CONTENT)
 
     def test_truncates_large_streams(self):
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ohmypcap.py'), 'r') as f:
