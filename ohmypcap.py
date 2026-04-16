@@ -36,9 +36,6 @@ BLOCKED_NETWORKS = [
     ipaddress.ip_network('fd00::/8'),
 ]
 
-current_pcap_file = None
-current_eve_file = None
-
 os.makedirs(DATA_DIR, exist_ok=True)
 
 PCAP_EXTENSIONS = ('.pcap', '.pcapng', '.cap', '.trace')
@@ -269,8 +266,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(json.dumps({'error': message}).encode())
 
     def do_GET(self):
-        global current_pcap_file, current_eve_file
-
         parsed = urlparse(self.path)
         path = parsed.path
         params = parse_qs(parsed.query)
@@ -293,21 +288,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
             md5 = params.get('md5', [''])[0]
-            db_file = None
-            if md5:
-                if not re.match(r'^[a-f0-9]{32}$', md5):
-                    self.wfile.write(b'[]')
-                    return
-                dir_path = os.path.join(DATA_DIR, md5)
-                if not is_safe_path(DATA_DIR, dir_path):
-                    self.wfile.write(b'[]')
-                    return
-                db_file = os.path.join(dir_path, 'events.db')
-                eve_file = os.path.join(dir_path, 'eve.json')
-            else:
-                dir_path = os.path.dirname(current_eve_file) if current_eve_file else DATA_DIR
-                db_file = os.path.join(dir_path, 'events.db') if current_eve_file else None
-                eve_file = current_eve_file or 'eve.json'
+            if not md5:
+                self.wfile.write(b'[]')
+                return
+            if not re.match(r'^[a-f0-9]{32}$', md5):
+                self.wfile.write(b'[]')
+                return
+            dir_path = os.path.join(DATA_DIR, md5)
+            if not is_safe_path(DATA_DIR, dir_path):
+                self.wfile.write(b'[]')
+                return
+            db_file = os.path.join(dir_path, 'events.db')
 
             offset = int(params.get('offset', ['0'])[0])
             limit = int(params.get('limit', ['1000'])[0])
@@ -326,20 +317,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
             md5 = params.get('md5', [''])[0]
-            if md5:
-                if not re.match(r'^[a-f0-9]{32}$', md5):
-                    self.wfile.write(json.dumps({}).encode())
-                    return
-                dir_path = os.path.join(DATA_DIR, md5)
-                if not is_safe_path(DATA_DIR, dir_path):
-                    self.wfile.write(json.dumps({}).encode())
-                    return
-                db_file = os.path.join(dir_path, 'events.db')
-                eve_file = os.path.join(dir_path, 'eve.json')
-            else:
-                dir_path = os.path.dirname(current_eve_file) if current_eve_file else DATA_DIR
-                db_file = os.path.join(dir_path, 'events.db')
-                eve_file = current_eve_file or 'eve.json'
+            if not md5:
+                self.wfile.write(json.dumps({'error': 'md5 parameter required'}).encode())
+                return
+            if not re.match(r'^[a-f0-9]{32}$', md5):
+                self.wfile.write(json.dumps({}).encode())
+                return
+            dir_path = os.path.join(DATA_DIR, md5)
+            if not is_safe_path(DATA_DIR, dir_path):
+                self.wfile.write(json.dumps({}).encode())
+                return
+            db_file = os.path.join(dir_path, 'events.db')
 
             stats = {}
             if os.path.exists(db_file):
@@ -352,20 +340,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
             md5 = params.get('md5', [''])[0]
+            if not md5:
+                self.wfile.write(json.dumps({'error': 'md5 parameter required'}).encode())
+                return
             event_type = params.get('type', [''])[0] or None
             
-            if md5:
-                if not re.match(r'^[a-f0-9]{32}$', md5):
-                    self.wfile.write(json.dumps({'count': 0}).encode())
-                    return
-                dir_path = os.path.join(DATA_DIR, md5)
-                if not is_safe_path(DATA_DIR, dir_path):
-                    self.wfile.write(json.dumps({'count': 0}).encode())
-                    return
-                db_file = os.path.join(dir_path, 'events.db')
-            else:
-                dir_path = os.path.dirname(current_eve_file) if current_eve_file else DATA_DIR
-                db_file = os.path.join(dir_path, 'events.db')
+            if not re.match(r'^[a-f0-9]{32}$', md5):
+                self.wfile.write(json.dumps({'count': 0}).encode())
+                return
+            dir_path = os.path.join(DATA_DIR, md5)
+            if not is_safe_path(DATA_DIR, dir_path):
+                self.wfile.write(json.dumps({'count': 0}).encode())
+                return
+            db_file = os.path.join(dir_path, 'events.db')
 
             if os.path.exists(db_file):
                 count = get_event_count_sqlite(db_file, event_type)
@@ -380,22 +367,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             dport = params.get('dport', [''])[0]
             md5 = params.get('md5', [''])[0]
 
+            if not md5:
+                self._send_error(400, 'md5 parameter required')
+                return
+
             if not (validate_ip(src) and validate_ip(dst) and validate_port(sport) and validate_port(dport)):
                 self._send_error(400, 'Invalid IP or port')
                 return
 
-            if md5:
-                if not re.match(r'^[a-f0-9]{32}$', md5):
-                    self._send_error(400, 'Invalid MD5')
-                    return
-                dir_path = os.path.join(DATA_DIR, md5)
-                if not is_safe_path(DATA_DIR, dir_path):
-                    self._send_error(400, 'Invalid path')
-                    return
-                pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)] if os.path.exists(dir_path) else []
-                pcap = os.path.join(dir_path, pcap_files[0]) if pcap_files else None
-            else:
-                pcap = current_pcap_file
+            if not re.match(r'^[a-f0-9]{32}$', md5):
+                self._send_error(400, 'Invalid MD5')
+                return
+            dir_path = os.path.join(DATA_DIR, md5)
+            if not is_safe_path(DATA_DIR, dir_path):
+                self._send_error(400, 'Invalid path')
+                return
+            pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)] if os.path.exists(dir_path) else []
+            pcap = os.path.join(dir_path, pcap_files[0]) if pcap_files else None
 
             if not pcap:
                 self._send_error(404, 'No pcap file found')
@@ -426,22 +414,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             dport = params.get('dport', [''])[0]
             md5 = params.get('md5', [''])[0]
 
+            if not md5:
+                self._send_error(400, 'md5 parameter required')
+                return
+
             if not (validate_ip(src) and validate_ip(dst) and validate_port(sport) and validate_port(dport)):
                 self._send_error(400, 'Invalid IP or port')
                 return
 
-            if md5:
-                if not re.match(r'^[a-f0-9]{32}$', md5):
-                    self._send_error(400, 'Invalid MD5')
-                    return
-                dir_path = os.path.join(DATA_DIR, md5)
-                if not is_safe_path(DATA_DIR, dir_path):
-                    self._send_error(400, 'Invalid path')
-                    return
-                pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)] if os.path.exists(dir_path) else []
-                pcap = os.path.join(dir_path, pcap_files[0]) if pcap_files else None
-            else:
-                pcap = current_pcap_file
+            if not re.match(r'^[a-f0-9]{32}$', md5):
+                self._send_error(400, 'Invalid MD5')
+                return
+            dir_path = os.path.join(DATA_DIR, md5)
+            if not is_safe_path(DATA_DIR, dir_path):
+                self._send_error(400, 'Invalid path')
+                return
+            pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)] if os.path.exists(dir_path) else []
+            pcap = os.path.join(dir_path, pcap_files[0]) if pcap_files else None
 
             if not pcap:
                 self._send_error(404, 'No pcap file found')
@@ -548,8 +537,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if eve_size > MAX_EVE_SIZE:
                     self._send_error(400, f'Eve.json too large ({eve_size // (1024*1024)}MB, max 1000MB)')
                     return
-                current_eve_file = eve_path
-                current_pcap_file = os.path.join(dir_path, pcap_files[0]) if pcap_files else None
 
                 pcap_name = md5
                 if os.path.exists(name_path) and is_safe_path(dir_path, name_path):
@@ -609,8 +596,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
 
     def do_POST(self):
-        global current_pcap_file, current_eve_file
-
         if self.path == '/api/upload':
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length > MAX_UPLOAD_SIZE:
@@ -698,9 +683,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     import threading
                     threading.Thread(target=lambda: (proc.wait(), on_suricata_done()), daemon=True).start()
                 else:
-                    current_eve_file = eve_path
-                    current_pcap_file = pcap_path
-
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
@@ -744,10 +726,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 name_path = os.path.join(dir_path, 'name.txt')
 
                 if os.path.exists(eve_path):
-                    current_eve_file = eve_path
-                    pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)]
-                    current_pcap_file = os.path.join(dir_path, pcap_files[0]) if pcap_files else None
-
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
@@ -863,8 +841,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     pass
 
             if is_ready:
-                current_eve_file = eve_path
-                current_pcap_file = pcap_path
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
