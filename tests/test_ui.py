@@ -558,7 +558,7 @@ class TestPerformance(unittest.TestCase):
     def test_truncates_large_streams(self):
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ohmypcap.py'), 'r') as f:
             server_content = f.read()
-        self.assertIn('Truncated', server_content)
+        self.assertIn('truncated', server_content)
 
 
 class TestAdvancedToggle(unittest.TestCase):

@@ -455,49 +455,62 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return
 
             try:
+                # Get TCP payload with source IP to determine direction
                 result = subprocess.run(
-                    ['tshark', '-r', pcap, '-Y', f'ip.addr == {src} && ip.addr == {dst} && tcp.port == {sport} && tcp.port == {dport}', '-T', 'fields', '-e', 'tcp.payload'],
+                    ['tshark', '-r', pcap, '-Y', f'ip.addr == {src} && ip.addr == {dst} && tcp.port == {sport} && tcp.port == {dport}', '-T', 'fields', '-e', 'ip.src', '-e', 'tcp.payload'],
                     capture_output=True, text=True
                 )
                 lines = []
                 for line in result.stdout.strip().split('\n'):
                     if not line.strip():
                         continue
-                    payload_hex = line.replace(':', '')
+                    parts = line.split('\t')
+                    if len(parts) < 2:
+                        continue
+                    packet_src = parts[0].strip()
+                    payload_hex = parts[1].replace(':', '') if len(parts) > 1 else ''
                     if payload_hex:
                         try:
                             payload_bytes = bytes.fromhex(payload_hex)
                             payload_str = payload_bytes.decode('utf-8', errors='replace')
                             cleaned = ''.join(c if c in '\n\r\t' or 32 <= ord(c) < 127 else '.' for c in payload_str)
                             if cleaned.strip():
-                                lines.append(cleaned)
+                                direction = 'src' if packet_src == src else 'dst'
+                                lines.append({'text': cleaned, 'direction': direction})
                         except Exception:
                             pass
                 if not lines:
+                    # Try UDP
                     result = subprocess.run(
-                        ['tshark', '-r', pcap, '-Y', f'ip.addr == {src} && ip.addr == {dst} && udp.port == {sport} && udp.port == {dport}', '-T', 'fields', '-e', 'udp.payload'],
+                        ['tshark', '-r', pcap, '-Y', f'ip.addr == {src} && ip.addr == {dst} && udp.port == {sport} && udp.port == {dport}', '-T', 'fields', '-e', 'ip.src', '-e', 'udp.payload'],
                         capture_output=True, text=True
                     )
                     for line in result.stdout.strip().split('\n'):
                         if not line.strip():
                             continue
-                        payload_hex = line.replace(':', '')
+                        parts = line.split('\t')
+                        if len(parts) < 2:
+                            continue
+                        packet_src = parts[0].strip()
+                        payload_hex = parts[1].replace(':', '') if len(parts) > 1 else ''
                         if payload_hex:
                             try:
                                 payload_bytes = bytes.fromhex(payload_hex)
                                 payload_str = payload_bytes.decode('utf-8', errors='replace')
                                 cleaned = ''.join(c if c in '\n\r\t' or 32 <= ord(c) < 127 else '.' for c in payload_str)
                                 if cleaned.strip():
-                                    lines.append(cleaned)
+                                    direction = 'src' if packet_src == src else 'dst'
+                                    lines.append({'text': cleaned, 'direction': direction})
                             except Exception:
                                 pass
                 self.send_response(200)
-                self.send_header('Content-Type', 'text/plain')
+                self.send_header('Content-Type', 'application/json')
                 self.end_headers()
-                full_text = '\n'.join(lines)
-                if len(full_text) > MAX_TRANSCRIPT_SIZE:
-                    full_text = full_text[:MAX_TRANSCRIPT_SIZE] + '\n\n[Truncated - stream too large. Use Download PCAP to view full capture.]'
-                self.wfile.write(full_text.encode())
+                full_text = '\n'.join([l['text'] for l in lines])
+                truncated = len(full_text) > MAX_TRANSCRIPT_SIZE
+                if truncated:
+                    lines = lines[:500]  # Approximate limit
+                self.wfile.write(json.dumps({'lines': lines, 'truncated': truncated}).encode())
             except Exception:
                 self._send_error(500, 'Internal server error')
 
