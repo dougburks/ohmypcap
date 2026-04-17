@@ -6,7 +6,7 @@ A standalone web application for analyzing PCAP files using Suricata. View secur
 
 The fastest way to try OhMyPCAP is with our online demo:
 
-https://killercoda.com/ohmypcap/scenario/ohmypcap
+https://securityonion.net/pcap
 
 Please note the following:
 - this is a cloud based service so please do not share any sensitive PCAP files or any other sensitive info
