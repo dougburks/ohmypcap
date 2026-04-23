@@ -1,6 +1,6 @@
 services:
   ohmypcap:
-    image: ghcr.io/dougburks/ohmypcap:latest
+    image: ghcr.io/dougburks/ohmypcap:main
     container_name: ohmypcap
     ports:
       - "8000:8000"
