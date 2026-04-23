@@ -49,6 +49,7 @@ To stop, just press Ctrl-C in the terminal window running OhMyPCAP or close the 
 
 ### Use docker compose
 
+If you prefer to use docker compose:
 ```bash
 # Install and configure docker.io and docker-compose
 sudo apt update && sudo apt -y install docker.io docker-compose && sudo usermod -aG docker $USER
@@ -59,7 +60,6 @@ mkdir -p ohmypcap-data
 # Start OhMyPCAP (add the -d option to run in the background if desired)
 newgrp docker -c "docker compose up"
 ```
-
 Once OhMyPCAP has initialized, you can then connect to http://localhost:8000/ohmypcap.html in your browser.
 
 To stop:
