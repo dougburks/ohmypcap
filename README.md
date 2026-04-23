@@ -36,13 +36,11 @@ If you are running the latest version of [OhMyDebn](https://ohmydebn.org), then 
 If you're not running OhMyDebn but are running another Debian-based distro, then you can install and configure Docker like this:
 ```bash
 # Install and configure docker.io
-sudo apt update && sudo apt -y install docker.io
-sudo usermod -aG docker $USER
-newgrp docker
+sudo apt update && sudo apt -y install docker.io && sudo usermod -aG docker $USER
 # Create data directory
 mkdir -p ~/ohmypcap-data
 # Start OhMyPCAP
-docker run -v ~/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main
+newgrp docker -c "docker run -v ~/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main"
 ```
 
 OhMyPCAP will update its NIDS rules and then prompt you to open http://localhost:8000/ohmypcap.html in your browser.
@@ -51,19 +49,17 @@ To stop, just press Ctrl-C in the terminal window running OhMyPCAP or close the 
 
 ### Use docker compose
 
+If you prefer to use docker compose:
 ```bash
 # Install and configure docker.io and docker-compose
-sudo apt update && sudo apt -y install docker.io docker-compose
-sudo usermod -aG docker $USER
-newgrp docker
+sudo apt update && sudo apt -y install docker.io docker-compose && sudo usermod -aG docker $USER
 # Download docker-compose.yml
 wget https://raw.githubusercontent.com/dougburks/ohmypcap/refs/heads/main/docker-compose.yml
 # Create data directory
 mkdir -p ohmypcap-data
-# Start OhMyPCAP (add the -d option to run in the background)
-docker compose up
+# Start OhMyPCAP (add the -d option to run in the background if desired)
+newgrp docker -c "docker compose up"
 ```
-
 Once OhMyPCAP has initialized, you can then connect to http://localhost:8000/ohmypcap.html in your browser.
 
 To stop:
