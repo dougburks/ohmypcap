@@ -33,7 +33,7 @@ If you are running the latest version of [OhMyDebn](https://ohmydebn.org), then 
 
 ### Quick Installation Using docker run
 
-If you're not running OhMyDebn, then here are the steps you can use to install and configure Docker on Debian 13 or compatible distros:
+If you're not running OhMyDebn, then here are the steps you can use to install and run OhMyPCAP using "docker run" on Debian 13 or compatible distros:
 ```bash
 # Install and configure docker.io
 sudo apt update && sudo apt -y install docker.io && sudo usermod -aG docker $USER
@@ -49,7 +49,7 @@ To stop, just press Ctrl-C in the terminal window running OhMyPCAP or close the 
 
 ### Quick Installation Using docker compose
 
-If you prefer to use docker compose, then here are the steps you can use on Debian 13 or compatible distros:
+If you prefer to use "docker compose", then here are the steps you can use on Debian 13 or compatible distros:
 ```bash
 # Install and configure docker.io and docker-compose
 sudo apt update && sudo apt -y install docker.io docker-compose && sudo usermod -aG docker $USER
