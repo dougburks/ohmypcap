@@ -25,7 +25,7 @@ Please note the following:
 
 ## Quick Installation
 
-Most folks will want to use our pre-built Docker image. If you prefer not to use our pre-built Docker image, then there are other options shown [below](#build-your-own-docker-image).
+For a private or permanent instance of OhMyPCAP, most folks will want to use our pre-built Docker image. If you prefer not to use our pre-built Docker image, then there are other options shown [below](#build-your-own-docker-image).
 
 ### Quick Installation on OhMyDebn
 
