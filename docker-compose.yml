@@ -1,0 +1,11 @@
+services:
+  ohmypcap:
+    image: ghcr.io/dougburks/ohmypcap:latest
+    container_name: ohmypcap
+    ports:
+      - "8000:8000"
+    volumes:
+      - type: bind
+        source: ./ohmypcap-data
+        target: /data
+    restart: unless-stopped

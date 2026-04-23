@@ -54,6 +54,19 @@ docker run -v ~/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main
 
 OhMyPCAP will update its NIDS rules and then prompt you to open http://localhost:8000/ohmypcap.html in your browser.
 
+### Use Docker Compose
+
+```bash
+mkdir -p ohmypcap-data # (run this in the same folder where you find OhMyPcaP docker-compose.yml file)
+docker compose up -d
+```
+To stop or restart
+
+```bash
+docker compose down
+docker compose restart
+```
+
 ## Usage
 
 ### Analyze a PCAP
