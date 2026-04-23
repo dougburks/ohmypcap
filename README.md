@@ -21,7 +21,7 @@ https://securityonion.net/pcap
 Please note the following:
 - this is a cloud based service so please do not share any sensitive PCAP files or any other sensitive info
 - free accounts are limited to 60 minutes of usage before the instance is automatically terminated
-- if you need a private or permanent instance of OhMyPCAP, then please see the other options below
+- if you need a private or permanent instance of OhMyPCAP, then you can proceed to the next section to perform a local installation of OhMyPCAP
 
 ## Quick Installation
 
@@ -31,28 +31,50 @@ Most folks will want to use our pre-built Docker image. If you prefer not to use
 
 If you are running the latest version of [OhMyDebn](https://ohmydebn.org), then you can just press `Ctrl + Alt + P` to automatically install and run OhMyPCAP and then you can skip to the Usage section below.
 
-### Install Docker
+### Use docker run
 
 If you're not running OhMyDebn but are running another Debian-based distro, then you can install and configure Docker like this:
-
 ```bash
+# Install and configure docker.io
 sudo apt update && sudo apt -y install docker.io
 sudo usermod -aG docker $USER
 newgrp docker
-```
-
-If you're running something other than Debian, then check your OS documentation for the best way to install Docker.
-
-### Use Docker to run OhMyPCAP
-
-Once Docker is installed and configured, all you have to do is create a data directory and then run our OhMyPCAP Docker image with that data directory mounted as a volume:
-
-```bash
+# Create data directory
 mkdir -p ~/ohmypcap-data
+# Start OhMyPCAP
 docker run -v ~/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main
 ```
 
 OhMyPCAP will update its NIDS rules and then prompt you to open http://localhost:8000/ohmypcap.html in your browser.
+
+To stop, just press Ctrl-C in the terminal window running OhMyPCAP or close the terminal window altogether.
+
+### Use docker compose
+
+```bash
+# Install and configure docker.io and docker-compose
+sudo apt update && sudo apt -y install docker.io docker-compose
+sudo usermod -aG docker $USER
+newgrp docker
+# Download docker-compose.yml
+wget https://raw.githubusercontent.com/dougburks/ohmypcap/refs/heads/main/docker-compose.yml
+# Create data directory
+mkdir -p ohmypcap-data
+# Start OhMyPCAP (add the -d option to run in the background)
+docker compose up
+```
+
+Once OhMyPCAP has initialized, you can then connect to http://localhost:8000/ohmypcap.html in your browser.
+
+To stop:
+```bash
+docker compose down
+```
+
+To restart:
+```bash
+docker compose restart
+```
 
 ## Usage
 
