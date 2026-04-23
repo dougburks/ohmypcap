@@ -27,11 +27,11 @@ Please note the following:
 
 Most folks will want to use our pre-built Docker image. If you prefer not to use our pre-built Docker image, then there are other options shown [below](#build-your-own-docker-image).
 
-### OhMyDebn
+### Quick Installation on OhMyDebn
 
 If you are running the latest version of [OhMyDebn](https://ohmydebn.org), then you can just press `Ctrl + Alt + P` to automatically install and run OhMyPCAP and then you can skip to the Usage section below.
 
-### Use docker run
+### Quick Installation Using docker run
 
 If you're not running OhMyDebn but are running another Debian-based distro, then you can install and configure Docker like this:
 ```bash
@@ -47,7 +47,7 @@ OhMyPCAP will update its NIDS rules and then prompt you to open http://localhost
 
 To stop, just press Ctrl-C in the terminal window running OhMyPCAP or close the terminal window altogether.
 
-### Use docker compose
+### Quick Installation Using docker compose
 
 If you prefer to use docker compose:
 ```bash
@@ -73,6 +73,8 @@ docker compose restart
 ```
 
 ## Usage
+
+Once you've connected to OhMyPCAP in your browser, here are some of the things you can do.
 
 ### Analyze a PCAP
 
