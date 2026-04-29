@@ -98,8 +98,70 @@ class TestCSSLayout(unittest.TestCase):
     def test_table_sticky_headers(self):
         self.assertIn('position: sticky', HTML_CONTENT)
 
-    def test_overflow_handling(self):
-        self.assertIn('overflow-x: auto', HTML_CONTENT)
+    def test_no_horizontal_scrollbars(self):
+        """No element should force horizontal scrolling; content must wrap instead."""
+        self.assertNotIn('overflow-x: auto', HTML_CONTENT,
+                         'No horizontal scrollbars allowed; content must wrap')
+        self.assertIn('overflow-wrap: break-word', HTML_CONTENT,
+                      'Long content must wrap with break-word')
+        self.assertIn('table-layout: fixed', HTML_CONTENT,
+                      'Table must use fixed layout to prevent expansion beyond viewport')
+
+    def test_stream_output_breaks_on_dots(self):
+        """Modal stream output must break on non-word characters like dots."""
+        self.assertIn('.stream-output {', HTML_CONTENT,
+                      'stream-output style must exist')
+        self.assertIn('word-break: break-all', HTML_CONTENT,
+                      'stream-output must break on dots and non-word characters')
+
+    def test_detail_row_allows_text_wrapping(self):
+        """Detail rows must override the global td nowrap so content can wrap."""
+        self.assertIn('.detail-row td {', HTML_CONTENT,
+                      'detail-row td style must exist')
+        self.assertIn('white-space: normal', HTML_CONTENT,
+                      'detail-row td must allow text wrapping')
+
+    def test_table_cells_wrap_not_truncate(self):
+        """Table cells (including ALERT) must wrap text, not truncate with ellipsis."""
+        td_match = re.search(r'td \{([^}]+)\}', HTML_CONTENT)
+        self.assertIsNotNone(td_match, 'Global td style must exist')
+        td_style = td_match.group(1)
+        self.assertNotIn('white-space: nowrap', td_style,
+                         'td must not force single-line truncation')
+        self.assertNotIn('text-overflow: ellipsis', td_style,
+                         'td must not hide overflow with ellipsis')
+        self.assertIn('overflow-wrap: break-word', td_style,
+                      'td must wrap long text like alert signatures')
+
+    def test_detail_content_wraps(self):
+        """Detail content must use overflow-wrap to prevent overflow."""
+        self.assertIn('.detail-content {', HTML_CONTENT,
+                      'detail-content style must exist')
+        self.assertIn('overflow-wrap: break-word', HTML_CONTENT,
+                      'detail-content must wrap long text')
+
+    def test_ascii_transcript_lines_wrap(self):
+        """ASCII transcript inner divs must wrap to avoid horizontal overflow."""
+        self.assertIn('.ascii-transcript div { overflow-wrap: break-word', HTML_CONTENT,
+                      'ascii-transcript divs must wrap long lines')
+        self.assertIn('word-break: break-all', HTML_CONTENT,
+                      'ascii-transcript divs must break on non-word characters like dots')
+
+    def test_ascii_transcript_shows_loading_indicator(self):
+        """ASCII transcript must show a loading spinner while fetching."""
+        self.assertIn('.ascii-loading {', HTML_CONTENT,
+                      'ascii-loading CSS class must exist')
+        self.assertIn('Loading ASCII transcript', JS_CONTENT,
+                      'toggleRow must set loading text before fetching transcript')
+        self.assertIn('ascii-loading', JS_CONTENT,
+                      'toggleRow must use ascii-loading spinner class')
+
+    def test_detail_grid_can_shrink(self):
+        """formatEvent grid must set min-width: 0 so columns shrink on narrow viewports."""
+        self.assertIn('min-width: 0', HTML_CONTENT,
+                      'formatEvent grid must set min-width: 0 to shrink')
+        self.assertIn('minmax(0, 1fr)', HTML_CONTENT,
+                      'formatEvent grid must use minmax(0, 1fr) to allow column shrinking')
 
     def test_responsive_viewport(self):
         self.assertIn('width=device-width', HTML_CONTENT)
@@ -171,6 +233,11 @@ class TestJavaScriptFunctions(unittest.TestCase):
 
     def test_has_delete_analysis(self):
         self.assertIn('function openDeleteAnalysis', JS_CONTENT)
+
+    def test_has_reanalyze_modal_functions(self):
+        self.assertIn('function openReanalyzeModal', JS_CONTENT)
+        self.assertIn('function closeReanalyzeModal', JS_CONTENT)
+        self.assertIn('function confirmReanalyze', JS_CONTENT)
 
 
 class TestJavaScriptSyntax(unittest.TestCase):
@@ -352,8 +419,8 @@ class TestUXFeatures(unittest.TestCase):
         self.assertIn('No previous PCAPs available', HTML_CONTENT)
 
     def test_error_messages(self):
-        self.assertIn('alert(', JS_CONTENT)
-        self.assertIn('Error:', JS_CONTENT)
+        self.assertIn('showError(', JS_CONTENT)
+        self.assertIn('id="errorModal"', HTML_CONTENT)
 
     def test_back_navigation(self):
         self.assertIn('Back to Overview', HTML_CONTENT)
@@ -509,7 +576,7 @@ class TestFiltering(unittest.TestCase):
         self.assertIn('.footer', HTML_CONTENT)
 
     def test_has_footer_with_version(self):
-        self.assertIn('OhMyPCAP 1.0.0', HTML_CONTENT)
+        self.assertIn('OhMyPCAP 1.1.0', HTML_CONTENT)
 
     def test_has_footer_with_copyright(self):
         self.assertIn('Security Onion Solutions, LLC', HTML_CONTENT)
@@ -737,6 +804,277 @@ class TestAdvancedModeFilterBar(unittest.TestCase):
         not currentFilters[sectionId]. Functions checked: buildSection, buildAllEvents,
         buildAggregationsSection, buildAggregationsSectionAll, getFilteredEvents."""
         self.assertNotIn("const filters = currentFilters[sectionId]", JS_CONTENT)
+
+
+class TestXSSPrevention(unittest.TestCase):
+    def _get_function_body(self, func_name):
+        func_match = re.search(rf'function {re.escape(func_name)}\([^)]*\)\s*\{{', JS_CONTENT)
+        self.assertIsNotNone(func_match, f'{func_name} function not found')
+        start = func_match.end()
+        brace_count = 1
+        pos = start
+        while pos < len(JS_CONTENT) and brace_count > 0:
+            if JS_CONTENT[pos] == '{':
+                brace_count += 1
+            elif JS_CONTENT[pos] == '}':
+                brace_count -= 1
+            pos += 1
+        return JS_CONTENT[start:pos]
+
+    def test_formatEvent_escapes_dynamic_values(self):
+        """User-controlled fields in formatEvent must be wrapped with escapeHtml()."""
+        func_body = self._get_function_body('formatEvent')
+        dangerous_patterns = [
+            r'\$\{e\.alert\?\.signature',
+            r'\$\{e\.alert\?\.rule',
+            r'\$\{e\.alert\?\.category',
+            r'\$\{e\.dns\?\.rrname',
+            r'\$\{e\.dns\?\.rrtype',
+            r'\$\{e\.http\?\.http_method',
+            r'\$\{e\.http\?\.url',
+            r'\$\{e\.http\?\.hostname',
+            r'\$\{e\.http\?\.http_user_agent',
+            r'\$\{e\.http\?\.http_content_type',
+            r'\$\{e\.tls\?\.sni',
+            r'\$\{e\.tls\?\.version',
+            r'\$\{e\.tls\?\.subject',
+            r'\$\{e\.tls\?\.issuerdn',
+            r'\$\{e\.tls\?\.fingerprint',
+            r'\$\{e\.flow\?\.state',
+            r'\$\{e\.ftp\?\.command',
+            r'\$\{e\.ftp\?\.reply',
+            r'\$\{e\.anomaly\?\.type',
+            r'\$\{e\.anomaly\?\.message',
+            r'\$\{e\.fileinfo\?\.filename',
+            r'\$\{e\.fileinfo\?\.magic',
+            r'\$\{e\.fileinfo\?\.md5',
+            r'\$\{e\.fileinfo\?\.sha1',
+            r'\$\{e\.fileinfo\?\.sha256',
+        ]
+        for pattern in dangerous_patterns:
+            matches = re.findall(pattern, func_body)
+            self.assertEqual(len(matches), 0,
+                f'Found unescaped user-controlled field in formatEvent matching: {pattern}')
+
+    def test_buildRowForEvent_escapes_user_fields(self):
+        """Table cells for DNS, HTTP, TLS, and Flow must use escapeHtml()."""
+        func_body = self._get_function_body('buildRowForEvent')
+        self.assertIn("escapeHtml(rrname)", func_body, 'DNS rrname must be escaped')
+        self.assertIn("escapeHtml(rrtype)", func_body, 'DNS rrtype must be escaped')
+        self.assertIn("escapeHtml(url)", func_body, 'HTTP url must be escaped')
+        self.assertIn("escapeHtml(ua)", func_body, 'HTTP user-agent must be escaped')
+        self.assertIn("escapeHtml(sni)", func_body, 'TLS SNI must be escaped')
+        self.assertIn("escapeHtml(subject)", func_body, 'TLS subject must be escaped')
+        self.assertIn("escapeHtml(issuer.slice(0, 30))", func_body, 'TLS issuer must be escaped')
+        self.assertIn("escapeHtml(state)", func_body, 'Flow state must be escaped')
+
+    def test_alert_details_shows_rule(self):
+        """Alert detail panel must include a Rule row with monospace styling."""
+        func_body = self._get_function_body('formatEvent')
+        self.assertIn("alert?.rule", func_body, 'formatEvent must reference alert.rule')
+        self.assertIn('white-space: pre-wrap', func_body, 'Rule text must wrap with pre-wrap')
+        self.assertIn('overflow-wrap: break-word', func_body, 'Rule text must wrap with overflow-wrap')
+        self.assertIn('class="mono"', func_body, 'Rule text must use monospace font')
+
+
+class TestURLParameterEncoding(unittest.TestCase):
+    def test_downloadPcap_uses_encodeURIComponent(self):
+        """downloadPcap must encode URL parameters to prevent injection."""
+        func_match = re.search(r'function downloadPcap\(', JS_CONTENT)
+        self.assertIsNotNone(func_match)
+        start = func_match.start()
+        brace_count = 0
+        pos = start
+        found_open = False
+        while pos < len(JS_CONTENT):
+            if JS_CONTENT[pos] == '{':
+                brace_count += 1
+                found_open = True
+            elif JS_CONTENT[pos] == '}':
+                brace_count -= 1
+            pos += 1
+            if found_open and brace_count == 0:
+                break
+        func_body = JS_CONTENT[start:pos]
+        self.assertIn("encodeURIComponent(src)", func_body)
+        self.assertIn("encodeURIComponent(sport)", func_body)
+        self.assertIn("encodeURIComponent(dst)", func_body)
+        self.assertIn("encodeURIComponent(dport)", func_body)
+        self.assertIn("encodeURIComponent(currentMd5)", func_body)
+
+    def test_loadAsciiTranscript_uses_encodeURIComponent(self):
+        """loadAsciiTranscript must encode URL parameters."""
+        func_match = re.search(r'function loadAsciiTranscript\(', JS_CONTENT)
+        self.assertIsNotNone(func_match)
+        start = func_match.start()
+        brace_count = 0
+        pos = start
+        found_open = False
+        while pos < len(JS_CONTENT):
+            if JS_CONTENT[pos] == '{':
+                brace_count += 1
+                found_open = True
+            elif JS_CONTENT[pos] == '}':
+                brace_count -= 1
+            pos += 1
+            if found_open and brace_count == 0:
+                break
+        func_body = JS_CONTENT[start:pos]
+        self.assertIn("encodeURIComponent(src)", func_body)
+        self.assertIn("encodeURIComponent(sport)", func_body)
+        self.assertIn("encodeURIComponent(dst)", func_body)
+        self.assertIn("encodeURIComponent(dport)", func_body)
+        self.assertIn("encodeURIComponent(currentMd5)", func_body)
+
+
+class TestEscapeHtmlRobustness(unittest.TestCase):
+    def test_escapeHtml_handles_numbers(self):
+        """REGRESSION: escapeHtml must coerce numbers to String before .replace().
+        Suricata outputs e.ftp?.reply as a number (e.g. 230), which caused:
+        TypeError: str.replace is not a function."""
+        func_match = re.search(r'function escapeHtml\(', JS_CONTENT)
+        self.assertIsNotNone(func_match)
+        start = func_match.start()
+        brace_count = 0
+        pos = start
+        found_open = False
+        while pos < len(JS_CONTENT):
+            if JS_CONTENT[pos] == '{':
+                brace_count += 1
+                found_open = True
+            elif JS_CONTENT[pos] == '}':
+                brace_count -= 1
+            pos += 1
+            if found_open and brace_count == 0:
+                break
+        func_body = JS_CONTENT[start:pos]
+        self.assertIn("String(str).replace", func_body,
+                      'escapeHtml must use String(str) to handle numeric inputs')
+        self.assertIn("str == null", func_body,
+                      'escapeHtml must use == null check (not !str) so 0 is not rejected')
+
+
+class TestErrorModal(unittest.TestCase):
+    def test_error_modal_exists(self):
+        self.assertIn('id="errorModal"', HTML_CONTENT)
+
+    def test_error_modal_has_close_button(self):
+        self.assertIn("onclick=\"closeErrorModal()\"", HTML_CONTENT)
+
+    def test_showError_function_exists(self):
+        self.assertIn('function showError(', JS_CONTENT)
+
+    def test_closeErrorModal_function_exists(self):
+        self.assertIn('function closeErrorModal(', JS_CONTENT)
+
+    def test_no_alert_for_errors(self):
+        """All user-facing error alerts must use showError, not alert()."""
+        alert_errors = re.findall(r"alert\('Error:", JS_CONTENT)
+        self.assertEqual(len(alert_errors), 0,
+                         f'Found {len(alert_errors)} alert() calls for errors; use showError() instead')
+
+
+class TestExternalLinksSecurity(unittest.TestCase):
+    def test_all_blank_targets_have_rel_noopener(self):
+        """All links with target='_blank' must have rel='noopener noreferrer' to prevent tabnabbing."""
+        links = re.findall(r'<a[^>]*target="_blank"[^>]*>', HTML_CONTENT)
+        self.assertGreater(len(links), 0, 'Should have external links to test')
+        for link in links:
+            self.assertIn('rel="noopener noreferrer"', link,
+                          f'External link missing rel="noopener noreferrer": {link}')
+
+
+class TestEscapeHtmlCompleteness(unittest.TestCase):
+    def test_escapeHtml_escapes_single_quotes(self):
+        func_match = re.search(r'function escapeHtml\(', JS_CONTENT)
+        self.assertIsNotNone(func_match)
+        start = func_match.start()
+        brace_count = 0
+        pos = start
+        found_open = False
+        while pos < len(JS_CONTENT):
+            if JS_CONTENT[pos] == '{':
+                brace_count += 1
+                found_open = True
+            elif JS_CONTENT[pos] == '}':
+                brace_count -= 1
+            pos += 1
+            if found_open and brace_count == 0:
+                break
+        func_body = JS_CONTENT[start:pos]
+        self.assertIn("replace(/'/g, '&#39;')", func_body,
+                      'escapeHtml must escape single quotes for defense-in-depth')
+
+
+class TestAdvancedToggleNoMemoryLeak(unittest.TestCase):
+    def test_no_inline_addEventListener_for_advancedToggle(self):
+        """The advanced toggle must use a single delegated listener, not repeated inline addEventListener calls."""
+        load_analysis = JS_CONTENT.split('async function loadAnalysis')[1]
+        self.assertNotIn("addEventListener('change', function()", load_analysis,
+                         'loadAnalysis must not attach inline change listeners to avoid memory leaks')
+
+    def test_delegated_listener_exists(self):
+        """A single delegated change listener on document must handle the advanced toggle."""
+        self.assertIn("e.target.id === 'advancedToggle'", JS_CONTENT,
+                      'Must use delegated listener for advanced toggle')
+
+
+class TestCheckStatusTimeoutFeedback(unittest.TestCase):
+    def test_timeout_shows_error_modal(self):
+        """After 120 polling attempts, checkStatus must show an error to the user."""
+        check_status = JS_CONTENT.split('async function checkStatus')[1]
+        self.assertIn('showError(', check_status,
+                      'checkStatus must show an error when polling times out')
+
+
+class TestNoDeadCode(unittest.TestCase):
+    def test_no_currentSectionTypes(self):
+        """currentSectionTypes was declared but never used — should be removed."""
+        self.assertNotIn('currentSectionTypes', JS_CONTENT,
+                         'currentSectionTypes is dead code and should be removed')
+
+
+class TestReanalyzeUI(unittest.TestCase):
+    def test_reanalyze_button_on_welcome(self):
+        """Welcome screen must show a re-analyze button next to each previous PCAP."""
+        self.assertIn('openReanalyzeModal', JS_CONTENT,
+                      'showWelcome must include re-analyze button')
+        self.assertIn('🔄', HTML_CONTENT,
+                      'Re-analyze button must use refresh icon')
+
+    def test_reanalyze_modal_exists(self):
+        """Re-analyze confirmation modal must exist in HTML."""
+        self.assertIn('id="reanalyzeConfirmModal"', HTML_CONTENT,
+                      'reanalyzeConfirmModal must exist')
+        self.assertIn('id="reanalyzeFileName"', HTML_CONTENT,
+                      'reanalyzeFileName span must exist')
+
+    def test_reanalyze_modal_has_cancel_and_reanalyze_buttons(self):
+        """Re-analyze modal must have Cancel and Re-analyze buttons."""
+        modal_section = HTML_CONTENT.split('id="reanalyzeConfirmModal"')[1].split('</div>\n        </div>')[0]
+        self.assertIn('closeReanalyzeModal()', modal_section,
+                      'Modal must have Cancel button')
+        self.assertIn('confirmReanalyze()', modal_section,
+                      'Modal must have Re-analyze button')
+
+    def test_reanalyze_calls_post_api(self):
+        """confirmReanalyze must POST to /api/reanalyze with JSON body."""
+        self.assertIn("fetch('/api/reanalyze'", JS_CONTENT,
+                      'confirmReanalyze must fetch /api/reanalyze')
+        self.assertIn("method: 'POST'", JS_CONTENT,
+                      'confirmReanalyze must use POST method')
+        self.assertIn("JSON.stringify({md5: md5})", JS_CONTENT,
+                      'confirmReanalyze must send md5 in JSON body')
+
+    def test_reanalyze_shows_loading(self):
+        """confirmReanalyze must show loading indicator while Suricata runs."""
+        self.assertIn("showLoading('Re-analyzing", JS_CONTENT,
+                      'confirmReanalyze must call showLoading')
+
+    def test_reanalyze_uses_checkStatus(self):
+        """confirmReanalyze must poll checkStatus after starting reanalysis."""
+        self.assertIn('await checkStatus(md5)', JS_CONTENT,
+                      'confirmReanalyze must poll checkStatus')
 
 
 if __name__ == '__main__':

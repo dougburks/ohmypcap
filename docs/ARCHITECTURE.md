@@ -68,7 +68,7 @@ The `json_data` column stores the complete original event, allowing the server t
 
 | Type | Description | Key fields |
 |---|---|---|
-| `alert` | Suricata rule matches | `alert.signature`, `alert.severity`, `alert.category` |
+| `alert` | Suricata rule matches | `alert.signature`, `alert.severity`, `alert.category`, `alert.rule` |
 | `dns` | DNS queries/responses | `dns.rrname`, `dns.rrtype`, `dns.rcode` |
 | `http` | HTTP requests | `http.http_method`, `http.url`, `http.http_content_type`, `http.status` |
 | `tls` | TLS handshakes | `tls.sni`, `tls.version`, `tls.subject`, `tls.issuer` |

@@ -20,18 +20,20 @@
         .section { background: #161b22; border-radius: 12px 12px 0 0; margin-bottom: 20px; border: 1px solid #30363d; overflow: hidden; }
         .section-hidden { display: none; }
         .section-header { background: #21262d; padding: 15px 20px; font-size: 1.1rem; font-weight: 600; color: #f0f6fc; }
-        .section-content { padding: 20px; overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .section-content { padding: 20px; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; table-layout: fixed; }
         th { text-align: left; padding: 12px; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; cursor: pointer; position: sticky; top: 0; z-index: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         th:hover { background: #30363d; }
-        td { padding: 12px; border-bottom: 1px solid #30363d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        td { padding: 12px; border-bottom: 1px solid #30363d; overflow-wrap: break-word; vertical-align: top; }
         tr { cursor: pointer; }
         tr:hover { background: #21262d; }
         tr.expanded-row td { border-bottom: none; }
         .detail-row { display: none; }
         .detail-row.visible { display: table-row; }
-        .detail-row td { padding: 15px 20px; background: #0d1117; }
-        .detail-content { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem; color: #c9d1d9; word-break: break-all; }
+        .detail-row td { padding: 15px 20px; background: #0d1117; white-space: normal; }
+        .detail-content { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem; color: #c9d1d9; overflow-wrap: break-word; }
+        .ascii-transcript div { overflow-wrap: break-word; word-break: break-all; }
+        .ascii-loading { display: inline-block; width: 12px; height: 12px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; vertical-align: middle; }
         .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
         .badge-info { background: rgba(88, 166, 255, 0.2); color: #58a6ff; }
         .badge-danger { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
@@ -59,8 +61,8 @@
         .modal-content { background: #161b22; border: 1px solid #30363d; border-radius: 12px; width: 90%; max-width: 900px; max-height: 80vh; overflow: auto; padding: 20px; }
         .modal-header { display: flex; justify-content: flex-start; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
         .modal-header h3 { color: #f0f6fc; }
-        .modal-close { background: none; border: none; color: #8b949e; font-size: 1.5rem; cursor: pointer; }
-        .stream-output { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem; white-space: pre-wrap; color: #c9d1d9; background: #0d1117; padding: 15px; border-radius: 8px; overflow-x: auto; }
+        .modal-close { background: none; border: none; color: #8b949e; font-size: 1.5rem; cursor: pointer; margin-left: auto; }
+        .stream-output { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-all; color: #c9d1d9; background: #0d1117; padding: 15px; border-radius: 8px; }
         .sort-arrow { margin-left: 5px; font-size: 0.6rem; }
         .loading { text-align: center; padding: 40px; color: #8b949e; }
         .agg-row { cursor: pointer; }
@@ -107,7 +109,22 @@
             <div class="loading-modal">
                 <div class="spinner"><div class="spinner-dot"></div></div>
                 <div class="loading-text" id="loadingText">Loading...</div>
-                <div class="loading-subtext">Parsing events, this may take a moment for large captures</div>
+                <div class="loading-subtext">This may take a minute or two depending on file size</div>
+            </div>
+        </div>
+        
+        <div class="modal" id="errorModal">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3 style="color: #ff6b6b;">Error</h3>
+                    <button class="modal-close" onclick="closeErrorModal()">&times;</button>
+                </div>
+                <div style="padding: 20px;">
+                    <p id="errorMessage" style="color: #c9d1d9; margin-bottom: 20px;"></p>
+                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                        <button onclick="closeErrorModal()" style="background: #30363d; color: #c9d1d9; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Close</button>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -122,6 +139,22 @@
                     <div style="display: flex; gap: 10px; justify-content: flex-end;">
                         <button onclick="closeDeleteModal()" style="background: #30363d; color: #c9d1d9; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Cancel</button>
                         <button onclick="confirmDelete()" style="background: #ff6b6b; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal" id="reanalyzeConfirmModal">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3 style="color: #58a6ff;">Confirm Re-analyze</h3>
+                    <button class="modal-close" onclick="closeReanalyzeModal()">&times;</button>
+                </div>
+                <div style="padding: 20px;">
+                    <p style="color: #c9d1d9; margin-bottom: 20px;">This will delete the existing analysis for <span id="reanalyzeFileName" style="font-weight: 600; color: #f0f6fc;"></span> and re-run Suricata. The PCAP file will be preserved.</p>
+                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                        <button onclick="closeReanalyzeModal()" style="background: #30363d; color: #c9d1d9; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Cancel</button>
+                        <button onclick="confirmReanalyze()" style="background: #58a6ff; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Re-analyze</button>
                     </div>
                 </div>
             </div>
@@ -143,8 +176,8 @@
         
         <script>
         function escapeHtml(str) {
-            if (!str) return '';
-            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            if (str == null) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
         
         function showTab(sectionId, el) {
@@ -246,6 +279,7 @@
                             const dstPort = parts[3];
                             const pre = asciiDiv.querySelector('.ascii-transcript');
                             if (pre && !pre.innerHTML) {
+                                pre.innerHTML = '<div style="color:#8b949e;padding:10px 0;display:flex;align-items:center;gap:8px;"><span class="ascii-loading"></span>Loading ASCII transcript...</div>';
                                 loadAsciiTranscript(srcIp, srcPort, dstIp, dstPort, pre);
                             }
                         }
@@ -255,8 +289,8 @@
         }
         
         async function loadAsciiTranscript(src, sport, dst, dport, pre) {
-            const md5Param = currentMd5 ? '&md5=' + currentMd5 : '';
-            const url = `/api/ascii-stream?src=${src}&sport=${sport}&dst=${dst}&dport=${dport}${md5Param}`;
+            const md5Param = currentMd5 ? '&md5=' + encodeURIComponent(currentMd5) : '';
+            const url = `/api/ascii-stream?src=${encodeURIComponent(src)}&sport=${encodeURIComponent(sport)}&dst=${encodeURIComponent(dst)}&dport=${encodeURIComponent(dport)}${md5Param}`;
             try {
                 const resp = await fetch(url);
                 const text = await resp.text();
@@ -302,115 +336,116 @@
         
         function formatEvent(e) {
             const ts = (e.timestamp || '').slice(0, 19);
-            let html = `<div style="display: grid; grid-template-columns: 120px 1fr; gap: 8px; font-size: 0.85rem;">`;
-            html += `<span style="color: #8b949e;">Timestamp</span><span>${ts}</span>`;
-            html += `<span style="color: #8b949e;">Event Type</span><span><span class="badge badge-info">${e.event_type || ''}</span></span>`;
-            html += `<span style="color: #8b949e;">Protocol</span><span>${e.proto || ''}</span>`;
-            html += `<span style="color: #8b949e;">Flow ID</span><span>${e.flow_id || ''}</span>`;
-            html += `<span style="color: #8b949e;">PCAP Count</span><span>${e.pcap_cnt || ''}</span>`;
+            let html = `<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; font-size: 0.85rem; min-width: 0;">`;
+            html += `<span style="color: #8b949e;">Timestamp</span><span>${escapeHtml(ts)}</span>`;
+            html += `<span style="color: #8b949e;">Event Type</span><span><span class="badge badge-info">${escapeHtml(e.event_type || '')}</span></span>`;
+            html += `<span style="color: #8b949e;">Protocol</span><span>${escapeHtml(e.proto || '')}</span>`;
+            html += `<span style="color: #8b949e;">Flow ID</span><span>${escapeHtml(String(e.flow_id || ''))}</span>`;
+            html += `<span style="color: #8b949e;">PCAP Count</span><span>${escapeHtml(String(e.pcap_cnt || ''))}</span>`;
             
             html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px;">Connection</span>`;
-            html += `<span style="color: #8b949e;">Source IP</span><span class="mono">${e.src_ip || ''}</span><span style="color: #8b949e;">Source Port</span><span class="mono">${e.src_port || ''}</span>`;
-            html += `<span style="color: #8b949e;">Dest IP</span><span class="mono">${e.dest_ip || ''}</span><span style="color: #8b949e;">Dest Port</span><span class="mono">${e.dest_port || ''}</span>`;
+            html += `<span style="color: #8b949e;">Source IP</span><span class="mono">${escapeHtml(e.src_ip || '')}</span><span style="color: #8b949e;">Source Port</span><span class="mono">${escapeHtml(String(e.src_port || ''))}</span>`;
+            html += `<span style="color: #8b949e;">Dest IP</span><span class="mono">${escapeHtml(e.dest_ip || '')}</span><span style="color: #8b949e;">Dest Port</span><span class="mono">${escapeHtml(String(e.dest_port || ''))}</span>`;
             
             if (e.event_type === 'alert') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #ff6b6b;">Alert Details</span>`;
-                html += `<span style="color: #8b949e;">Signature</span><span>${e.alert?.signature || ''}</span>`;
-                html += `<span style="color: #8b949e;">Category</span><span><span class="badge badge-danger">${e.alert?.category || ''}</span></span>`;
-                html += `<span style="color: #8b949e;">Severity</span><span>${e.alert?.severity || ''}</span>`;
-                html += `<span style="color: #8b949e;">Action</span><span>${e.alert?.action || ''}</span>`;
-                html += `<span style="color: #8b949e;">GID</span><span>${e.alert?.gid || ''}</span>`;
-                html += `<span style="color: #8b949e;">SID</span><span>${e.alert?.signature_id || ''}</span>`;
+                html += `<span style="color: #8b949e;">Signature</span><span>${escapeHtml(e.alert?.signature || '')}</span>`;
+                html += `<span style="color: #8b949e;">Category</span><span><span class="badge badge-danger">${escapeHtml(e.alert?.category || '')}</span></span>`;
+                html += `<span style="color: #8b949e;">Severity</span><span>${escapeHtml(String(e.alert?.severity || ''))}</span>`;
+                html += `<span style="color: #8b949e;">Action</span><span>${escapeHtml(e.alert?.action || '')}</span>`;
+                html += `<span style="color: #8b949e;">GID</span><span>${escapeHtml(String(e.alert?.gid || ''))}</span>`;
+                html += `<span style="color: #8b949e;">SID</span><span>${escapeHtml(String(e.alert?.signature_id || ''))}</span>`;
+                html += `<span style="color: #8b949e;">Rule</span><span class="mono" style="white-space: pre-wrap; overflow-wrap: break-word; min-width: 0;">${escapeHtml(e.alert?.rule || '')}</span>`;
             }
             
             if (e.event_type === 'dns') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #66bb6a;">DNS Details</span>`;
-                html += `<span style="color: #8b949e;">Type</span><span>${e.dns?.type || ''}</span>`;
-                html += `<span style="color: #8b949e;">Query Name</span><span class="mono">${e.dns?.rrname || ''}</span>`;
-                html += `<span style="color: #8b949e;">Query Type</span><span>${e.dns?.rrtype || ''}</span>`;
+                html += `<span style="color: #8b949e;">Type</span><span>${escapeHtml(e.dns?.type || '')}</span>`;
+                html += `<span style="color: #8b949e;">Query Name</span><span class="mono">${escapeHtml(e.dns?.rrname || '')}</span>`;
+                html += `<span style="color: #8b949e;">Query Type</span><span>${escapeHtml(e.dns?.rrtype || '')}</span>`;
                 if (e.dns?.answers) {
-                    html += `<span style="color: #8b949e;">Answers</span><span class="mono">${e.dns.answers.map(a => a.rdata).join(', ')}</span>`;
+                    html += `<span style="color: #8b949e;">Answers</span><span class="mono">${escapeHtml(e.dns.answers.map(a => a.rdata).join(', '))}</span>`;
                 }
             }
             
             if (e.event_type === 'http') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #ffa726;">HTTP Details</span>`;
-                html += `<span style="color: #8b949e;">Method</span><span><span class="badge badge-info">${e.http?.http_method || ''}</span></span>`;
-                html += `<span style="color: #8b949e;">URL</span><span class="mono">${e.http?.url || ''}</span>`;
-                html += `<span style="color: #8b949e;">Host</span><span class="mono">${e.http?.hostname || ''}</span>`;
-                html += `<span style="color: #8b949e;">Status</span><span>${e.http?.status || ''}</span>`;
-                html += `<span style="color: #8b949e;">User Agent</span><span style="word-break: break-all;">${e.http?.http_user_agent || ''}</span>`;
-                html += `<span style="color: #8b949e;">Content Type</span><span>${e.http?.http_content_type || ''}</span>`;
+                html += `<span style="color: #8b949e;">Method</span><span><span class="badge badge-info">${escapeHtml(e.http?.http_method || '')}</span></span>`;
+                html += `<span style="color: #8b949e;">URL</span><span class="mono">${escapeHtml(e.http?.url || '')}</span>`;
+                html += `<span style="color: #8b949e;">Host</span><span class="mono">${escapeHtml(e.http?.hostname || '')}</span>`;
+                html += `<span style="color: #8b949e;">Status</span><span>${escapeHtml(String(e.http?.status || ''))}</span>`;
+                html += `<span style="color: #8b949e;">User Agent</span><span style="word-break: break-all;">${escapeHtml(e.http?.http_user_agent || '')}</span>`;
+                html += `<span style="color: #8b949e;">Content Type</span><span>${escapeHtml(e.http?.http_content_type || '')}</span>`;
             }
             
             if (e.event_type === 'tls') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #58a6ff;">TLS Details</span>`;
-                html += `<span style="color: #8b949e;">SNI</span><span class="mono">${e.tls?.sni || ''}</span>`;
-                html += `<span style="color: #8b949e;">Version</span><span><span class="badge badge-info">${e.tls?.version || ''}</span></span>`;
-                html += `<span style="color: #8b949e;">Subject</span><span class="mono">${e.tls?.subject || ''}</span>`;
-                html += `<span style="color: #8b949e;">Issuer</span><span class="mono">${e.tls?.issuerdn || ''}</span>`;
-                html += `<span style="color: #8b949e;">Not Before</span><span>${e.tls?.notbefore || ''}</span>`;
-                html += `<span style="color: #8b949e;">Not After</span><span>${e.tls?.notafter || ''}</span>`;
-                html += `<span style="color: #8b949e;">Fingerprint</span><span class="mono">${e.tls?.fingerprint || ''}</span>`;
+                html += `<span style="color: #8b949e;">SNI</span><span class="mono">${escapeHtml(e.tls?.sni || '')}</span>`;
+                html += `<span style="color: #8b949e;">Version</span><span><span class="badge badge-info">${escapeHtml(e.tls?.version || '')}</span></span>`;
+                html += `<span style="color: #8b949e;">Subject</span><span class="mono">${escapeHtml(e.tls?.subject || '')}</span>`;
+                html += `<span style="color: #8b949e;">Issuer</span><span class="mono">${escapeHtml(e.tls?.issuerdn || '')}</span>`;
+                html += `<span style="color: #8b949e;">Not Before</span><span>${escapeHtml(e.tls?.notbefore || '')}</span>`;
+                html += `<span style="color: #8b949e;">Not After</span><span>${escapeHtml(e.tls?.notafter || '')}</span>`;
+                html += `<span style="color: #8b949e;">Fingerprint</span><span class="mono">${escapeHtml(e.tls?.fingerprint || '')}</span>`;
             }
             
             if (e.event_type === 'flow') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #bc8cff;">Flow Details</span>`;
-                html += `<span style="color: #8b949e;">State</span><span>${e.flow?.state || ''}</span>`;
-                html += `<span style="color: #8b949e;">Age</span><span>${e.flow?.age || ''} seconds</span>`;
-                html += `<span style="color: #8b949e;">Pkts to Server</span><span>${(e.flow?.pkts_toserver || 0).toLocaleString()}</span>`;
-                html += `<span style="color: #8b949e;">Pkts to Client</span><span>${(e.flow?.pkts_toclient || 0).toLocaleString()}</span>`;
-                html += `<span style="color: #8b949e;">Bytes to Server</span><span>${(e.flow?.bytes_toserver || 0).toLocaleString()}</span>`;
-                html += `<span style="color: #8b949e;">Bytes to Client</span><span>${(e.flow?.bytes_toclient || 0).toLocaleString()}</span>`;
-                html += `<span style="color: #8b949e;">Alerted</span><span>${e.flow?.alerted ? 'Yes' : 'No'}</span>`;
+                html += `<span style="color: #8b949e;">State</span><span>${escapeHtml(e.flow?.state || '')}</span>`;
+                html += `<span style="color: #8b949e;">Age</span><span>${escapeHtml(String(e.flow?.age || ''))} seconds</span>`;
+                html += `<span style="color: #8b949e;">Pkts to Server</span><span>${escapeHtml(String((e.flow?.pkts_toserver || 0).toLocaleString()))}</span>`;
+                html += `<span style="color: #8b949e;">Pkts to Client</span><span>${escapeHtml(String((e.flow?.pkts_toclient || 0).toLocaleString()))}</span>`;
+                html += `<span style="color: #8b949e;">Bytes to Server</span><span>${escapeHtml(String((e.flow?.bytes_toserver || 0).toLocaleString()))}</span>`;
+                html += `<span style="color: #8b949e;">Bytes to Client</span><span>${escapeHtml(String((e.flow?.bytes_toclient || 0).toLocaleString()))}</span>`;
+                html += `<span style="color: #8b949e;">Alerted</span><span>${escapeHtml(e.flow?.alerted ? 'Yes' : 'No')}</span>`;
             }
             
             if (e.event_type === 'ftp') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #00bcd4;">FTP Details</span>`;
-                html += `<span style="color: #8b949e;">Command</span><span>${e.ftp?.command || ''}</span>`;
-                html += `<span style="color: #8b949e;">Reply</span><span>${e.ftp?.reply || ''}</span>`;
-                html += `<span style="color: #8b949e;">Data Channel</span><span>${e.ftp?.data_channel?.active ? 'Active' : 'Passive'}</span>`;
+                html += `<span style="color: #8b949e;">Command</span><span>${escapeHtml(e.ftp?.command || '')}</span>`;
+                html += `<span style="color: #8b949e;">Reply</span><span>${escapeHtml(String(e.ftp?.reply || ''))}</span>`;
+                html += `<span style="color: #8b949e;">Data Channel</span><span>${escapeHtml(e.ftp?.data_channel?.active ? 'Active' : 'Passive')}</span>`;
             }
             
             if (e.event_type === 'anomaly') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #ff9800;">Anomaly Details</span>`;
-                html += `<span style="color: #8b949e;">Type</span><span>${e.anomaly?.type || ''}</span>`;
-                html += `<span style="color: #8b949e;">Message</span><span>${e.anomaly?.message || ''}</span>`;
+                html += `<span style="color: #8b949e;">Type</span><span>${escapeHtml(e.anomaly?.type || '')}</span>`;
+                html += `<span style="color: #8b949e;">Message</span><span>${escapeHtml(e.anomaly?.message || '')}</span>`;
             }
             
             if (e.event_type === 'fileinfo') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #9c27b0;">File Info</span>`;
-                html += `<span style="color: #8b949e;">Filename</span><span class="mono">${e.fileinfo?.filename || ''}</span>`;
-                html += `<span style="color: #8b949e;">Magic</span><span>${e.fileinfo?.magic || ''}</span>`;
-                html += `<span style="color: #8b949e;">MD5</span><span class="mono">${e.fileinfo?.md5 || ''}</span>`;
-                html += `<span style="color: #8b949e;">SHA1</span><span class="mono">${e.fileinfo?.sha1 || ''}</span>`;
-                html += `<span style="color: #8b949e;">SHA256</span><span class="mono">${e.fileinfo?.sha256 || ''}</span>`;
-                html += `<span style="color: #8b949e;">Size</span><span>${(e.fileinfo?.size || 0).toLocaleString()} bytes</span>`;
+                html += `<span style="color: #8b949e;">Filename</span><span class="mono">${escapeHtml(e.fileinfo?.filename || '')}</span>`;
+                html += `<span style="color: #8b949e;">Magic</span><span>${escapeHtml(e.fileinfo?.magic || '')}</span>`;
+                html += `<span style="color: #8b949e;">MD5</span><span class="mono">${escapeHtml(e.fileinfo?.md5 || '')}</span>`;
+                html += `<span style="color: #8b949e;">SHA1</span><span class="mono">${escapeHtml(e.fileinfo?.sha1 || '')}</span>`;
+                html += `<span style="color: #8b949e;">SHA256</span><span class="mono">${escapeHtml(e.fileinfo?.sha256 || '')}</span>`;
+                html += `<span style="color: #8b949e;">Size</span><span>${escapeHtml(String((e.fileinfo?.size || 0).toLocaleString()))} bytes</span>`;
             }
             
             if (e.event_type === 'stats') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #9e9e9e;">Stats Details</span>`;
                 if (e.stats?.capture) {
-                    html += `<span style="color: #8b949e;">Kernel Packets</span><span>${(e.stats.capture.kernel_packets || 0).toLocaleString()}</span>`;
-                    html += `<span style="color: #8b949e;">Kernel Drops</span><span>${(e.stats.capture.kernel_drops || 0).toLocaleString()}</span>`;
+                    html += `<span style="color: #8b949e;">Kernel Packets</span><span>${escapeHtml(String((e.stats.capture.kernel_packets || 0).toLocaleString()))}</span>`;
+                    html += `<span style="color: #8b949e;">Kernel Drops</span><span>${escapeHtml(String((e.stats.capture.kernel_drops || 0).toLocaleString()))}</span>`;
                 }
                 if (e.stats?.detect) {
-                    html += `<span style="color: #8b949e;">Alerts</span><span>${(e.stats.detect.alert || 0).toLocaleString()}</span>`;
+                    html += `<span style="color: #8b949e;">Alerts</span><span>${escapeHtml(String((e.stats.detect.alert || 0).toLocaleString()))}</span>`;
                 }
             }
             
             html += `</div>`;
             
             if (e.src_ip && e.src_port && e.dest_ip && e.dest_port) {
-                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 10px;"><span style="color: #8b949e;">ASCII Transcript</span><button class="stream-btn" onclick="downloadPcap('${e.src_ip}', '${e.src_port}', '${e.dest_ip}', '${e.dest_port}')" style="margin-left: 10px; padding: 4px 10px;">Download PCAP</button></div><div class="ascii-transcript" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0;"></div></div>`;
+                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 10px;"><span style="color: #8b949e;">ASCII Transcript</span><button class="stream-btn" onclick="downloadPcap('${e.src_ip}', '${e.src_port}', '${e.dest_ip}', '${e.dest_port}')" style="margin-left: 10px; padding: 4px 10px;">Download PCAP</button></div><div class="ascii-transcript" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0; white-space: pre-wrap; overflow-wrap: break-word;"></div></div>`;
             }
             
             return html;
         }
         
         function downloadPcap(src, sport, dst, dport) {
-            const md5Param = currentMd5 ? '&md5=' + currentMd5 : '';
-            const url = `/api/download-stream?src=${src}&sport=${sport}&dst=${dst}&dport=${dport}${md5Param}`;
+            const md5Param = currentMd5 ? '&md5=' + encodeURIComponent(currentMd5) : '';
+            const url = `/api/download-stream?src=${encodeURIComponent(src)}&sport=${encodeURIComponent(sport)}&dst=${encodeURIComponent(dst)}&dport=${encodeURIComponent(dport)}${md5Param}`;
             const a = document.createElement('a');
             a.href = url;
             a.download = `stream_${src}_${sport}_to_${dst}_${dport}.pcap`;
@@ -515,6 +550,7 @@
                     previousHtml = analyses.map(a => 
                         `<div style="display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid #30363d;">
                             <a href="?pcap=${a.md5}" onclick="event.preventDefault(); loadAnalysis('${a.md5}');" style="color: #58a6ff; text-decoration: none; flex: 1;">📁 ${a.pcap}</a>
+                            <button onclick="openReanalyzeModal('${a.md5}', '${a.pcap}')" style="background: #30363d; border: none; color: #58a6ff; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px; margin-right: 4px;" title="Re-analyze">🔄</button>
                             <button onclick="openDeleteAnalysis('${a.md5}', '${a.pcap}')" style="background: #30363d; border: none; color: #ff6b6b; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px;" title="Delete">🗑️</button>
                         </div>`
                     ).join('');
@@ -546,10 +582,10 @@
                                 💡 Maximum file size is 1000MB. Processing may take a minute or two depending on the size of the file.
                             </p>
                             <p style="color: #8b949e; font-size: 0.95rem; margin-top: 15px;">
-                                💡 The URL field can automatically handle zipped pcap files including those from <a href="https://www.malware-traffic-analysis.net" target="_blank" style="color: #58a6ff; text-decoration: none;">malware-traffic-analysis.net</a> that are password protected.
+                                💡 The URL field can automatically handle zipped pcap files including those from <a href="https://www.malware-traffic-analysis.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">malware-traffic-analysis.net</a> that are password protected.
                             </p>
                             <p style="color: #8b949e; font-size: 0.95rem; margin-top: 15px;">
-                                💡 If you don't already have a pcap in mind, just click the Go button below and it will automatically download a pcap from <a href="https://www.malware-traffic-analysis.net" target="_blank" style="color: #58a6ff; text-decoration: none;">malware-traffic-analysis.net</a>. There are lots of other fun pcap files to be found at that site!
+                                💡 If you don't already have a pcap in mind, just click the Go button below and it will automatically download a pcap from <a href="https://www.malware-traffic-analysis.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">malware-traffic-analysis.net</a>. There are lots of other fun pcap files to be found at that site!
                             </p>
                         </div>
                     </div>
@@ -572,7 +608,7 @@
                         <div id="previousAnalysesList">${previousHtml}</div>
                     </div>
                     <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; margin-top: 20px;">
-                        <div style="color: #8b949e; font-size: 0.9rem; margin-bottom: 10px; text-align: center;">OhMyPCAP provides basic pcap analysis. Need more advanced functionality?<br>Take a look at the <a href="https://securityonion.net" target="_blank" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion</a> platform available in a free Community Edition!<br>If you need enterprise features, consider upgrading to <a href="https://securityonion.com/pro" target="_blank" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion Pro</a>!</div>
+                        <div style="color: #8b949e; font-size: 0.9rem; margin-bottom: 10px; text-align: center;">OhMyPCAP provides basic pcap analysis. Need more advanced functionality?<br>Take a look at the <a href="https://securityonion.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion</a> platform available in a free Community Edition!<br>If you need enterprise features, consider upgrading to <a href="https://securityonion.com/pro" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion Pro</a>!</div>
                         <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
                             <thead>
                                 <tr style="border-bottom: 1px solid #30363d;">
@@ -712,13 +748,13 @@
                             </tbody>
                         </table>
                         <div style="margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; font-size: 0.85rem;">
-                            <a href="https://securityonion.net" target="_blank" style="color: #58a6ff; text-decoration: none;">Security Onion</a>
+                            <a href="https://securityonion.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">Security Onion</a>
                             <span style="color: #30363d;">|</span>
-                            <a href="http://securityonion.net/docs/about" target="_blank" style="color: #58a6ff; text-decoration: none;">Security Onion Documentation</a>
+                            <a href="http://securityonion.net/docs/about" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">Security Onion Documentation</a>
                             <span style="color: #30363d;">|</span>
-                            <a href="https://securityonion.com/pro" target="_blank" style="color: #58a6ff; text-decoration: none;">Security Onion Pro</a>
+                            <a href="https://securityonion.com/pro" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">Security Onion Pro</a>
                             <span style="color: #30363d;">|</span>
-                            <a href="http://securityonion.net/docs/security-onion-pro" target="_blank" style="color: #58a6ff; text-decoration: none;">Security Onion Pro Documentation</a>
+                            <a href="http://securityonion.net/docs/security-onion-pro" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">Security Onion Pro Documentation</a>
                         </div>
                     </div>
                 </div>
@@ -733,6 +769,41 @@
         
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') closeModal();
+        });
+        
+        // Single delegated listener for advanced toggle (prevents memory leak from repeated loadAnalysis calls)
+        document.addEventListener('change', function(e) {
+            if (e.target && e.target.id === 'advancedToggle') {
+                advancedMode = e.target.checked;
+                const aggContainer = document.getElementById('aggregations');
+                const filterBarContainer = document.getElementById('filterBarContainer');
+                if (aggContainer) {
+                    aggContainer.style.display = advancedMode ? '' : 'none';
+                }
+                
+                if (advancedMode) {
+                    if (filterBarContainer) {
+                        filterBarContainer.innerHTML = '';
+                        filterBarContainer.style.display = 'none';
+                    }
+                    const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+                    if (visibleSection) {
+                        const eventType = visibleSection.id.replace('section-', '');
+                        if (eventType === 'all') {
+                            buildAggregationsSectionAll();
+                        } else {
+                            const events = tabDataCache[eventType] || sections[eventType] || [];
+                            const filtered = getFilteredEvents(visibleSection.id, events, eventType);
+                            buildAggregationsSection(eventType, filtered);
+                        }
+                    }
+                } else {
+                    if (aggContainer) {
+                        aggContainer.innerHTML = '';
+                    }
+                    updateFilterBarVisibility();
+                }
+            }
         });
         
         const typeLabels = {
@@ -797,13 +868,13 @@
                     const colors = { 1: '#ff6b6b', 2: '#ffa726', 3: '#ffca28', 4: '#66bb6a' };
                     const sevColor = colors[sev] || '#8b949e';
                     colSpan = 9;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td>${escapeHtml(sig)}</td><td><span class="badge badge-danger">${cat}</span></td><td><span class="badge" style="background:${sevColor}33;color:${sevColor}">Sev ${sev}</span></td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td>${escapeHtml(sig)}</td><td><span class="badge badge-danger">${escapeHtml(cat)}</span></td><td><span class="badge" style="background:${sevColor}33;color:${sevColor}">Sev ${sev}</span></td></tr>`;
                     break;
                 case 'dns':
                     const rrname = e.dns?.rrname || '';
                     const rrtype = e.dns?.rrtype || '';
                     colSpan = 8;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td class="mono">${rrname}</td><td><span class="badge badge-info">${rrtype}</span></td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td class="mono">${escapeHtml(rrname)}</td><td><span class="badge badge-info">${escapeHtml(rrtype)}</span></td></tr>`;
                     break;
                 case 'http':
                     const method = e.http?.http_method || '';
@@ -813,7 +884,7 @@
                     const streamId = `${srcIp},${srcPort},${dstIp},${dstPort}`;
                     const statusBadge = status && parseInt(status) < 400 ? 'badge-success' : status && parseInt(status) < 500 ? 'badge-warning' : 'badge-danger';
                     colSpan = 10;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td><span class="badge badge-info">${method}</span></td><td class="mono">${url}</td><td><span class="badge ${statusBadge}">${status}</span></td><td>${ua}</td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td><span class="badge badge-info">${escapeHtml(method)}</span></td><td class="mono">${escapeHtml(url)}</td><td><span class="badge ${statusBadge}">${escapeHtml(String(status))}</span></td><td>${escapeHtml(ua)}</td></tr>`;
                     break;
                 case 'tls':
                     const sni = e.tls?.sni || '-';
@@ -822,7 +893,7 @@
                     let issuer = e.tls?.issuerdn || '-';
                     if (issuer && issuer.includes('CN=')) issuer = issuer.split('CN=')[1].split(',')[0];
                     colSpan = 10;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td class="mono">${sni}</td><td><span class="badge badge-info">${version}</span></td><td class="mono">${subject}</td><td class="mono">${issuer.slice(0, 30)}</td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td class="mono">${escapeHtml(sni)}</td><td><span class="badge badge-info">${escapeHtml(version)}</span></td><td class="mono">${escapeHtml(subject)}</td><td class="mono">${escapeHtml(issuer.slice(0, 30))}</td></tr>`;
                     break;
                 case 'flow':
                     const pktsTs = e.flow?.pkts_toserver || 0;
@@ -834,11 +905,11 @@
                     const alertedBadge = alerted ? 'badge-danger' : 'badge-success';
                     const alertedText = alerted ? 'Yes' : 'No';
                     colSpan = 12;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td>${pktsTs.toLocaleString()}</td><td>${pktsTc.toLocaleString()}</td><td>${bytesTs.toLocaleString()}</td><td>${bytesTc.toLocaleString()}</td><td>${state}</td><td><span class="badge ${alertedBadge}">${alertedText}</span></td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td>${escapeHtml(String(pktsTs.toLocaleString()))}</td><td>${escapeHtml(String(pktsTc.toLocaleString()))}</td><td>${escapeHtml(String(bytesTs.toLocaleString()))}</td><td>${escapeHtml(String(bytesTc.toLocaleString()))}</td><td>${escapeHtml(state)}</td><td><span class="badge ${alertedBadge}">${escapeHtml(alertedText)}</span></td></tr>`;
                     break;
                 default:
                     colSpan = 6;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td></tr>`;
             }
             
             return row + `<tr class="detail-row"><td colspan="${colSpan}"><div class="detail-content">${formatted}</div></td></tr>`;
@@ -1211,7 +1282,6 @@
         let currentMd5 = '';
           let currentPcapName = '';
           let currentFilters = {};
-          let currentSectionTypes = {};
           let advancedMode = false;
         
         function applyFilter(sectionId, columnName, value) {
@@ -1289,7 +1359,7 @@
                 const result = await resp.json();
                 
                 if (result.error) {
-                    alert('Error: ' + result.error);
+                    showError(result.error);
                     await showWelcome();
                     return;
                 }
@@ -1309,7 +1379,6 @@
                     sections = {};
                     eventTypes = [];
                     currentFilters = {};
-                    currentSectionTypes = {};
                     tabDataCache = {};
                     document.getElementById('sections').innerHTML = '';
                     document.getElementById('statsGrid').innerHTML = '';
@@ -1379,42 +1448,6 @@
                     document.getElementById('aggregations').style.display = advancedMode ? '' : 'none';
                     updateFilterBarVisibility();
                     
-                    // Attach toggle event listener after checkbox is created
-                    const toggle = document.getElementById('advancedToggle');
-                    if (toggle) {
-                        toggle.addEventListener('change', function() {
-                            advancedMode = this.checked;
-                            const aggContainer = document.getElementById('aggregations');
-                            const filterBarContainer = document.getElementById('filterBarContainer');
-                            if (aggContainer) {
-                                aggContainer.style.display = advancedMode ? '' : 'none';
-                            }
-                            
-                            if (advancedMode) {
-                                if (filterBarContainer) {
-                                    filterBarContainer.innerHTML = '';
-                                    filterBarContainer.style.display = 'none';
-                                }
-                                const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
-                                if (visibleSection) {
-                                    const eventType = visibleSection.id.replace('section-', '');
-                                    if (eventType === 'all') {
-                                        buildAggregationsSectionAll();
-                                    } else {
-                                        const events = tabDataCache[eventType] || sections[eventType] || [];
-                                        const filtered = getFilteredEvents(visibleSection.id, events, eventType);
-                                        buildAggregationsSection(eventType, filtered);
-                                    }
-                                }
-                            } else {
-                                if (aggContainer) {
-                                    aggContainer.innerHTML = '';
-                                }
-                                updateFilterBarVisibility();
-                            }
-                        });
-                    }
-                    
                     buildSections();
                     
                     hideLoading();
@@ -1438,7 +1471,7 @@
             const exampleUrl = 'https://www.malware-traffic-analysis.net/2026/02/03/2026-02-03-GuLoader-for-AgentTesla-style-infection-with-FTP-data-exfil.pcap.zip';
             
             if (!url) {
-                alert('Please enter a URL');
+                showError('Please enter a URL');
                 return;
             }
             
@@ -1462,11 +1495,11 @@
                     urlInput.value = exampleUrl;
                 } else {
                     hideLoading();
-                    alert('Error: ' + (result.error || 'Unknown error'));
+                    showError(result.error || 'Unknown error');
                 }
             } catch(err) {
                 hideLoading();
-                alert('Error: ' + err.message);
+                showError(err.message);
             }
         }
         
@@ -1474,8 +1507,6 @@
             const fileInput = document.getElementById('pcapUpload');
             const file = fileInput.files[0];
             if (!file) return;
-            
-            
             
             const formData = new FormData();
             formData.append('pcap', file);
@@ -1487,6 +1518,13 @@
                 });
                 const result = await resp.json();
                 
+                if (!resp.ok || result.error) {
+                    hideLoading();
+                    showError(result.error || 'Upload failed');
+                    fileInput.value = '';
+                    return;
+                }
+                
                 if (result.status === 'ready') {
                     await loadAnalysis(result.md5);
                 } else if (result.status === 'processing') {
@@ -1495,7 +1533,7 @@
                 }
             } catch(err) {
                 hideLoading();
-                
+                showError(err.message);
             }
             
             fileInput.value = '';
@@ -1523,9 +1561,12 @@
                 }
             }
             
+            hideLoading();
+            showError('Analysis timed out. The PCAP may be very large or Suricata may have encountered an error.');
         }
         
         let pendingDelete = null;
+        let pendingReanalyze = null;
         
         function openDeleteAnalysis(md5, name) {
             pendingDelete = { md5, name };
@@ -1536,6 +1577,15 @@
         function closeDeleteModal() {
             pendingDelete = null;
             document.getElementById('deleteConfirmModal').classList.remove('active');
+        }
+        
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorModal').classList.add('active');
+        }
+        
+        function closeErrorModal() {
+            document.getElementById('errorModal').classList.remove('active');
         }
         
         async function confirmDelete() {
@@ -1551,10 +1601,51 @@
                 if (result.success) {
                     showWelcome();
                 } else {
-                    alert('Error: ' + (result.error || 'Could not delete'));
+                    showError(result.error || 'Could not delete');
                 }
             } catch(err) {
-                alert('Error: ' + err.message);
+                showError(err.message);
+            }
+        }
+        
+        function openReanalyzeModal(md5, name) {
+            pendingReanalyze = { md5, name };
+            document.getElementById('reanalyzeFileName').textContent = name;
+            document.getElementById('reanalyzeConfirmModal').classList.add('active');
+        }
+        
+        function closeReanalyzeModal() {
+            pendingReanalyze = null;
+            document.getElementById('reanalyzeConfirmModal').classList.remove('active');
+        }
+        
+        async function confirmReanalyze() {
+            if (!pendingReanalyze) return;
+            const { md5, name } = pendingReanalyze;
+            pendingReanalyze = null;
+            closeReanalyzeModal();
+            
+            showLoading('Re-analyzing ' + name + '...');
+            try {
+                const resp = await fetch('/api/reanalyze', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({md5: md5})
+                });
+                const result = await resp.json();
+                if (result.error) {
+                    hideLoading();
+                    showError(result.error);
+                    return;
+                }
+                if (result.status === 'processing') {
+                    await checkStatus(md5);
+                } else {
+                    hideLoading();
+                }
+            } catch(err) {
+                hideLoading();
+                showError(err.message);
             }
         }
         
@@ -1583,8 +1674,8 @@
         </script>
     </div>
     <div class="footer">
-        <a href="https://github.com/dougburks/ohmypcap" target="_blank" style="color: #58a6ff; text-decoration: none;">OhMyPCAP 1.0.0</a>
-        <a href="https://securityonion.com" target="_blank" style="color: #58a6ff; text-decoration: none;">&copy; 2026 Security Onion Solutions, LLC</a>
+        <a href="https://github.com/dougburks/ohmypcap" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">OhMyPCAP 1.1.0</a>
+        <a href="https://securityonion.com" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">&copy; 2026 Security Onion Solutions, LLC</a>
     </div>
 </body>
 </html>

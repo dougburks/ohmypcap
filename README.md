@@ -81,6 +81,7 @@ Once you've connected to OhMyPCAP in your browser, here are some of the things y
 1. **Upload a file** — click "Choose File" and select a `.pcap`, `.pcapng`, `.cap`, or `.trace` file (or a `.zip` containing one)
 2. **Load from URL** — paste a URL to a PCAP file and click "Load from URL". Password-protected zips from `malware-traffic-analysis.net` are auto-decrypted using the date-based password format
 3. **Reopen a previous analysis** — previously analyzed PCAPs are listed on the welcome screen
+4. **Re-analyze a previous PCAP** — click the 🔄 button next to any previous PCAP to delete its analysis and re-run Suricata with the latest rules
 
 ### Navigate Results
 
