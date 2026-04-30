@@ -69,10 +69,10 @@
         .agg-row:hover { background: #30363d !important; }
         .agg-table { display: block; margin-bottom: 12px; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #161b22; }
         .agg-table .agg-header { display: flex; width: 100%; justify-content: center; align-items: center; text-align: center; padding: 12px; box-sizing: border-box; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; }
-        .agg-table table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .agg-table table { width: auto; table-layout: auto; border-collapse: collapse; font-size: 0.9rem; }
         .agg-table th { text-align: left; padding: 12px; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .agg-table th:hover { background: #30363d; }
-        .agg-table td { padding: 12px; background: transparent; border-bottom: 1px solid #30363d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .agg-table td { padding: 12px; background: transparent; border-bottom: 1px solid #30363d; }
         .agg-table tr { cursor: pointer; }
         .agg-table tr:hover { background: #21262d; }
         .filter-bar { background: #1c2333; border: 1px solid #58a6ff; border-radius: 8px; padding: 10px 15px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -84,7 +84,8 @@
         .filter-clear-all:hover { background: rgba(255, 107, 107, 0.1); }
         .filtered-row { background: rgba(88, 166, 255, 0.05); }
         .agg-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 0; padding: 0 0 5px; }
-        .agg-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .agg-section { flex: 0 1 auto; margin-bottom: 0; }
+        .agg-cell { overflow-wrap: break-word; word-break: break-word; }
         .footer { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; color: #8b949e; font-size: 0.85rem; border-top: 1px solid #30363d; background: #161b22; z-index: 1000; }
         .advanced-toggle { display: flex; align-items: center; gap: 10px; color: #8b949e; font-size: 0.85rem; }
         .advanced-toggle input[type="checkbox"] { appearance: none; width: 40px; height: 20px; background: #30363d; border-radius: 10px; position: relative; cursor: pointer; outline: none; }

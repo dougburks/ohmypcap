@@ -497,6 +497,29 @@ class TestAggregationTables(unittest.TestCase):
     def test_has_agg_grid_css(self):
         self.assertIn('.agg-grid', HTML_CONTENT)
 
+    def test_has_agg_section_css(self):
+        """agg-section must be a flex item sized to content, not fixed widths."""
+        self.assertIn('.agg-section', HTML_CONTENT)
+        section_match = re.search(r'\.agg-section\s*\{([^}]+)\}', HTML_CONTENT)
+        self.assertIsNotNone(section_match, 'agg-section CSS rule must exist')
+        section_style = section_match.group(1)
+        self.assertIn('flex: 0 1 auto', section_style,
+                      'agg-section must size to content, not force fixed widths')
+        self.assertNotIn('min-width', section_style,
+                         'agg-section must not have fixed min-width')
+        self.assertNotIn('max-width', section_style,
+                         'agg-section must not have fixed max-width')
+
+    def test_agg_table_sized_to_content(self):
+        """agg-table tables must use auto width and layout so columns size to data."""
+        rule_match = re.search(r'\.agg-table table\s*\{([^}]+)\}', HTML_CONTENT)
+        self.assertIsNotNone(rule_match, '.agg-table table CSS rule must exist')
+        rule_style = rule_match.group(1)
+        self.assertIn('width: auto', rule_style,
+                      'agg-table must size to content, not fill container')
+        self.assertIn('table-layout: auto', rule_style,
+                      'agg-table columns must size based on data')
+
     def test_has_agg_table_css(self):
         self.assertIn('.agg-table', HTML_CONTENT)
 
@@ -508,6 +531,30 @@ class TestAggregationTables(unittest.TestCase):
 
     def test_has_agg_cell_css(self):
         self.assertIn('.agg-cell', HTML_CONTENT)
+
+    def test_agg_cell_allows_full_text(self):
+        """agg-cell must show full values without truncation."""
+        cell_match = re.search(r'\.agg-cell\s*\{([^}]+)\}', HTML_CONTENT)
+        self.assertIsNotNone(cell_match, '.agg-cell CSS rule must exist')
+        cell_style = cell_match.group(1)
+        self.assertNotIn('text-overflow: ellipsis', cell_style,
+                         'agg-cell must not truncate with ellipsis')
+        self.assertNotIn('white-space: nowrap', cell_style,
+                         'agg-cell must allow text wrapping')
+        self.assertNotIn('max-width', cell_style,
+                         'agg-cell must not have fixed max-width')
+        self.assertIn('overflow-wrap: break-word', cell_style,
+                      'agg-cell must wrap long words')
+
+    def test_agg_table_td_allows_full_text(self):
+        """agg-table td cells must not force single-line truncation."""
+        td_match = re.search(r'\.agg-table td\s*\{([^}]+)\}', HTML_CONTENT)
+        self.assertIsNotNone(td_match, '.agg-table td CSS rule must exist')
+        td_style = td_match.group(1)
+        self.assertNotIn('text-overflow: ellipsis', td_style,
+                         'agg-table td must not truncate with ellipsis')
+        self.assertNotIn('white-space: nowrap', td_style,
+                         'agg-table td must allow text wrapping')
 
     def test_has_aggregations_container(self):
         self.assertIn('id="aggregations"', HTML_CONTENT)
