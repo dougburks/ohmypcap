@@ -744,10 +744,33 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
                         with zipfile.ZipFile(tmp_zip, 'r') as zip_ref:
                             validate_zip_extraction(zip_ref, tmp_dir)
+                            extracted = False
+                            # Try no password first
                             try:
                                 zip_ref.extractall(tmp_dir)
+                                extracted = True
                             except RuntimeError:
-                                self._send_error(400, 'Password-protected ZIPs are not supported via upload. Please extract the PCAP first.')
+                                pass
+
+                            # Try common passwords for malware-traffic-analysis.net zips
+                            if not extracted:
+                                passwords = [b'infected']
+                                # Try deriving date-based password from filename (e.g., 2026-02-03-...)
+                                date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', safe_filename)
+                                if date_match:
+                                    year, month, day = date_match.groups()
+                                    passwords.append(f'infected_{year}{month}{day}'.encode())
+
+                                for pwd in passwords:
+                                    try:
+                                        zip_ref.extractall(tmp_dir, pwd=pwd)
+                                        extracted = True
+                                        break
+                                    except RuntimeError:
+                                        continue
+
+                            if not extracted:
+                                self._send_error(400, 'Password-protected ZIP could not be opened. Please extract the PCAP first.')
                                 return
 
                         pcap_files = [f for f in os.listdir(tmp_dir) if f.endswith(PCAP_EXTENSIONS)]

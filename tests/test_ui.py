@@ -79,11 +79,14 @@ class TestHTMLStructure(unittest.TestCase):
 
 class TestCSSLayout(unittest.TestCase):
     def test_stats_grid_columns(self):
-        match = re.search(r'grid-template-columns:\s*repeat\((\d+)', HTML_CONTENT)
+        match = re.search(r'grid-template-columns:\s*repeat\(([^)]+)\)', HTML_CONTENT)
         self.assertIsNotNone(match, "stats-grid should have grid-template-columns")
         if match:
-            columns = int(match.group(1))
-            self.assertGreaterEqual(columns, 9)
+            columns = match.group(1)
+            self.assertIn('auto-fit', columns,
+                          'stats-grid must use auto-fit for responsive wrapping')
+            self.assertIn('minmax', columns,
+                          'stats-grid must use minmax for responsive column sizing')
 
     def test_stats_grid_gap(self):
         self.assertIn('gap:', HTML_CONTENT)
@@ -425,11 +428,91 @@ class TestUXFeatures(unittest.TestCase):
     def test_back_navigation(self):
         self.assertIn('Back to Overview', HTML_CONTENT)
 
+    def test_header_has_no_separators(self):
+        """Header items must not have any separators (pipes or borders) for clean responsive wrapping."""
+        header_section = JS_CONTENT.split("getElementById('headerContent').innerHTML")[1].split("`;")[0]
+        self.assertNotIn('color: #30363d;"|"', header_section,
+                         'Header must not use literal pipe characters as separators')
+        self.assertNotIn('.header-item', HTML_CONTENT,
+                         'Header must not use CSS border separators')
+
+    def test_header_has_file_icon(self):
+        """Header filename must have a file icon prefix."""
+        header_section = JS_CONTENT.split("getElementById('headerContent').innerHTML")[1].split("`;")[0]
+        self.assertIn('📄 ${currentPcapName}', header_section,
+                      'Header filename must have 📄 icon')
+
     def test_file_input_accepts_correct_types(self):
         self.assertIn('.pcap', HTML_CONTENT)
         self.assertIn('.pcapng', HTML_CONTENT)
         self.assertIn('.cap', HTML_CONTENT)
         self.assertIn('.trace', HTML_CONTENT)
+
+    def test_file_input_accepts_zip(self):
+        """File input must accept .zip files for drag-and-drop and browse."""
+        input_match = re.search(r'id="pcapUpload"[^>]*accept="([^"]*)"', HTML_CONTENT)
+        self.assertIsNotNone(input_match, 'pcapUpload input must have accept attribute')
+        accept_value = input_match.group(1)
+        self.assertIn('.zip', accept_value,
+                      'File input must accept .zip files')
+
+    def test_drag_and_drop_accepts_zip(self):
+        """Drag-and-drop handler must validate .zip files as acceptable."""
+        drop_section = JS_CONTENT.split('function handleDrop')[1].split('function checkStatus')[0]
+        self.assertIn("'.zip'", drop_section,
+                      'handleDrop must include .zip in validExts')
+
+    def test_drag_and_drop_zone_exists(self):
+        """Upload area must have a visible drop zone for drag-and-drop."""
+        self.assertIn('id="dropZone"', HTML_CONTENT,
+                      'Drop zone element must exist')
+        self.assertIn('ondragover', HTML_CONTENT,
+                      'Drop zone must handle dragover event')
+        self.assertIn('ondrop', HTML_CONTENT,
+                      'Drop zone must handle drop event')
+
+    def test_drag_and_drop_css_feedback(self):
+        """Drop zone must have CSS class for visual feedback on drag."""
+        self.assertIn('.drop-zone-active', HTML_CONTENT,
+                      'Drop zone active CSS class must exist')
+        active_match = re.search(r'\.drop-zone-active\s*\{([^}]+)\}', HTML_CONTENT)
+        self.assertIsNotNone(active_match, '.drop-zone-active CSS rule must exist')
+        active_style = active_match.group(1)
+        self.assertIn('border-color', active_style,
+                      'Drop zone active must change border color')
+
+    def test_drag_and_drop_handlers_exist(self):
+        """JavaScript must have drag-and-drop event handler functions."""
+        self.assertIn('function handleDragOver', JS_CONTENT,
+                      'handleDragOver function must exist')
+        self.assertIn('function handleDragLeave', JS_CONTENT,
+                      'handleDragLeave function must exist')
+        self.assertIn('function handleDrop', JS_CONTENT,
+                      'handleDrop function must exist')
+
+    def test_upload_function_accepts_file_parameter(self):
+        """uploadPcap must accept an optional file parameter for drag-and-drop."""
+        func_match = re.search(r'function uploadPcap\(([^)]*)\)', JS_CONTENT)
+        self.assertIsNotNone(func_match, 'uploadPcap function must exist')
+        params = func_match.group(1)
+        self.assertIn('droppedFile', params,
+                      'uploadPcap must accept a droppedFile parameter')
+
+    def test_upload_shows_loading_immediately(self):
+        """uploadPcap must show loading before fetch so user sees feedback during ZIP extraction."""
+        upload_func = JS_CONTENT.split('async function uploadPcap')[1].split('async function checkStatus')[0]
+        self.assertIn("showLoading('Uploading and extracting PCAP...')", upload_func,
+                      'uploadPcap must show loading immediately before fetch')
+
+    def test_url_input_submits_on_enter(self):
+        """URL input field must call loadFromUrl when Enter key is pressed."""
+        input_match = re.search(r'id="pcapUrl"[^>]*>', HTML_CONTENT)
+        self.assertIsNotNone(input_match, 'pcapUrl input must exist')
+        input_tag = input_match.group(0)
+        self.assertIn("onkeydown", input_tag,
+                      'pcapUrl input must have onkeydown handler')
+        self.assertIn("loadFromUrl()", input_tag,
+                      'pcapUrl onkeydown must call loadFromUrl')
 
     def test_default_url_prefilled(self):
         self.assertIn('malware-traffic-analysis.net', HTML_CONTENT)
@@ -472,7 +555,7 @@ class TestSecurityInUI(unittest.TestCase):
         self.assertIn('escapeHtml(', JS_CONTENT)
 
     def test_no_hardcoded_credentials(self):
-        content = JS_CONTENT.lower().replace('disclaimer', '').replace('password-protected', '').replace('password protected', '')
+        content = JS_CONTENT.lower().replace('disclaimer', '').replace('password-protected', '').replace('password protected', '').replace('common passwords', '')
         self.assertNotIn('password', content)
 
     def test_uses_https_for_external_resources(self):

@@ -434,7 +434,8 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(status, 400)
 
     def test_upload_traversal_filename(self):
-        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x00' * 100
+        # Use unique PCAP content to avoid collision with test_upload_same_pcap_in_different_zips
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x02' * 100
         status, body = self._post_multipart(
             '/api/upload',
             '../../../etc/evil.pcap',
@@ -493,6 +494,27 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(data['status'], 'processing')
         # Verify directory was created using PCAP MD5
         self.assertTrue(os.path.exists(os.path.join(self.tmpdir, expected_md5, 'test.pcap')))
+
+    def test_upload_tries_password_protected_zips(self):
+        """Upload handler code must attempt common passwords before rejecting protected ZIPs."""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        upload_section = content.split("if safe_filename.endswith('.zip'):")[1].split("pcap_files = [")[0]
+        # Should try no password first
+        self.assertIn("extracted = False", upload_section,
+                      'Must track extraction success')
+        self.assertIn("zip_ref.extractall(tmp_dir)", upload_section,
+                      'Must attempt extraction without password')
+        # Should try common passwords
+        self.assertIn("passwords = [b'infected']", upload_section,
+                      'Must try infected password')
+        self.assertIn("for pwd in passwords:", upload_section,
+                      'Must loop over candidate passwords')
+        # Should try date-based password from filename
+        self.assertIn("re.search(r'(\\d{4})-(\\d{2})-(\\d{2})', safe_filename)", upload_section,
+                      'Must derive date-based password from filename')
+        self.assertIn("'infected_{year}{month}{day}'.encode()", upload_section,
+                      'Must construct MTA-style date password')
 
     def test_upload_same_pcap_in_different_zips(self):
         import io
