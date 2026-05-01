@@ -24,8 +24,8 @@ class TestHTMLStructure(unittest.TestCase):
         """Verify script tags are properly closed"""
         self.assertIn('<script>', HTML_CONTENT)
         self.assertIn('</script>', HTML_CONTENT)
-        # Count occurrences
-        open_count = HTML_CONTENT.count('<script>')
+        # Count occurrences (including script tags with src attributes)
+        open_count = HTML_CONTENT.count('<script>') + HTML_CONTENT.count('<script ')
         close_count = HTML_CONTENT.count('</script>')
         self.assertEqual(open_count, close_count, 'Script tags not balanced')
     
@@ -304,8 +304,11 @@ class TestCardOrder(unittest.TestCase):
         """Verify applyFilter builds both section and aggregation when filtering"""
         self.assertIn("buildSection(eventType, sections[eventType])", JS_CONTENT,
                       "applyFilter should call buildSection")
-        self.assertIn("buildAggregationsSection(eventType, getFilteredEvents(", JS_CONTENT,
-                      "applyFilter should call buildAggregationsSection with getFilteredEvents")
+        applyFunc = JS_CONTENT.split('function applyFilter')[1].split('function clearFilter')[0]
+        self.assertIn("buildAggregationsSection(eventType, filtered)", applyFunc,
+                      "applyFilter should call buildAggregationsSection with filtered events")
+        self.assertIn("updateSankeyDiagram(filtered)", applyFunc,
+                      "applyFilter should update Sankey diagram with filtered events")
 
 
 class TestJavaScriptDataStructures(unittest.TestCase):
@@ -514,6 +517,80 @@ class TestUXFeatures(unittest.TestCase):
         self.assertIn("loadFromUrl()", input_tag,
                       'pcapUrl onkeydown must call loadFromUrl')
 
+    def test_diagram_toggle_exists(self):
+        """Analysis header must include a Diagram toggle checkbox."""
+        self.assertIn('id="diagramToggle"', HTML_CONTENT,
+                      'Diagram toggle checkbox must exist')
+        self.assertIn('diagramMode', JS_CONTENT,
+                      'diagramMode variable must exist')
+
+    def test_sankey_panel_exists(self):
+        """Static HTML must include a #sankeyPanel container."""
+        self.assertIn('id="sankeyPanel"', HTML_CONTENT,
+                      'sankeyPanel container must exist')
+
+    def test_d3_library_bundled(self):
+        """D3 and d3-sankey must be loaded from local static files, not CDN."""
+        self.assertIn('static/d3.min.js', HTML_CONTENT,
+                      'D3 must be loaded from local static file')
+        self.assertIn('static/d3-sankey.min.js', HTML_CONTENT,
+                      'd3-sankey must be loaded from local static file')
+        self.assertNotIn('unpkg.com', HTML_CONTENT,
+                         'Must not use external CDN for D3 libraries')
+
+    def test_sankey_functions_exist(self):
+        """JavaScript must define buildSankeyData and renderSankeySVG functions."""
+        self.assertIn('function buildSankeyData(', JS_CONTENT,
+                      'buildSankeyData function must exist')
+        self.assertIn('function renderSankeySVG(', JS_CONTENT,
+                      'renderSankeySVG function must exist')
+        self.assertIn('d3.sankey()', JS_CONTENT,
+                      'renderSankeySVG must use d3.sankey for layout')
+        self.assertIn('d3.sankeyLinkHorizontal()', JS_CONTENT,
+                      'renderSankeySVG must use d3.sankeyLinkHorizontal for links')
+
+    def test_diagram_toggle_listener_exists(self):
+        """Diagram toggle must have a delegated change listener."""
+        self.assertIn("e.target.id === 'diagramToggle'", JS_CONTENT,
+                      'Diagram toggle listener must check diagramToggle id')
+
+    def test_sankey_has_close_button(self):
+        """Sankey diagram panel must include a close button to hide the diagram."""
+        self.assertIn('sankey-close', HTML_CONTENT,
+                      'sankey-close CSS class must exist')
+        self.assertIn("diagramMode = false", JS_CONTENT,
+                      'Sankey close must disable diagramMode')
+        self.assertIn("document.getElementById('diagramToggle').checked = false", JS_CONTENT,
+                      'Sankey close must uncheck diagram toggle')
+
+    def test_sankey_links_clickable(self):
+        """Sankey links must have click handlers to create filters."""
+        self.assertIn(".on('click', function(event, d)", JS_CONTENT,
+                      'Sankey links must have click handler')
+        self.assertIn("applyFilters(visibleSection.id, [", JS_CONTENT,
+                      'Sankey link click must call applyFilters')
+        self.assertIn("getColumnNameFromSankeyColumn(d.source.column)", JS_CONTENT,
+                      'Sankey link must map source column')
+        self.assertIn("getColumnNameFromSankeyColumn(d.target.column)", JS_CONTENT,
+                      'Sankey link must map target column')
+
+    def test_sankey_nodes_clickable(self):
+        """Sankey nodes must have click handlers to create filters."""
+        self.assertIn(".on('click', function(event, d)", JS_CONTENT,
+                      'Sankey nodes must have click handler')
+        self.assertIn("getColumnNameFromSankeyColumn(d.column)", JS_CONTENT,
+                      'Sankey node must map column')
+
+    def test_apply_filters_function_exists(self):
+        """JavaScript must define applyFilters to apply multiple filters at once."""
+        self.assertIn('function applyFilters(', JS_CONTENT,
+                      'applyFilters function must exist')
+
+    def test_get_column_name_helper_exists(self):
+        """JavaScript must define getColumnNameFromSankeyColumn for column mapping."""
+        self.assertIn('function getColumnNameFromSankeyColumn(', JS_CONTENT,
+                      'getColumnNameFromSankeyColumn function must exist')
+
     def test_default_url_prefilled(self):
         self.assertIn('malware-traffic-analysis.net', HTML_CONTENT)
 
@@ -676,6 +753,32 @@ class TestAggregationTables(unittest.TestCase):
     def test_agg_tables_wrap_with_flex(self):
         self.assertIn('flex-wrap: wrap', HTML_CONTENT)
 
+    def test_agg_header_has_close_button(self):
+        """Each aggregation table header must include a close button to hide the table."""
+        self.assertIn('agg-close', HTML_CONTENT,
+                      'agg-close CSS class must exist')
+        self.assertIn("hideAggregationTable('${sectionId}'", JS_CONTENT,
+                      'Aggregation header must call hideAggregationTable')
+
+    def test_hide_aggregation_table_function_exists(self):
+        """JavaScript must define hideAggregationTable to track hidden aggregation tables."""
+        self.assertIn('function hideAggregationTable(', JS_CONTENT,
+                      'hideAggregationTable function must exist')
+        self.assertIn('hiddenAggregations', JS_CONTENT,
+                      'hiddenAggregations variable must exist')
+
+    def test_aggregation_skips_hidden_columns(self):
+        """buildAggregationTables must filter out columns in hiddenAggregations."""
+        self.assertIn("!hiddenAggregations.has(sectionId + ':' + c)", JS_CONTENT,
+                      'buildAggregationTables must skip hidden columns')
+
+    def test_hide_aggregation_table_auto_disables_advanced(self):
+        """Closing the last visible aggregation table must disable Advanced mode."""
+        self.assertIn("advancedMode = false", JS_CONTENT,
+                      'hideAggregationTable must set advancedMode to false when last table hidden')
+        self.assertIn("document.getElementById('advancedToggle').checked = false", JS_CONTENT,
+                      'hideAggregationTable must uncheck Advanced toggle when last table hidden')
+
 
 class TestFiltering(unittest.TestCase):
     def test_has_current_filters_state(self):
@@ -787,7 +890,7 @@ class TestAdvancedToggle(unittest.TestCase):
         self.assertIn('function buildFilterBarHtml', JS_CONTENT)
 
     def test_advanced_toggle_in_header(self):
-        self.assertIn('Advanced', JS_CONTENT)
+        self.assertIn('Aggregation', JS_CONTENT)
         self.assertIn("id=\"advancedToggle\"", JS_CONTENT)
 
 

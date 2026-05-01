@@ -17,7 +17,7 @@
         .stat-card.tab-active { border-color: #58a6ff; background: #21262d; }
         .stat-number { font-size: 2.5rem; font-weight: bold; }
         .stat-label { color: #8b949e; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
-        .section { background: #161b22; border-radius: 12px 12px 0 0; margin-bottom: 20px; border: 1px solid #30363d; overflow: hidden; }
+        .section { background: #161b22; border-radius: 12px; margin-bottom: 20px; border: 1px solid #30363d; overflow: hidden; }
         .section-hidden { display: none; }
         .section-header { background: #21262d; padding: 15px 20px; font-size: 1.1rem; font-weight: 600; color: #f0f6fc; }
         .section-content { padding: 20px; }
@@ -68,7 +68,9 @@
         .agg-row { cursor: pointer; }
         .agg-row:hover { background: #30363d !important; }
         .agg-table { display: block; margin-bottom: 12px; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #161b22; }
-        .agg-table .agg-header { display: flex; width: 100%; justify-content: center; align-items: center; text-align: center; padding: 12px; box-sizing: border-box; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; }
+        .agg-table .agg-header { display: flex; width: 100%; justify-content: space-between; align-items: center; padding: 12px; box-sizing: border-box; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; }
+        .agg-close { background: none; border: none; color: #8b949e; font-size: 1rem; cursor: pointer; line-height: 1; padding: 0 4px; margin-left: 8px; }
+        .agg-close:hover { color: #ff6b6b; }
         .agg-table table { width: auto; table-layout: auto; border-collapse: collapse; font-size: 0.9rem; }
         .agg-table th { text-align: left; padding: 12px; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .agg-table th:hover { background: #30363d; }
@@ -93,7 +95,20 @@
         .advanced-toggle input[type="checkbox"]:checked { background: #58a6ff; }
         .advanced-toggle input[type="checkbox"]:checked::before { left: 22px; background: #fff; }
         .drop-zone-active { border-color: #58a6ff !important; background: #1c2333 !important; }
+        .sankey-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-top: 20px; margin-bottom: 20px; position: relative; }
+        #aggregations { margin-bottom: 20px; }
+        .sankey-close { position: absolute; top: 10px; right: 15px; background: none; border: none; color: #8b949e; font-size: 1.2rem; font-weight: 600; cursor: pointer; line-height: 1; padding: 0; z-index: 10; }
+        .sankey-close:hover { color: #ff6b6b; }
+        .sankey-svg { width: 100%; height: auto; display: block; }
+        .sankey-node rect { fill: #21262d; stroke: #30363d; stroke-width: 1; rx: 4; shape-rendering: crispEdges; }
+        .sankey-link { fill: none; stroke-opacity: 0.35; transition: stroke-opacity 0.2s; cursor: pointer; }
+        .sankey-link:hover { stroke-opacity: 0.7; }
+        .sankey-node rect { fill: #21262d; stroke: #30363d; stroke-width: 1; rx: 4; shape-rendering: crispEdges; cursor: pointer; }
+        .sankey-node text { fill: #c9d1d9; font-size: 10px; font-family: monospace; pointer-events: none; text-shadow: 0 0 3px #0d1117, 0 0 3px #0d1117; }
+        .sankey-title { fill: #8b949e; font-size: 12px; font-weight: 600; text-transform: uppercase; }
     </style>
+    <script src="static/d3.min.js"></script>
+    <script src="static/d3-sankey.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -165,13 +180,14 @@
         <header id="mainHeader" style="display: none;">
             <div id="headerContent" style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;"></div>
             <div id="instructions" style="color: #8b949e; font-size: 0.8rem; margin-top: 8px;">
-                <span style="color: #58a6ff;">💡</span> Start by reviewing security alerts. Drill into one of the rows to see the ASCII transcript and optionally download the PCAP file for that stream. Once you've reviewed the security alerts, then you can change to one of the other data types like DNS, HTTP, or TLS. If you need to see aggregate values or do filtering, click the Advanced toggle in the upper right.
+                <span style="color: #58a6ff;">💡</span> Start by reviewing security alerts and then you can change to one of the other data types like DNS, HTTP, or TLS. When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript and optionally download the PCAP file for that stream.
             </div>
         </header>
         
         <div class="stats-grid" id="statsGrid"></div>
-        <div id="filterBarContainer"></div>
         <div id="aggregations"></div>
+        <div id="filterBarContainer"></div>
+        <div class="sankey-panel" id="sankeyPanel" style="display: none;"></div>
         <div id="sections"></div>
         
         <div id="inputBoxes" style="display: none; padding: 20px;"></div>
@@ -224,6 +240,7 @@
                 if (sectionEl) buildAllEvents();
                 if (sectionEl && advancedMode) buildAggregationsSectionAll();
                 if (!advancedMode) updateFilterBarVisibility();
+                updateSankeyDiagram(allEvents);
                 return;
             }
             
@@ -237,6 +254,7 @@
                     buildSection(eventType, tabDataCache[eventType]);
                     updateFilterBarVisibility();
                 }
+                updateSankeyDiagram(tabDataCache[eventType]);
                 return;
             }
             
@@ -254,6 +272,7 @@
                 }
                 if (sectionEl) buildSection(eventType, events);
                 if (!advancedMode) updateFilterBarVisibility();
+                updateSankeyDiagram(events);
             } catch(e) {
                 console.error('Failed to load tab data:', e);
                 if (sectionEl) {
@@ -539,6 +558,8 @@
             }
             document.getElementById('mainHeader').style.display = 'none';
             document.getElementById('statsGrid').innerHTML = '';
+            document.getElementById('sankeyPanel').style.display = 'none';
+            document.getElementById('sankeyPanel').innerHTML = '';
             document.getElementById('aggregations').innerHTML = '';
             document.getElementById('sections').innerHTML = '';
             document.getElementById('inputBoxes').style.display = 'block';
@@ -590,15 +611,12 @@
                     </div>
                     <div style="display: flex; flex-direction: column; gap: 20px; margin-bottom: 20px;">
                         <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; width: 100%; box-sizing: border-box;">
-                            <div style="color: #8b949e; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 15px; font-weight: 600;">⬇️ Download PCAP from URL</div>
-                            <div style="display: flex; gap: 8px;">
+                            <div style="color: #8b949e; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 15px; font-weight: 600;">⬇️ Import pcap from URL or local filesystem</div>
+                            <div style="display: flex; gap: 8px; margin-bottom: 15px;">
                                 <input type="text" id="pcapUrl" value="https://www.malware-traffic-analysis.net/2026/02/03/2026-02-03-GuLoader-for-AgentTesla-style-infection-with-FTP-data-exfil.pcap.zip" onfocus="this.value=''" onkeydown="if(event.key==='Enter')loadFromUrl()" style="background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 8px 12px; border-radius: 4px; font-size: 0.95rem; flex: 1;">
                                 <button onclick="loadFromUrl()" style="background: #58a6ff; color: #0d1117; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.95rem; border: none;">Go</button>
                             </div>
-                        </div>
-                        <div style="text-align: center; color: #8b949e; font-size: 0.9rem; font-weight: 600; text-transform: uppercase;">— OR —</div>
-                        <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; width: 100%; box-sizing: border-box;">
-                            <div style="color: #8b949e; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 15px; font-weight: 600;">📤 Upload local PCAP file</div>
+                            <div style="text-align: center; color: #8b949e; font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 15px;">— OR —</div>
                             <input type="file" id="pcapUpload" accept=".pcap,.pcapng,.cap,.trace,.zip" onchange="uploadPcap()" style="display: none;">
                             <div id="dropZone" style="background: #0d1117; color: #58a6ff; padding: 20px; border-radius: 4px; cursor: pointer; font-size: 0.95rem; border: 2px dashed #30363d; text-align: center; transition: border-color 0.2s, background 0.2s;"
                                  ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)"
@@ -787,6 +805,7 @@
                 }
                 
                 if (advancedMode) {
+                    hiddenAggregations = new Set();
                     if (filterBarContainer) {
                         filterBarContainer.innerHTML = '';
                         filterBarContainer.style.display = 'none';
@@ -807,6 +826,25 @@
                         aggContainer.innerHTML = '';
                     }
                     updateFilterBarVisibility();
+                }
+            }
+            if (e.target && e.target.id === 'diagramToggle') {
+                diagramMode = e.target.checked;
+                const sankeyPanel = document.getElementById('sankeyPanel');
+                if (sankeyPanel) {
+                    sankeyPanel.style.display = diagramMode ? '' : 'none';
+                    if (diagramMode) {
+                        const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+                        if (visibleSection) {
+                            const eventType = visibleSection.id.replace('section-', '');
+                            if (eventType === 'all') {
+                                updateSankeyDiagram(allEvents);
+                            } else {
+                                const events = tabDataCache[eventType] || sections[eventType] || [];
+                                updateSankeyDiagram(events);
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -834,7 +872,222 @@
             stats: '#9e9e9e',
             tls: '#58a6ff'
         };
-        
+
+        function buildSankeyData(events) {
+            const nodeMap = new Map();
+            const linkMap = new Map();
+
+            function getNodeId(name, column) {
+                return column + ':' + name;
+            }
+
+            function addNode(name, column) {
+                const id = getNodeId(name, column);
+                if (!nodeMap.has(id)) {
+                    nodeMap.set(id, { id: id, name: name, column: column });
+                }
+                return id;
+            }
+
+            function addLink(sourceId, targetId) {
+                const key = sourceId + '->' + targetId;
+                if (!linkMap.has(key)) {
+                    linkMap.set(key, { source: sourceId, target: targetId, value: 0 });
+                }
+                linkMap.get(key).value += 1;
+            }
+
+            for (const e of events) {
+                if (!e || e.event_type === 'stats') continue;
+                const src = e.src_ip || '?';
+                const dst = e.dest_ip || '?';
+                const port = String(e.dest_port || '?');
+                const srcId = addNode(src, 0);
+                const dstId = addNode(dst, 1);
+                const portId = addNode(port, 2);
+                addLink(srcId, dstId);
+                addLink(dstId, portId);
+            }
+
+            function capColumn(columnIndex, limit) {
+                const columnNodes = Array.from(nodeMap.values()).filter(n => n.column === columnIndex);
+                if (columnNodes.length <= limit) return;
+                columnNodes.sort((a, b) => {
+                    const av = Array.from(linkMap.values()).filter(l => l.source === a.id || l.target === a.id).reduce((s, l) => s + l.value, 0);
+                    const bv = Array.from(linkMap.values()).filter(l => l.source === b.id || l.target === b.id).reduce((s, l) => s + l.value, 0);
+                    return bv - av;
+                });
+                const keepIds = new Set(columnNodes.slice(0, limit).map(n => n.id));
+                const otherId = addNode('Other', columnIndex);
+
+                for (const node of columnNodes.slice(limit)) {
+                    nodeMap.delete(node.id);
+                }
+
+                const newLinks = new Map();
+                for (const [key, link] of linkMap) {
+                    const s = link.source;
+                    const t = link.target;
+                    const sExists = nodeMap.has(s);
+                    const tExists = nodeMap.has(t);
+                    if (sExists && tExists) {
+                        newLinks.set(key, link);
+                    } else if (!sExists && tExists) {
+                        const newKey = otherId + '->' + t;
+                        const existing = newLinks.get(newKey);
+                        if (existing) { existing.value += link.value; }
+                        else { newLinks.set(newKey, { source: otherId, target: t, value: link.value }); }
+                    } else if (sExists && !tExists) {
+                        const newKey = s + '->' + otherId;
+                        const existing = newLinks.get(newKey);
+                        if (existing) { existing.value += link.value; }
+                        else { newLinks.set(newKey, { source: s, target: otherId, value: link.value }); }
+                    }
+                }
+                linkMap.clear();
+                for (const [k, v] of newLinks) { linkMap.set(k, v); }
+            }
+
+            capColumn(0, 50);
+            capColumn(1, 50);
+            capColumn(2, 50);
+
+            return { nodes: Array.from(nodeMap.values()), links: Array.from(linkMap.values()) };
+        }
+
+        function renderSankeySVG(data, container) {
+            const width = container.clientWidth || 900;
+            const nodesByCol = [[], [], []];
+            for (const n of data.nodes) { nodesByCol[n.column].push(n); }
+            const maxColNodes = Math.max(nodesByCol[0].length, nodesByCol[1].length, nodesByCol[2].length);
+            const minNodeH = 8;
+            const nodeGap = 4;
+            const height = Math.max(400, maxColNodes * (minNodeH + nodeGap) + 60);
+            container.innerHTML = '';
+
+            if (!data.nodes.length) return;
+
+            const svg = d3.select(container).append('svg')
+                .attr('class', 'sankey-svg')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('viewBox', [0, 0, width, height]);
+
+            const nodeIndex = new Map();
+            data.nodes.forEach((n, i) => nodeIndex.set(n.id, i));
+
+            const graph = {
+                nodes: data.nodes.map(n => ({ name: n.name, column: n.column })),
+                links: data.links.map(l => ({
+                    source: nodeIndex.get(l.source),
+                    target: nodeIndex.get(l.target),
+                    value: l.value
+                }))
+            };
+
+            const sankey = d3.sankey()
+                .nodeWidth(18)
+                .nodePadding(nodeGap)
+                .extent([[30, 35], [width - 30, height - 10]]);
+
+            let { nodes, links } = sankey(graph);
+
+            function ipToColor(ip) {
+                let hash = 0;
+                for (let i = 0; i < ip.length; i++) { hash = ((hash << 5) - hash) + ip.charCodeAt(i); }
+                return 'hsl(' + (Math.abs(hash) % 360) + ', 70%, 60%)';
+            }
+
+            const linkGroup = svg.append('g');
+            linkGroup.selectAll('path')
+                .data(links)
+                .join('path')
+                .attr('class', 'sankey-link')
+                .attr('d', d3.sankeyLinkHorizontal())
+                .attr('stroke', d => ipToColor(d.source.name))
+                .attr('stroke-width', d => Math.max(d.width, 1))
+                .on('click', function(event, d) {
+                    const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+                    if (!visibleSection) return;
+                    applyFilters(visibleSection.id, [
+                        {column: getColumnNameFromSankeyColumn(d.source.column), value: d.source.name},
+                        {column: getColumnNameFromSankeyColumn(d.target.column), value: d.target.name}
+                    ]);
+                })
+                .append('title')
+                .text(d => d.source.name + ' \u2192 ' + d.target.name + ' (' + d.value + ')');
+
+            const nodeGroup = svg.append('g')
+                .selectAll('g')
+                .data(nodes)
+                .join('g')
+                .attr('class', 'sankey-node')
+                .attr('transform', d => 'translate(' + d.x0 + ',' + d.y0 + ')');
+
+            nodeGroup.append('rect')
+                .attr('height', d => d.y1 - d.y0)
+                .attr('width', d => d.x1 - d.x0)
+                .on('click', function(event, d) {
+                    const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+                    if (!visibleSection) return;
+                    applyFilters(visibleSection.id, [
+                        {column: getColumnNameFromSankeyColumn(d.column), value: d.name}
+                    ]);
+                })
+                .append('title')
+                .text(d => d.name + ' (' + d.value + ')');
+
+            nodeGroup.append('text')
+                .attr('x', d => d.x0 < width / 2 ? (d.x1 - d.x0) + 5 : -5)
+                .attr('y', d => (d.y1 - d.y0) / 2)
+                .attr('dy', '0.35em')
+                .attr('text-anchor', d => d.x0 < width / 2 ? 'start' : 'end')
+                .style('opacity', d => (d.y1 - d.y0) >= minNodeH ? 1 : 0)
+                .text(d => {
+                    const label = d.name + ' (' + d.value + ')';
+                    return label.length > 24 ? d.name.slice(0, 21) + '\u2026 (' + d.value + ')' : label;
+                });
+
+            const colLabels = ['Source IP', 'Dest IP', 'Dest Port'];
+            const colCenters = [0, 1, 2].map(i => {
+                const colNodes = nodes.filter(n => n.column === i);
+                if (!colNodes.length) return width * (i + 0.5) / 3;
+                return d3.mean(colNodes, n => (n.x0 + n.x1) / 2);
+            });
+
+            svg.append('g')
+                .selectAll('text')
+                .data(colLabels)
+                .join('text')
+                .attr('class', 'sankey-title')
+                .attr('x', (d, i) => colCenters[i])
+                .attr('y', 20)
+                .attr('text-anchor', 'middle')
+                .text(d => d);
+        }
+
+        function updateSankeyDiagram(events) {
+            const sankeyPanel = document.getElementById('sankeyPanel');
+            if (!sankeyPanel || !diagramMode) return;
+            sankeyPanel.innerHTML = '';
+            if (!events || events.length === 0) return;
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'sankey-close';
+            closeBtn.innerHTML = '&times;';
+            closeBtn.title = 'Hide diagram';
+            closeBtn.onclick = function() {
+                diagramMode = false;
+                document.getElementById('diagramToggle').checked = false;
+                sankeyPanel.style.display = 'none';
+                sankeyPanel.innerHTML = '';
+            };
+            sankeyPanel.appendChild(closeBtn);
+            const svgContainer = document.createElement('div');
+            sankeyPanel.appendChild(svgContainer);
+            const data = buildSankeyData(events);
+            renderSankeySVG(data, svgContainer);
+        }
+
         function getColumnsForType(eventType) {
             switch(eventType) {
                 case 'alert':
@@ -1168,7 +1421,8 @@
             if (!events || events.length === 0) return '';
             
             const excludeCols = ['Time'];
-            const aggCols = columns.filter(c => !excludeCols.includes(c));
+            const sectionId = 'section-all';
+            const aggCols = columns.filter(c => !excludeCols.includes(c) && !hiddenAggregations.has(sectionId + ':' + c));
             
             let html = '<div class="agg-grid">';
             
@@ -1185,7 +1439,7 @@
                 const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
                 
                 html += `<div class="section agg-section" data-col="${col}"><div class="section-content"><div class="agg-table">
-                    <div class="agg-header">${col}</div>
+                    <div class="agg-header"><span>${col}</span><button class="agg-close" onclick="hideAggregationTable('${sectionId}', '${col.replace(/'/g, "\\'")}')" title="Hide">&times;</button></div>
                     <table>
                         <thead><tr><th style="width:60px;text-align:right;">Count</th><th>Value</th></tr></thead>
                         <tbody>`;
@@ -1242,7 +1496,8 @@
             
             const columns = getColumnsForType(eventType);
             const excludeCols = ['Time'];
-            const aggCols = columns.filter(c => !excludeCols.includes(c));
+            const sectionId = 'section-' + eventType;
+            const aggCols = columns.filter(c => !excludeCols.includes(c) && !hiddenAggregations.has(sectionId + ':' + c));
             
             let html = '<div class="agg-grid">';
             
@@ -1259,7 +1514,7 @@
                 const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
                 
                 html += `<div class="section agg-section" data-col="${col}"><div class="section-content"><div class="agg-table">
-                    <div class="agg-header">${col}</div>
+                    <div class="agg-header"><span>${col}</span><button class="agg-close" onclick="hideAggregationTable('${sectionId}', '${col.replace(/'/g, "\\'")}')" title="Hide">&times;</button></div>
                     <table>
                         <thead><tr><th style="width:60px;text-align:right;">Count</th><th>Value</th></tr></thead>
                         <tbody>`;
@@ -1288,21 +1543,67 @@
           let currentPcapName = '';
           let currentFilters = {};
           let advancedMode = false;
-        
+          let diagramMode = true;
+          let hiddenAggregations = new Set();
+
+        function hideAggregationTable(sectionId, col) {
+            hiddenAggregations.add(sectionId + ':' + col);
+            document.querySelectorAll(`.agg-section[data-col="${col}"]`).forEach(el => {
+                el.style.display = 'none';
+            });
+            const anyVisible = document.querySelectorAll('.agg-section:not([style*="display: none"])').length > 0;
+            if (!anyVisible) {
+                advancedMode = false;
+                document.getElementById('advancedToggle').checked = false;
+                const aggContainer = document.getElementById('aggregations');
+                if (aggContainer) {
+                    aggContainer.style.display = 'none';
+                    aggContainer.innerHTML = '';
+                }
+                updateFilterBarVisibility();
+            }
+        }
+
+        function getColumnNameFromSankeyColumn(col) {
+            return ['Source IP', 'Dest IP', 'Dest Port'][col] || '';
+        }
+
+        function applyFilters(sectionId, filters) {
+            for (const f of filters) {
+                currentFilters[f.column] = f.value;
+            }
+            updateFilterBarVisibility();
+            const eventType = sectionId.replace('section-', '');
+            if (eventType === 'all') {
+                const filtered = getFilteredEvents(sectionId, allEvents, eventType);
+                buildAllEvents();
+                buildAggregationsSectionAll();
+                updateSankeyDiagram(filtered);
+            } else {
+                buildSection(eventType, sections[eventType]);
+                const filtered = getFilteredEvents(sectionId, sections[eventType], eventType);
+                buildAggregationsSection(eventType, filtered);
+                updateSankeyDiagram(filtered);
+            }
+        }
+
         function applyFilter(sectionId, columnName, value) {
             currentFilters[columnName] = value;
             updateFilterBarVisibility();
             const eventType = sectionId.replace('section-', '');
             if (eventType === 'all') {
+                const filtered = getFilteredEvents(sectionId, allEvents, eventType);
                 buildAllEvents();
                 buildAggregationsSectionAll();
+                updateSankeyDiagram(filtered);
             } else {
                 buildSection(eventType, sections[eventType]);
                 const filtered = getFilteredEvents(sectionId, sections[eventType], eventType);
                 buildAggregationsSection(eventType, filtered);
+                updateSankeyDiagram(filtered);
             }
         }
-        
+
         function clearFilter(columnName) {
             delete currentFilters[columnName];
             updateFilterBarVisibility();
@@ -1310,14 +1611,18 @@
             if (!visibleSection) return;
             const eventType = visibleSection.id.replace('section-', '');
             if (eventType === 'all') {
+                const filtered = getFilteredEvents(visibleSection.id, allEvents, eventType);
                 buildAllEvents();
                 buildAggregationsSectionAll();
+                updateSankeyDiagram(filtered);
             } else {
                 buildSection(eventType, sections[eventType]);
-                buildAggregationsSection(eventType, getFilteredEvents(visibleSection.id, sections[eventType], eventType));
+                const filtered = getFilteredEvents(visibleSection.id, sections[eventType], eventType);
+                buildAggregationsSection(eventType, filtered);
+                updateSankeyDiagram(filtered);
             }
         }
-        
+
         function clearAllFilters() {
             currentFilters = {};
             updateFilterBarVisibility();
@@ -1327,9 +1632,12 @@
             if (eventType === 'all') {
                 buildAllEvents();
                 buildAggregationsSectionAll();
+                updateSankeyDiagram(allEvents);
             } else {
                 buildSection(eventType, sections[eventType]);
-                buildAggregationsSection(eventType, getFilteredEvents(visibleSection.id, sections[eventType], eventType));
+                const filtered = getFilteredEvents(visibleSection.id, sections[eventType], eventType);
+                buildAggregationsSection(eventType, filtered);
+                updateSankeyDiagram(filtered);
             }
         }
         
@@ -1384,9 +1692,12 @@
                     sections = {};
                     eventTypes = [];
                     currentFilters = {};
+                    hiddenAggregations = new Set();
                     tabDataCache = {};
                     document.getElementById('sections').innerHTML = '';
                     document.getElementById('statsGrid').innerHTML = '';
+                    document.getElementById('sankeyPanel').innerHTML = '';
+                    document.getElementById('sankeyPanel').style.display = 'none';
                     document.getElementById('inputBoxes').style.display = 'none';
                     
                     showLoading('Loading events...');
@@ -1440,7 +1751,11 @@
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📅 ${ts[0]?.slice(0, 19) || ''} to ${ts[ts.length-1]?.slice(0, 19) || ''}</span>
                                 <label class="advanced-toggle" style="margin-left: auto;">
                                     <input type="checkbox" id="advancedToggle" ${advancedMode ? 'checked' : ''}>
-                                    <span>Advanced</span>
+                                    <span>Aggregation</span>
+                                </label>
+                                <label class="advanced-toggle" style="margin-left: 15px;">
+                                    <input type="checkbox" id="diagramToggle" ${diagramMode ? 'checked' : ''}>
+                                    <span>Diagram</span>
                                 </label>
                             </div>
                         </div>
@@ -1450,6 +1765,12 @@
                     updateFilterBarVisibility();
                     
                     buildSections();
+                    
+                    const sankeyPanel = document.getElementById('sankeyPanel');
+                    if (sankeyPanel) {
+                        sankeyPanel.style.display = diagramMode ? '' : 'none';
+                        updateSankeyDiagram(allEvents);
+                    }
                     
                     hideLoading();
                     

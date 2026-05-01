@@ -90,10 +90,11 @@ Welcome Screen (no PCAP loaded)
   └── Previous analyses list
 
 Analysis View (PCAP loaded)
-  ├── Header (back button, name, date range, Advanced toggle)
+  ├── Header (back button, name, date range, Aggregation toggle, Diagram toggle)
   ├── Stats Grid (clickable event-type cards)
   ├── Filter Bar (non-advanced mode)
   ├── Aggregations (advanced mode)
+  ├── Sankey Diagram (diagram mode — Source IP → Dest IP → Dest Port)
   └── Data Sections (tabbed tables)
 ```
 

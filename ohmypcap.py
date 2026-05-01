@@ -724,7 +724,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                 break
 
             if not file_data:
-                self._send_error(400, 'No valid file')
+                self._send_error(400, 'Invalid file')
                 return
 
             if not validate_pcap_content(file_data):

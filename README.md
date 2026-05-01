@@ -88,13 +88,14 @@ Once you've connected to OhMyPCAP in your browser, here are some of the things y
 After Suricata finishes processing, the UI displays:
 
 - **Stats Grid** — clickable cards showing event counts by type (Alerts, DNS, HTTP, TLS, Flows, etc.)
+- **Sankey Diagram** — toggle the "Diagram" switch to visualize network flow relationships (Source IP → Dest IP → Dest Port)
 - **Data Tables** — sortable tables with expandable detail rows showing full event JSON and ASCII transcripts
-- **Aggregation Tables** — (Advanced mode) frequency counts for each column; click a value to filter
-- **Filtering** — apply filters by clicking aggregation values; filter chips show active filters; filters persist across all tabs
+- **Aggregation Tables** — (Aggregation mode) frequency counts for each column; click a value to filter
+- **Filtering** — apply filters by clicking aggregation values; filter chips show active filters; filters persist across all tabs and the Sankey diagram
 
-### Advanced Mode
+### Aggregation Mode
 
-Toggle the "Advanced" switch in the upper right to enable:
+Toggle the "Aggregation" switch in the upper right to enable:
 - Aggregation tables showing top-10 values per column
 - Inline filter bar with filter chips
 - Cross-tab filter persistence
@@ -179,13 +180,15 @@ Suricata config is auto-generated from `/etc/suricata/` on first run. Rules are 
 - Zip-slip prevention on archive extraction
 - Generic error messages (no internal details leaked)
 
-## Architecture
+## Development
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a detailed overview of how the pieces fit together.
 
 See [docs/API.md](docs/API.md) for the full API reference.
 
 See [docs/FILTERING.md](docs/FILTERING.md) for details on the filtering system.
+
+See [docs/AGENTS.md](docs/AGENTS.md) for agent-focused guidance on maintaining OhMyPCAP, including updating vendored dependencies.
 
 ## Testing
 
