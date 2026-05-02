@@ -52,6 +52,13 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 PCAP_EXTENSIONS = ('.pcap', '.pcapng', '.cap', '.trace')
 
+def has_internet_access():
+    try:
+        socket.create_connection(("rules.emergingthreats.net", 80), timeout=5)
+        return True
+    except OSError:
+        return False
+
 def setup_suricata_config():
     os.makedirs(SURICATA_DIR, exist_ok=True)
     os.makedirs(SURICATA_RULES_DIR, exist_ok=True)
@@ -97,20 +104,30 @@ def setup_suricata_config():
         with open(disable_conf, 'w') as f:
             f.write('re:classtype:protocol-command-decode\n')
     
-    # Check if rules need to be downloaded
+    # Determine whether to update rules or use baked-in rules
     rules_exist = os.path.exists(os.path.join(SURICATA_RULES_DIR, 'suricata.rules'))
-    if not rules_exist:
-        print(f"Downloading Suricata rules... (this may take a moment)")
-    
-    try:
-        subprocess.run(
-            ['suricata-update', '--no-test', '-c', suricata_config, '--data-dir', SURICATA_DIR, '--disable-conf', disable_conf, '--output', SURICATA_RULES_DIR],
-            timeout=60
-        )
-        if not rules_exist:
-            print(f"Suricata rules downloaded successfully")
-    except Exception as e:
-        print(f'suricata-update warning: {e}')
+    baked_in_rules_dir = '/usr/share/suricata/rules'
+    baked_in_rules_exist = os.path.isdir(baked_in_rules_dir) and os.path.exists(os.path.join(baked_in_rules_dir, 'suricata.rules'))
+
+    if has_internet_access():
+        print("Internet access detected — updating Suricata rules...")
+        try:
+            subprocess.run(
+                ['suricata-update', '--no-test', '-c', suricata_config, '--data-dir', SURICATA_DIR, '--disable-conf', disable_conf, '--output', SURICATA_RULES_DIR],
+                timeout=60
+            )
+            print("Suricata rules updated successfully")
+        except Exception as e:
+            print(f'suricata-update warning: {e}')
+    elif baked_in_rules_exist:
+        print("No internet access detected — using baked-in Suricata rules")
+        try:
+            shutil.copytree(baked_in_rules_dir, SURICATA_RULES_DIR, dirs_exist_ok=True)
+            print("Baked-in rules copied successfully")
+        except Exception as e:
+            print(f'Warning: could not copy baked-in rules: {e}')
+    else:
+        print("Warning: no baked-in rules found and no internet access — Suricata may not have rules to use")
 
 def is_private_ip(ip_str):
     try:

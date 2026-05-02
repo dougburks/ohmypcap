@@ -518,9 +518,9 @@ class TestUXFeatures(unittest.TestCase):
                       'pcapUrl onkeydown must call loadFromUrl')
 
     def test_diagram_toggle_exists(self):
-        """Analysis header must include a Diagram toggle checkbox."""
-        self.assertIn('id="diagramToggle"', HTML_CONTENT,
-                      'Diagram toggle checkbox must exist')
+        """Sankey panel must include a collapsible heading bar."""
+        self.assertIn('toggleDiagram()', JS_CONTENT,
+                      'toggleDiagram function must be referenced in heading bar')
         self.assertIn('diagramMode', JS_CONTENT,
                       'diagramMode variable must exist')
 
@@ -550,18 +550,18 @@ class TestUXFeatures(unittest.TestCase):
                       'renderSankeySVG must use d3.sankeyLinkHorizontal for links')
 
     def test_diagram_toggle_listener_exists(self):
-        """Diagram toggle must have a delegated change listener."""
-        self.assertIn("e.target.id === 'diagramToggle'", JS_CONTENT,
-                      'Diagram toggle listener must check diagramToggle id')
+        """Sankey diagram heading bar must call toggleDiagram when clicked."""
+        self.assertIn("toggleDiagram()", JS_CONTENT,
+                      'Sankey heading bar onclick must call toggleDiagram')
 
     def test_sankey_has_close_button(self):
-        """Sankey diagram panel must include a close button to hide the diagram."""
-        self.assertIn('sankey-close', HTML_CONTENT,
-                      'sankey-close CSS class must exist')
-        self.assertIn("diagramMode = false", JS_CONTENT,
-                      'Sankey close must disable diagramMode')
-        self.assertIn("document.getElementById('diagramToggle').checked = false", JS_CONTENT,
-                      'Sankey close must uncheck diagram toggle')
+        """Sankey diagram panel must include a collapsible heading bar."""
+        self.assertIn('section-toggle-bar', HTML_CONTENT,
+                      'section-toggle-bar CSS class must exist')
+        self.assertIn("diagramMode = !diagramMode", JS_CONTENT,
+                      'toggleDiagram must flip diagramMode state')
+        self.assertIn("toggleDiagram()", JS_CONTENT,
+                      'Sankey heading must call toggleDiagram')
 
     def test_sankey_links_clickable(self):
         """Sankey links must have click handlers to create filters."""
@@ -671,12 +671,12 @@ class TestAggregationTables(unittest.TestCase):
                          'agg-section must not have fixed max-width')
 
     def test_agg_table_sized_to_content(self):
-        """agg-table tables must use auto width and layout so columns size to data."""
+        """agg-table tables must fill container while columns size to data."""
         rule_match = re.search(r'\.agg-table table\s*\{([^}]+)\}', HTML_CONTENT)
         self.assertIsNotNone(rule_match, '.agg-table table CSS rule must exist')
         rule_style = rule_match.group(1)
-        self.assertIn('width: auto', rule_style,
-                      'agg-table must size to content, not fill container')
+        self.assertIn('width: 100%', rule_style,
+                      'agg-table must fill container for consistent header backgrounds')
         self.assertIn('table-layout: auto', rule_style,
                       'agg-table columns must size based on data')
 
@@ -772,12 +772,12 @@ class TestAggregationTables(unittest.TestCase):
         self.assertIn("!hiddenAggregations.has(sectionId + ':' + c)", JS_CONTENT,
                       'buildAggregationTables must skip hidden columns')
 
-    def test_hide_aggregation_table_auto_disables_advanced(self):
-        """Closing the last visible aggregation table must disable Advanced mode."""
+    def test_hide_aggregation_table_auto_collapses_section(self):
+        """Closing the last visible aggregation table must collapse the section."""
         self.assertIn("advancedMode = false", JS_CONTENT,
                       'hideAggregationTable must set advancedMode to false when last table hidden')
-        self.assertIn("document.getElementById('advancedToggle').checked = false", JS_CONTENT,
-                      'hideAggregationTable must uncheck Advanced toggle when last table hidden')
+        self.assertIn("▸ Aggregation Tables", JS_CONTENT,
+                      'hideAggregationTable must render collapsed heading when last table hidden')
 
 
 class TestFiltering(unittest.TestCase):
@@ -851,6 +851,15 @@ class TestFiltering(unittest.TestCase):
         self.assertIn("function getFilteredEvents", JS_CONTENT)
         self.assertIn("eventType === 'all'", JS_CONTENT)
 
+    def test_eventMatchesFilters_uses_extractValue_unconditionally(self):
+        """eventMatchesFilters must call extractValue for all columns, not gated by colIndex.
+        Cross-type metadata (e.g., http.hostname on a fileinfo event) must be matched."""
+        func_body = JS_CONTENT.split('function eventMatchesFilters')[1].split('function computeFilteredStats')[0]
+        self.assertIn("extractValue(event, col, -1)", func_body,
+                      'eventMatchesFilters must call extractValue unconditionally')
+        self.assertNotIn("colIndex >= 0", func_body,
+                         'eventMatchesFilters must not gate extractValue on colIndex')
+
 
 class TestPerformance(unittest.TestCase):
     def test_uses_document_fragment_for_batch_inserts(self):
@@ -874,13 +883,13 @@ class TestAdvancedToggle(unittest.TestCase):
         self.assertIn('.advanced-toggle', HTML_CONTENT)
 
     def test_has_advanced_toggle_input(self):
-        self.assertIn('id="advancedToggle"', HTML_CONTENT)
+        self.assertIn('toggleAggregations()', JS_CONTENT)
 
     def test_has_advanced_mode_js_variable(self):
         self.assertIn('let advancedMode', JS_CONTENT)
 
-    def test_aggregations_hidden_by_default(self):
-        self.assertIn("document.getElementById('aggregations').style.display = advancedMode ? '' : 'none'", JS_CONTENT)
+    def test_aggregations_collapsed_by_default(self):
+        self.assertIn("▸ Aggregation Tables", JS_CONTENT)
 
     def test_filter_bar_container_exists(self):
         self.assertIn('id="filterBarContainer"', HTML_CONTENT)
@@ -890,8 +899,8 @@ class TestAdvancedToggle(unittest.TestCase):
         self.assertIn('function buildFilterBarHtml', JS_CONTENT)
 
     def test_advanced_toggle_in_header(self):
-        self.assertIn('Aggregation', JS_CONTENT)
-        self.assertIn("id=\"advancedToggle\"", JS_CONTENT)
+        self.assertIn('Aggregation Tables', JS_CONTENT)
+        self.assertIn("toggleAggregations()", JS_CONTENT)
 
 
 class TestFilterOnclickQuoting(unittest.TestCase):
@@ -943,34 +952,33 @@ class TestAdvancedModeFilterBar(unittest.TestCase):
     """Regression tests for advanced mode toggle and filter bar persistence."""
 
     def test_loadTabData_calls_updateFilterBarVisibility_for_cached_data(self):
-        """loadTabData must call updateFilterBarVisibility when using cached data in non-advanced mode"""
+        """loadTabData must call updateFilterBarVisibility when using cached data"""
         self.assertIn("updateFilterBarVisibility()", JS_CONTENT)
-        pattern = r"buildSection\(eventType,\s*tabDataCache\[eventType\]\);\s*updateFilterBarVisibility\(\)"
+        pattern = r"buildSection\(eventType,\s*tabDataCache\[eventType\]\);[\s\S]{0,80}updateFilterBarVisibility\(\)"
         self.assertRegex(JS_CONTENT, pattern,
             'loadTabData must call updateFilterBarVisibility after buildSection for cached data')
 
     def test_loadTabData_calls_updateFilterBarVisibility_for_fresh_data(self):
-        """loadTabData must call updateFilterBarVisibility after fetching fresh data in non-advanced mode"""
-        pattern = r"buildSection\(eventType,\s*events\);\s*if\s*\(\s*!advancedMode\s*\)\s*updateFilterBarVisibility\(\)"
+        """loadTabData must call updateFilterBarVisibility after fetching fresh data"""
+        pattern = r"buildSection\(eventType,\s*events\);[\s\S]{0,80}updateFilterBarVisibility\(\)"
         self.assertRegex(JS_CONTENT, pattern,
             'loadTabData must call updateFilterBarVisibility after buildSection for fresh data')
 
     def test_loadTabData_all_events_calls_updateFilterBarVisibility(self):
-        """loadTabData for "all" events must call updateFilterBarVisibility in non-advanced mode"""
-        pattern = r"buildAllEvents\(\);\s*if\s*\(\s*sectionEl\s*&&\s*advancedMode\s*\)\s*buildAggregationsSectionAll\(\);\s*if\s*\(\s*!advancedMode\s*\)\s*updateFilterBarVisibility\(\)"
+        """loadTabData for "all" events must call updateFilterBarVisibility"""
+        pattern = r"buildAllEvents\(\);\s*if\s*\(\s*sectionEl\s*&&\s*advancedMode\s*\)\s*buildAggregationsSectionAll\(\);\s*updateFilterBarVisibility\(\)"
         self.assertRegex(JS_CONTENT, pattern,
-            'loadTabData must call updateFilterBarVisibility for "all" events in non-advanced mode')
+            'loadTabData must call updateFilterBarVisibility for "all" events')
 
     def test_advanced_toggle_clears_filterBarContainer(self):
         """Enabling advanced mode must clear filterBarContainer to prevent duplicate filter bars"""
         self.assertIn("filterBarContainer.innerHTML = ''", JS_CONTENT)
         self.assertIn("filterBarContainer.style.display = 'none'", JS_CONTENT)
 
-    def test_advanced_toggle_clears_aggregations_on_disable(self):
-        """Disabling advanced mode must clear aggregations container to prevent duplicate filter bars"""
-        pattern = r"aggContainer\.innerHTML\s*=\s*''"
-        self.assertRegex(JS_CONTENT, pattern,
-            'Advanced toggle must clear aggregations container when disabling advanced mode')
+    def test_advanced_toggle_collapses_aggregations_on_disable(self):
+        """Collapsing aggregations must render collapsed heading instead of clearing container"""
+        self.assertIn("▸ Aggregation Tables", JS_CONTENT,
+            'Aggregation collapse must render collapsed heading bar')
 
     def test_filters_are_global_not_per_section(self):
         """currentFilters must be a flat object so filters persist across all views"""
@@ -984,10 +992,9 @@ class TestAdvancedModeFilterBar(unittest.TestCase):
         self.assertNotIn("currentFilters[sectionId] || {}", JS_CONTENT)
 
     def test_buildAggregationsSection_uses_global_filters(self):
-        """buildAggregationsSection must use global currentFilters for filter bar"""
-        pattern = r"function buildAggregationsSection[\s\S]{0,500}Object\.keys\(currentFilters\)\.length"
-        self.assertRegex(JS_CONTENT, pattern,
-            'buildAggregationsSection must check Object.keys(currentFilters).length')
+        """buildAggregationsSection must render heading bar and delegate to buildAggregationTables"""
+        self.assertIn('function buildAggregationsSection', JS_CONTENT)
+        self.assertIn('section-toggle-bar', JS_CONTENT)
 
     def test_buildAggregationsSectionAll_uses_global_filters(self):
         """buildAggregationsSectionAll must use global currentFilters for filtering and filter bar"""
@@ -1012,13 +1019,13 @@ class TestAdvancedModeFilterBar(unittest.TestCase):
 
     def test_loadTabData_filters_agg_tables_in_advanced_mode_cached(self):
         """loadTabData must pass filtered events to buildAggregationsSection for cached data in advanced mode"""
-        pattern = r"const filtered = getFilteredEvents\(sectionEl\.id,\s*tabDataCache\[eventType\],\s*eventType\);\s*buildAggregationsSection\(eventType,\s*filtered\)"
+        pattern = r"const filtered = getFilteredEvents\((?:sectionEl\.id|sectionId),\s*tabDataCache\[eventType\],\s*eventType\);[\s\S]{0,120}buildAggregationsSection\(eventType,\s*filtered\)"
         self.assertRegex(JS_CONTENT, pattern,
             'loadTabData must call getFilteredEvents before buildAggregationsSection for cached data in advanced mode')
 
     def test_loadTabData_filters_agg_tables_in_advanced_mode_fresh(self):
         """loadTabData must pass filtered events to buildAggregationsSection for fresh data in advanced mode"""
-        pattern = r"const filtered = getFilteredEvents\(sectionEl\.id,\s*events,\s*eventType\);\s*buildAggregationsSection\(eventType,\s*filtered\)"
+        pattern = r"const filtered = getFilteredEvents\((?:sectionEl\.id|sectionId),\s*events,\s*eventType\);[\s\S]{0,120}buildAggregationsSection\(eventType,\s*filtered\)"
         self.assertRegex(JS_CONTENT, pattern,
             'loadTabData must call getFilteredEvents before buildAggregationsSection for fresh data in advanced mode')
 
@@ -1090,7 +1097,7 @@ class TestXSSPrevention(unittest.TestCase):
                 f'Found unescaped user-controlled field in formatEvent matching: {pattern}')
 
     def test_buildRowForEvent_escapes_user_fields(self):
-        """Table cells for DNS, HTTP, TLS, and Flow must use escapeHtml()."""
+        """Table cells for DNS, HTTP, TLS, Flow, and File Info must use escapeHtml()."""
         func_body = self._get_function_body('buildRowForEvent')
         self.assertIn("escapeHtml(rrname)", func_body, 'DNS rrname must be escaped')
         self.assertIn("escapeHtml(rrtype)", func_body, 'DNS rrtype must be escaped')
@@ -1100,6 +1107,7 @@ class TestXSSPrevention(unittest.TestCase):
         self.assertIn("escapeHtml(subject)", func_body, 'TLS subject must be escaped')
         self.assertIn("escapeHtml(issuer.slice(0, 30))", func_body, 'TLS issuer must be escaped')
         self.assertIn("escapeHtml(state)", func_body, 'Flow state must be escaped')
+        self.assertIn("escapeHtml(filename)", func_body, 'File Info filename must be escaped')
 
     def test_alert_details_shows_rule(self):
         """Alert detail panel must include a Rule row with monospace styling."""
@@ -1246,10 +1254,10 @@ class TestAdvancedToggleNoMemoryLeak(unittest.TestCase):
         self.assertNotIn("addEventListener('change', function()", load_analysis,
                          'loadAnalysis must not attach inline change listeners to avoid memory leaks')
 
-    def test_delegated_listener_exists(self):
-        """A single delegated change listener on document must handle the advanced toggle."""
-        self.assertIn("e.target.id === 'advancedToggle'", JS_CONTENT,
-                      'Must use delegated listener for advanced toggle')
+    def test_toggle_aggregations_function_exists(self):
+        """toggleAggregations function must exist to handle section heading clicks."""
+        self.assertIn("function toggleAggregations()", JS_CONTENT,
+                      'toggleAggregations function must exist')
 
 
 class TestCheckStatusTimeoutFeedback(unittest.TestCase):

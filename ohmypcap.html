@@ -17,7 +17,7 @@
         .stat-card.tab-active { border-color: #58a6ff; background: #21262d; }
         .stat-number { font-size: 2.5rem; font-weight: bold; }
         .stat-label { color: #8b949e; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
-        .section { background: #161b22; border-radius: 12px; margin-bottom: 20px; border: 1px solid #30363d; overflow: hidden; }
+        .section { background: #161b22; overflow: hidden; }
         .section-hidden { display: none; }
         .section-header { background: #21262d; padding: 15px 20px; font-size: 1.1rem; font-weight: 600; color: #f0f6fc; }
         .section-content { padding: 20px; }
@@ -71,13 +71,13 @@
         .agg-table .agg-header { display: flex; width: 100%; justify-content: space-between; align-items: center; padding: 12px; box-sizing: border-box; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; }
         .agg-close { background: none; border: none; color: #8b949e; font-size: 1rem; cursor: pointer; line-height: 1; padding: 0 4px; margin-left: 8px; }
         .agg-close:hover { color: #ff6b6b; }
-        .agg-table table { width: auto; table-layout: auto; border-collapse: collapse; font-size: 0.9rem; }
+        .agg-table table { width: 100%; table-layout: auto; border-collapse: collapse; font-size: 0.9rem; }
         .agg-table th { text-align: left; padding: 12px; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .agg-table th:hover { background: #30363d; }
         .agg-table td { padding: 12px; background: transparent; border-bottom: 1px solid #30363d; }
         .agg-table tr { cursor: pointer; }
         .agg-table tr:hover { background: #21262d; }
-        .filter-bar { background: #1c2333; border: 1px solid #58a6ff; border-radius: 8px; padding: 10px 15px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .filter-bar { background: #1c2333; border: 1px solid #58a6ff; border-radius: 8px; padding: 10px 15px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .filter-label { color: #58a6ff; font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
         .filter-chip { background: #58a6ff; color: #0d1117; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
         .filter-chip-remove { cursor: pointer; font-size: 1rem; line-height: 1; opacity: 0.7; }
@@ -95,8 +95,16 @@
         .advanced-toggle input[type="checkbox"]:checked { background: #58a6ff; }
         .advanced-toggle input[type="checkbox"]:checked::before { left: 22px; background: #fff; }
         .drop-zone-active { border-color: #58a6ff !important; background: #1c2333 !important; }
-        .sankey-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-top: 20px; margin-bottom: 20px; position: relative; }
+        .sankey-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
+        .agg-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
+        .data-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
+        .data-panel-heading { background: #21262d; padding: 12px 20px; color: #8b949e; font-size: 0.85rem; font-weight: 600; user-select: none; border-bottom: 1px solid #30363d; }
+        #mainHeader { margin-bottom: 20px; }
         #aggregations { margin-bottom: 20px; }
+        .section-toggle-bar { background: #21262d; padding: 12px 20px; color: #8b949e; font-size: 0.85rem; font-weight: 600; cursor: pointer; user-select: none; border-bottom: 1px solid #30363d; }
+        .section-toggle-bar:hover { background: #30363d; }
+        .sankey-content { padding: 20px; }
+        .agg-content { padding: 15px 20px 5px; }
         .sankey-close { position: absolute; top: 10px; right: 15px; background: none; border: none; color: #8b949e; font-size: 1.2rem; font-weight: 600; cursor: pointer; line-height: 1; padding: 0; z-index: 10; }
         .sankey-close:hover { color: #ff6b6b; }
         .sankey-svg { width: 100%; height: auto; display: block; }
@@ -179,16 +187,19 @@
         
         <header id="mainHeader" style="display: none;">
             <div id="headerContent" style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;"></div>
-            <div id="instructions" style="color: #8b949e; font-size: 0.8rem; margin-top: 8px;">
+            <div id="instructions" style="color: #8b949e; font-size: 0.8rem; margin-top: 8px; text-align: center;">
                 <span style="color: #58a6ff;">💡</span> Start by reviewing security alerts and then you can change to one of the other data types like DNS, HTTP, or TLS. When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript and optionally download the PCAP file for that stream.
             </div>
         </header>
         
-        <div class="stats-grid" id="statsGrid"></div>
-        <div id="aggregations"></div>
         <div id="filterBarContainer"></div>
+        <div class="stats-grid" id="statsGrid"></div>
         <div class="sankey-panel" id="sankeyPanel" style="display: none;"></div>
-        <div id="sections"></div>
+        <div id="aggregations"></div>
+        <div class="data-panel">
+            <div class="data-panel-heading">Data Table</div>
+            <div id="sections"></div>
+        </div>
         
         <div id="inputBoxes" style="display: none; padding: 20px;"></div>
         
@@ -239,22 +250,23 @@
                 }
                 if (sectionEl) buildAllEvents();
                 if (sectionEl && advancedMode) buildAggregationsSectionAll();
-                if (!advancedMode) updateFilterBarVisibility();
-                updateSankeyDiagram(allEvents);
+                updateFilterBarVisibility();
+                const filtered = getFilteredEvents('section-all', allEvents, 'all');
+                updateSankeyDiagram(filtered);
                 return;
             }
             
             if (tabDataCache[eventType]) {
                 sections[eventType] = tabDataCache[eventType];
+                const filtered = getFilteredEvents(sectionId, tabDataCache[eventType], eventType);
                 if (advancedMode && sectionEl) {
-                    const filtered = getFilteredEvents(sectionEl.id, tabDataCache[eventType], eventType);
                     buildAggregationsSection(eventType, filtered);
                     buildSection(eventType, tabDataCache[eventType]);
                 } else if (sectionEl) {
                     buildSection(eventType, tabDataCache[eventType]);
-                    updateFilterBarVisibility();
                 }
-                updateSankeyDiagram(tabDataCache[eventType]);
+                updateFilterBarVisibility();
+                updateSankeyDiagram(filtered);
                 return;
             }
             
@@ -264,15 +276,15 @@
                 tabDataCache[eventType] = events;
                 
                 sections[eventType] = events;
+                const filtered = getFilteredEvents(sectionId, events, eventType);
                 if (advancedMode) {
                     if (sectionEl) {
-                        const filtered = getFilteredEvents(sectionEl.id, events, eventType);
                         buildAggregationsSection(eventType, filtered);
                     }
                 }
                 if (sectionEl) buildSection(eventType, events);
-                if (!advancedMode) updateFilterBarVisibility();
-                updateSankeyDiagram(events);
+                updateFilterBarVisibility();
+                updateSankeyDiagram(filtered);
             } catch(e) {
                 console.error('Failed to load tab data:', e);
                 if (sectionEl) {
@@ -392,10 +404,10 @@
             if (e.event_type === 'http') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #ffa726;">HTTP Details</span>`;
                 html += `<span style="color: #8b949e;">Method</span><span><span class="badge badge-info">${escapeHtml(e.http?.http_method || '')}</span></span>`;
-                html += `<span style="color: #8b949e;">URL</span><span class="mono">${escapeHtml(e.http?.url || '')}</span>`;
                 html += `<span style="color: #8b949e;">Host</span><span class="mono">${escapeHtml(e.http?.hostname || '')}</span>`;
-                html += `<span style="color: #8b949e;">Status</span><span>${escapeHtml(String(e.http?.status || ''))}</span>`;
+                html += `<span style="color: #8b949e;">URL</span><span class="mono">${escapeHtml(e.http?.url || '')}</span>`;
                 html += `<span style="color: #8b949e;">User Agent</span><span style="word-break: break-all;">${escapeHtml(e.http?.http_user_agent || '')}</span>`;
+                html += `<span style="color: #8b949e;">Status</span><span>${escapeHtml(String(e.http?.status || ''))}</span>`;
                 html += `<span style="color: #8b949e;">Content Type</span><span>${escapeHtml(e.http?.http_content_type || '')}</span>`;
             }
             
@@ -795,59 +807,43 @@
         });
         
         // Single delegated listener for advanced toggle (prevents memory leak from repeated loadAnalysis calls)
-        document.addEventListener('change', function(e) {
-            if (e.target && e.target.id === 'advancedToggle') {
-                advancedMode = e.target.checked;
-                const aggContainer = document.getElementById('aggregations');
-                const filterBarContainer = document.getElementById('filterBarContainer');
-                if (aggContainer) {
-                    aggContainer.style.display = advancedMode ? '' : 'none';
-                }
-                
-                if (advancedMode) {
-                    hiddenAggregations = new Set();
-                    if (filterBarContainer) {
-                        filterBarContainer.innerHTML = '';
-                        filterBarContainer.style.display = 'none';
-                    }
-                    const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
-                    if (visibleSection) {
-                        const eventType = visibleSection.id.replace('section-', '');
-                        if (eventType === 'all') {
-                            buildAggregationsSectionAll();
-                        } else {
-                            const events = tabDataCache[eventType] || sections[eventType] || [];
-                            const filtered = getFilteredEvents(visibleSection.id, events, eventType);
-                            buildAggregationsSection(eventType, filtered);
-                        }
-                    }
+        function toggleDiagram() {
+            diagramMode = !diagramMode;
+            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            if (visibleSection) {
+                const eventType = visibleSection.id.replace('section-', '');
+                if (eventType === 'all') {
+                    const filtered = getFilteredEvents('section-all', allEvents, 'all');
+                    updateSankeyDiagram(filtered);
                 } else {
-                    if (aggContainer) {
-                        aggContainer.innerHTML = '';
-                    }
-                    updateFilterBarVisibility();
+                    const events = tabDataCache[eventType] || sections[eventType] || [];
+                    const filtered = getFilteredEvents(visibleSection.id, events, eventType);
+                    updateSankeyDiagram(filtered);
                 }
             }
-            if (e.target && e.target.id === 'diagramToggle') {
-                diagramMode = e.target.checked;
-                const sankeyPanel = document.getElementById('sankeyPanel');
-                if (sankeyPanel) {
-                    sankeyPanel.style.display = diagramMode ? '' : 'none';
-                    if (diagramMode) {
-                        const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
-                        if (visibleSection) {
-                            const eventType = visibleSection.id.replace('section-', '');
-                            if (eventType === 'all') {
-                                updateSankeyDiagram(allEvents);
-                            } else {
-                                const events = tabDataCache[eventType] || sections[eventType] || [];
-                                updateSankeyDiagram(events);
-                            }
-                        }
-                    }
+        }
+        
+        function toggleAggregations() {
+            advancedMode = !advancedMode;
+            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            if (!visibleSection) return;
+            const eventType = visibleSection.id.replace('section-', '');
+            if (advancedMode) {
+                hiddenAggregations = new Set();
+                if (eventType === 'all') {
+                    buildAggregationsSectionAll();
+                } else {
+                    const events = tabDataCache[eventType] || sections[eventType] || [];
+                    const filtered = getFilteredEvents(visibleSection.id, events, eventType);
+                    buildAggregationsSection(eventType, filtered);
+                }
+            } else {
+                const aggContainer = document.getElementById('aggregations');
+                if (aggContainer) {
+                    aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
                 }
             }
-        });
+        }
         
         const typeLabels = {
             alert: 'Security Alerts',
@@ -1068,22 +1064,19 @@
 
         function updateSankeyDiagram(events) {
             const sankeyPanel = document.getElementById('sankeyPanel');
-            if (!sankeyPanel || !diagramMode) return;
+            if (!sankeyPanel) return;
             sankeyPanel.innerHTML = '';
-            if (!events || events.length === 0) return;
-            const closeBtn = document.createElement('button');
-            closeBtn.className = 'sankey-close';
-            closeBtn.innerHTML = '&times;';
-            closeBtn.title = 'Hide diagram';
-            closeBtn.onclick = function() {
-                diagramMode = false;
-                document.getElementById('diagramToggle').checked = false;
+            if (!diagramMode) {
+                sankeyPanel.innerHTML = '<div class="section-toggle-bar" onclick="toggleDiagram()">▸ Sankey Diagram</div>';
+                return;
+            }
+            if (!events || events.length === 0) {
                 sankeyPanel.style.display = 'none';
-                sankeyPanel.innerHTML = '';
-            };
-            sankeyPanel.appendChild(closeBtn);
-            const svgContainer = document.createElement('div');
-            sankeyPanel.appendChild(svgContainer);
+                return;
+            }
+            sankeyPanel.style.display = '';
+            sankeyPanel.innerHTML = '<div class="section-toggle-bar" onclick="toggleDiagram()">▾ Sankey Diagram</div><div class="sankey-content"></div>';
+            const svgContainer = sankeyPanel.querySelector('.sankey-content');
             const data = buildSankeyData(events);
             renderSankeySVG(data, svgContainer);
         }
@@ -1095,11 +1088,13 @@
                 case 'dns':
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Query', 'Type'];
                 case 'http':
-                    return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Method', 'URL', 'Status', 'User-Agent'];
+                    return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Method', 'Host', 'URL', 'User-Agent', 'Status'];
                 case 'tls':
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'SNI / Host', 'Version', 'Subject', 'Issuer'];
                 case 'flow':
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Pkts →', 'Pkts ←', 'Bytes →', 'Bytes ←', 'State', 'Alerted'];
+                case 'fileinfo':
+                    return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Filename'];
                 default:
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port'];
             }
@@ -1136,13 +1131,14 @@
                     break;
                 case 'http':
                     const method = e.http?.http_method || '';
+                    const host = e.http?.hostname || '';
                     const url = e.http?.url || '';
                     const status = e.http?.status || '';
                     const ua = (e.http?.http_user_agent || '').slice(0, 30);
                     const streamId = `${srcIp},${srcPort},${dstIp},${dstPort}`;
                     const statusBadge = status && parseInt(status) < 400 ? 'badge-success' : status && parseInt(status) < 500 ? 'badge-warning' : 'badge-danger';
-                    colSpan = 10;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td><span class="badge badge-info">${escapeHtml(method)}</span></td><td class="mono">${escapeHtml(url)}</td><td><span class="badge ${statusBadge}">${escapeHtml(String(status))}</span></td><td>${escapeHtml(ua)}</td></tr>`;
+                    colSpan = 11;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td><span class="badge badge-info">${escapeHtml(method)}</span></td><td class="mono">${escapeHtml(host)}</td><td class="mono">${escapeHtml(url)}</td><td>${escapeHtml(ua)}</td><td><span class="badge ${statusBadge}">${escapeHtml(String(status))}</span></td></tr>`;
                     break;
                 case 'tls':
                     const sni = e.tls?.sni || '-';
@@ -1164,6 +1160,11 @@
                     const alertedText = alerted ? 'Yes' : 'No';
                     colSpan = 12;
                     row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td>${escapeHtml(String(pktsTs.toLocaleString()))}</td><td>${escapeHtml(String(pktsTc.toLocaleString()))}</td><td>${escapeHtml(String(bytesTs.toLocaleString()))}</td><td>${escapeHtml(String(bytesTc.toLocaleString()))}</td><td>${escapeHtml(state)}</td><td><span class="badge ${alertedBadge}">${escapeHtml(alertedText)}</span></td></tr>`;
+                    break;
+                case 'fileinfo':
+                    const filename = e.fileinfo?.filename || '';
+                    colSpan = 7;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td class="mono">${escapeHtml(filename)}</td></tr>`;
                     break;
                 default:
                     colSpan = 6;
@@ -1195,11 +1196,17 @@
             const container = document.getElementById(sectionId);
             if (!container) return;
             
-            let html = '<div class="section-content"><table><thead><tr>';
-            columns.forEach(h => html += `<th>${h}</th>`);
-            html += '</tr></thead><tbody>';
-            rows.forEach(r => html += r);
-            html += '</tbody></table></div>';
+            let html = '<div class="section-content">';
+            if (rows.length === 0 && Object.keys(currentFilters).length > 0) {
+                html += '<div style="padding: 40px; text-align: center; color: #8b949e; font-size: 0.95rem;">🔍 No events match the current filters</div>';
+            } else {
+                html += '<table><thead><tr>';
+                columns.forEach(h => html += `<th>${h}</th>`);
+                html += '</tr></thead><tbody>';
+                rows.forEach(r => html += r);
+                html += '</tbody></table>';
+            }
+            html += '</div>';
             
             try {
                 container.innerHTML = html;
@@ -1213,21 +1220,14 @@
             const aggContainer = document.getElementById('aggregations');
             if (!aggContainer) return;
             
-            const sectionId = `section-${eventType}`;
-            
-            let html = '';
-            
-            if (Object.keys(currentFilters).length > 0) {
-                html += '<div class="filter-bar"><span class="filter-label">🔍 Filtered:</span>';
-                for (const [col, val] of Object.entries(currentFilters)) {
-                    html += `<span class="filter-chip">${col}: ${escapeHtml(val)} <span class="filter-chip-remove" onclick="clearFilter('${col}')">&times;</span></span>`;
-                }
-                html += '<button class="filter-clear-all" onclick="clearAllFilters()">Clear All</button></div>';
+            if (!advancedMode) {
+                aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                return;
             }
             
-            html += buildAggregationTables(events, eventType);
+            const sectionId = `section-${eventType}`;
             
-            aggContainer.innerHTML = html;
+            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + buildAggregationTables(events, eventType) + '</div></div>';
         }
         
         function buildFilterBarHtml() {
@@ -1245,48 +1245,85 @@
             const filterBarContainer = document.getElementById('filterBarContainer');
             if (!filterBarContainer) return;
             
-            if (!advancedMode) {
-                if (Object.keys(currentFilters).length > 0) {
-                    filterBarContainer.innerHTML = buildFilterBarHtml();
-                    filterBarContainer.style.display = 'block';
-                } else {
-                    filterBarContainer.innerHTML = '';
-                    filterBarContainer.style.display = 'none';
-                }
+            if (Object.keys(currentFilters).length > 0) {
+                filterBarContainer.innerHTML = buildFilterBarHtml();
+                filterBarContainer.style.display = 'block';
+            } else {
+                filterBarContainer.innerHTML = '';
+                filterBarContainer.style.display = 'none';
             }
         }
         
         let eventStats = {};
         
-         function buildStats() {
-             const grid = document.getElementById('statsGrid');
-             const stats = [];
-             
-             eventTypes.forEach(type => {
+        function eventMatchesFilters(event) {
+            if (Object.keys(currentFilters).length === 0) return true;
+            for (const [col, val] of Object.entries(currentFilters)) {
+                let extracted;
+                if (col === 'Type' || col === 'Detail') {
+                    const types = { alert: '🔴', dns: '🟢', http: '🟠', tls: '🔵', flow: '🟣', ftp: '📁', anomaly: '⚠️', fileinfo: '📄' };
+                    const allColumns = ['Time', 'Type', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Detail'];
+                    const allColIndex = allColumns.indexOf(col);
+                    extracted = extractAllValue(event, col, allColIndex, types);
+                } else {
+                    extracted = extractValue(event, col, -1);
+                }
+                if (extracted !== val) return false;
+            }
+            return true;
+        }
+
+        function computeFilteredStats() {
+            const stats = {};
+            const events = allEvents.filter(e => e.event_type !== 'stats');
+            for (const e of events) {
+                if (eventMatchesFilters(e)) {
+                    const type = e.event_type || 'unknown';
+                    stats[type] = (stats[type] || 0) + 1;
+                }
+            }
+            return stats;
+        }
+
+        function buildStats(filteredStats) {
+            const grid = document.getElementById('statsGrid');
+            const stats = [];
+            const hasFilters = Object.keys(currentFilters).length > 0;
+            
+            eventTypes.forEach(type => {
+                const total = eventStats[type] || 0;
+                const filtered = filteredStats ? (filteredStats[type] || 0) : total;
                 stats.push({
                     id: type,
                     label: typeLabels[type] || type.toUpperCase(),
-                    count: eventStats[type] || 0,
+                    count: filtered,
+                    total: total,
                     color: typeColors[type] || '#58a6ff'
                 });
-             });
-             
-             const allCount = Object.values(eventStats).reduce((a, b) => a + b, 0) - (eventStats['stats'] || 0);
-             stats.push({
-                 id: 'all',
-                 label: 'All Events',
-                 count: allCount,
-                 color: '#f0f6fc'
-             });
-             
-             const firstActive = stats[0].id;
-             grid.innerHTML = stats.map(s => `
-                 <div class="stat-card${s.id === firstActive ? ' tab-active' : ''}" onclick="showTab('section-${s.id}', this)">
-                     <div class="stat-number" style="color: ${s.color}">${s.count}</div>
-                     <div class="stat-label">${s.label}</div>
-                 </div>
-             `).join('');
-         }
+            });
+            
+            const allFiltered = stats.reduce((a, s) => a + s.count, 0);
+            const allTotal = Object.values(eventStats).reduce((a, b) => a + b, 0) - (eventStats['stats'] || 0);
+            stats.push({
+                id: 'all',
+                label: 'All Events',
+                count: allFiltered,
+                total: allTotal,
+                color: '#f0f6fc'
+            });
+            
+            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            const activeType = visibleSection ? visibleSection.id.replace('section-', '') : (stats[0] && stats[0].id);
+            grid.innerHTML = stats.map(s => {
+                const countDisplay = hasFilters ? `${s.count} / ${s.total}` : String(s.count);
+                return `
+                    <div class="stat-card${s.id === activeType ? ' tab-active' : ''}" onclick="showTab('section-${s.id}', this)">
+                        <div class="stat-number" style="color: ${s.color}">${countDisplay}</div>
+                        <div class="stat-label">${s.label}</div>
+                    </div>
+                `;
+            }).join('');
+        }
         
         function buildSections() {
             const sectionsEl = document.getElementById('sections');
@@ -1349,11 +1386,17 @@
             });
             
             const container = document.getElementById(sectionId);
-            let html = '<div class="section-content"><table><thead><tr>';
-            allColumns.forEach(h => html += `<th>${h}</th>`);
-            html += '</tr></thead><tbody>';
-            rows.forEach(r => html += r);
-            html += '</tbody></table></div>';
+            let html = '<div class="section-content">';
+            if (rows.length === 0 && Object.keys(currentFilters).length > 0) {
+                html += '<div style="padding: 40px; text-align: center; color: #8b949e; font-size: 0.95rem;">🔍 No events match the current filters</div>';
+            } else {
+                html += '<table><thead><tr>';
+                allColumns.forEach(h => html += `<th>${h}</th>`);
+                html += '</tr></thead><tbody>';
+                rows.forEach(r => html += r);
+                html += '</tbody></table>';
+            }
+            html += '</div>';
             
             container.innerHTML = html;
         }
@@ -1378,19 +1421,12 @@
                 });
             }
             
-            let html = '';
-            
-            if (Object.keys(currentFilters).length > 0) {
-                html += '<div class="filter-bar"><span class="filter-label">🔍 Filtered:</span>';
-                for (const [col, val] of Object.entries(currentFilters)) {
-                    html += `<span class="filter-chip">${col}: ${escapeHtml(val)} <span class="filter-chip-remove" onclick="clearFilter('${col}')">&times;</span></span>`;
-                }
-                html += '<button class="filter-clear-all" onclick="clearAllFilters()">Clear All</button></div>';
+            if (!advancedMode) {
+                aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                return;
             }
             
-            html += buildAggregationTablesAll(filteredEvents, allColumns, types);
-            
-            aggContainer.innerHTML = html;
+            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + buildAggregationTablesAll(filteredEvents, allColumns, types) + '</div></div>';
         }
         
         function extractAllValue(e, col, colIndex, types) {
@@ -1474,6 +1510,7 @@
                 case 'Query': return e.dns?.rrname || '';
                 case 'Type': return e.dns?.rrtype || '';
                 case 'Method': return e.http?.http_method || '';
+                case 'Host': return e.http?.hostname || '';
                 case 'URL': return e.http?.url || '';
                 case 'Status': return String(e.http?.status || '');
                 case 'User-Agent': return (e.http?.http_user_agent || '').slice(0, 50);
@@ -1487,6 +1524,7 @@
                 case 'Bytes ←': return String(e.flow?.bytes_toclient || 0);
                 case 'State': return e.flow?.state || '';
                 case 'Alerted': return e.flow?.alerted ? 'Yes' : 'No';
+                case 'Filename': return e.fileinfo?.filename || '';
                 default: return '';
             }
         }
@@ -1554,13 +1592,10 @@
             const anyVisible = document.querySelectorAll('.agg-section:not([style*="display: none"])').length > 0;
             if (!anyVisible) {
                 advancedMode = false;
-                document.getElementById('advancedToggle').checked = false;
                 const aggContainer = document.getElementById('aggregations');
                 if (aggContainer) {
-                    aggContainer.style.display = 'none';
-                    aggContainer.innerHTML = '';
+                    aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
                 }
-                updateFilterBarVisibility();
             }
         }
 
@@ -1573,6 +1608,7 @@
                 currentFilters[f.column] = f.value;
             }
             updateFilterBarVisibility();
+            buildStats(computeFilteredStats());
             const eventType = sectionId.replace('section-', '');
             if (eventType === 'all') {
                 const filtered = getFilteredEvents(sectionId, allEvents, eventType);
@@ -1590,6 +1626,7 @@
         function applyFilter(sectionId, columnName, value) {
             currentFilters[columnName] = value;
             updateFilterBarVisibility();
+            buildStats(computeFilteredStats());
             const eventType = sectionId.replace('section-', '');
             if (eventType === 'all') {
                 const filtered = getFilteredEvents(sectionId, allEvents, eventType);
@@ -1607,6 +1644,7 @@
         function clearFilter(columnName) {
             delete currentFilters[columnName];
             updateFilterBarVisibility();
+            buildStats(computeFilteredStats());
             const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
             if (!visibleSection) return;
             const eventType = visibleSection.id.replace('section-', '');
@@ -1626,6 +1664,7 @@
         function clearAllFilters() {
             currentFilters = {};
             updateFilterBarVisibility();
+            buildStats(computeFilteredStats());
             const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
             if (!visibleSection) return;
             const eventType = visibleSection.id.replace('section-', '');
@@ -1717,10 +1756,10 @@
                     // eventTypes should not include 'all' - it's added separately by buildStats()
                     eventTypes = types;
                     
-                    buildStats();
-                    
                     const eventsResp = await fetch('/api/events?md5=' + md5 + '&limit=10000&t=' + Date.now());
                     allEvents = await eventsResp.json();
+                    
+                    buildStats(computeFilteredStats());
                     
                     if (allEvents.length === 0) {
                         hideLoading();
@@ -1738,7 +1777,7 @@
                     
                     document.getElementById('headerContent').innerHTML = `
                         <div style="background: #161b22; padding: 12px 20px; border-radius: 8px; border: 1px solid #30363d; flex: 1;">
-                            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 20px;">
+                            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
                                 <a href="#" onclick="showWelcome(); return false;" style="color: #58a6ff; text-decoration: none; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                                         <line x1="19" y1="12" x2="5" y2="12"></line>
@@ -1749,27 +1788,27 @@
                                 <span style="color: #f0f6fc; font-weight: 600; white-space: nowrap;">📄 ${currentPcapName}</span>
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📁 ${pcapPath.substring(0, pcapPath.lastIndexOf('/') + 1)}</span>
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📅 ${ts[0]?.slice(0, 19) || ''} to ${ts[ts.length-1]?.slice(0, 19) || ''}</span>
-                                <label class="advanced-toggle" style="margin-left: auto;">
-                                    <input type="checkbox" id="advancedToggle" ${advancedMode ? 'checked' : ''}>
-                                    <span>Aggregation</span>
-                                </label>
-                                <label class="advanced-toggle" style="margin-left: 15px;">
-                                    <input type="checkbox" id="diagramToggle" ${diagramMode ? 'checked' : ''}>
-                                    <span>Diagram</span>
-                                </label>
                             </div>
+
                         </div>
                      `;
                     document.getElementById('mainHeader').style.display = 'block';
-                    document.getElementById('aggregations').style.display = advancedMode ? '' : 'none';
                     updateFilterBarVisibility();
                     
                     buildSections();
                     
                     const sankeyPanel = document.getElementById('sankeyPanel');
                     if (sankeyPanel) {
-                        sankeyPanel.style.display = diagramMode ? '' : 'none';
                         updateSankeyDiagram(allEvents);
+                    }
+                    
+                    const aggContainer = document.getElementById('aggregations');
+                    if (aggContainer) {
+                        if (advancedMode) {
+                            buildAggregationsSectionAll();
+                        } else {
+                            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                        }
                     }
                     
                     hideLoading();

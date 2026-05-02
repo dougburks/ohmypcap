@@ -43,7 +43,7 @@ mkdir -p ~/ohmypcap-data
 newgrp docker -c "docker run -v ~/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main"
 ```
 
-OhMyPCAP will update its NIDS rules and then prompt you to open http://localhost:8000/ohmypcap.html in your browser.
+OhMyPCAP will check for internet access, update its NIDS rules if online (or use the baked-in rules if offline), and then prompt you to open http://localhost:8000/ohmypcap.html in your browser.
 
 To stop, just press Ctrl-C in the terminal window running OhMyPCAP or close the terminal window altogether.
 
@@ -81,7 +81,7 @@ Once you've connected to OhMyPCAP in your browser, here are some of the things y
 1. **Upload a file** — click "Choose File" and select a `.pcap`, `.pcapng`, `.cap`, or `.trace` file (or a `.zip` containing one)
 2. **Load from URL** — paste a URL to a PCAP file and press **Enter** (or click **Go**). Password-protected zips from `malware-traffic-analysis.net` are auto-decrypted using the date-based password format
 3. **Reopen a previous analysis** — previously analyzed PCAPs are listed on the welcome screen
-4. **Re-analyze a previous PCAP** — click the 🔄 button next to any previous PCAP to delete its analysis and re-run Suricata with the latest rules
+4. **Re-analyze a previous PCAP** — click the 🔄 button next to any previous PCAP to delete its analysis and re-run Suricata (rules are updated first if internet access is available)
 
 ### Navigate Results
 
@@ -132,13 +132,28 @@ docker run -v ~/ohmypcap-data:/data -p 8000:8000 ohmypcap
 
 Then open http://localhost:8000/ohmypcap.html in your browser.
 
+### Air-Gapped / Offline Deployment
+
+The Docker image bakes in the Emerging Threats Open ruleset at build time, so it works without internet access. To deploy on an isolated network:
+
+```bash
+# On an internet-connected machine
+docker pull ghcr.io/dougburks/ohmypcap:main
+docker save ghcr.io/dougburks/ohmypcap:main > ohmypcap-airgap.tar
+
+# Transfer ohmypcap-airgap.tar to the isolated network via USB, etc.
+# Then on the air-gapped machine:
+docker load < ohmypcap-airgap.tar
+docker run -v ~/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main
+```
+
 ## Running without Docker
 
 If you prefer to run without docker, then you will need these prerequisites:
 
 - **Python 3** (stdlib only — no pip packages required)
 - **Suricata** — for PCAP analysis and rule-based alerting
-- **suricata-update** — for downloading/updating Suricata rules
+- **suricata-update** — for downloading/updating Suricata rules (internet access required; the app will warn and continue without rules if offline)
 - **tcpdump** — for stream carving (`/api/download-stream`)
 - **tshark** — for ASCII transcript extraction (`/api/ascii-stream`)
 
@@ -168,7 +183,7 @@ Then open http://localhost:8000/ohmypcap.html in your browser.
 | `MAX_EVE_SIZE` | `1000 MB` | Maximum eve.json size |
 | `MAX_TRANSCRIPT_SIZE` | `100,000 chars` | Maximum ASCII transcript length |
 
-Suricata config is auto-generated from `/etc/suricata/` on first run. Rules are downloaded via `suricata-update` if not present.
+Suricata config is auto-generated from `/etc/suricata/` on first run. Rules are downloaded via `suricata-update` when internet access is available; otherwise, the app uses baked-in rules (Docker) or warns and continues without rules (source).
 
 ## Security
 

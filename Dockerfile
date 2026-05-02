@@ -20,6 +20,10 @@ COPY ohmypcap.py ohmypcap.html ./
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# Bake Suricata rules into image for air-gapped deployments
+RUN mkdir -p /usr/share/suricata/rules && \
+    suricata-update --no-test --data-dir /usr/share/suricata --output /usr/share/suricata/rules
+
 RUN mkdir -p /data && chown -R 1000:1000 /data
 
 USER 1000:1000

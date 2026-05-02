@@ -34,7 +34,7 @@ A stdlib-only Python HTTP server (`http.server.SimpleHTTPRequestHandler`). Handl
   suricata/
     suricata.yaml          # Copied from /etc/suricata/, rule path rewritten
     rules/
-      suricata.rules       # Downloaded by suricata-update
+      suricata.rules       # Downloaded by suricata-update (online) or copied from baked-in image (offline/air-gapped)
     disable.conf
   <md5>/
     <filename>.pcap        # Original PCAP
@@ -90,11 +90,12 @@ Welcome Screen (no PCAP loaded)
   └── Previous analyses list
 
 Analysis View (PCAP loaded)
-  ├── Header (back button, name, date range, Aggregation toggle, Diagram toggle)
-  ├── Stats Grid (clickable event-type cards)
-  ├── Filter Bar (non-advanced mode)
-  ├── Aggregations (advanced mode)
-  ├── Sankey Diagram (diagram mode — Source IP → Dest IP → Dest Port)
+  ├── Header (back button, name, path, date range)
+  ├── Visualizations bar (Diagram toggle, Aggregation toggle)
+  ├── Filter Bar (active filters as removable chips)
+  ├── Stats Grid (clickable event-type cards, shows filtered/total counts when active)
+  ├── Sankey Diagram (diagram mode — Source IP → Dest IP → Dest Port, reflects current filters)
+  ├── Aggregations (aggregation mode — frequency counts per column)
   └── Data Sections (tabbed tables)
 ```
 
@@ -130,7 +131,7 @@ Each event type has its own column set. The "All Events" view uses a unified col
 
 **Shared columns (all types):** Time, Protocol, Source IP, Source Port, Dest IP, Dest Port
 
-**Per-type columns:** Alert, Category, Severity (alerts); Query, Type (DNS); Method, URL, Status, User-Agent (HTTP); SNI / Host, Version, Subject, Issuer (TLS); Pkts →, Pkts ←, Bytes →, Bytes ←, State, Alerted (flows); Command (FTP); Message (anomaly); Filename (fileinfo)
+**Per-type columns:** Alert, Category, Severity (alerts); Query, Type (DNS); Method, Host, URL, User-Agent, Status (HTTP); SNI / Host, Version, Subject, Issuer (TLS); Pkts →, Pkts ←, Bytes →, Bytes ←, State, Alerted (flows); Command (FTP); Message (anomaly); Filename (fileinfo)
 
 **All-events columns:** Type (event type), Detail (type-specific summary)
 

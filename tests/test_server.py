@@ -1013,12 +1013,59 @@ class TestRuleDownloadPrompt(unittest.TestCase):
         """Verify that suricata-update outputs messages when rules are downloaded"""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        
+
         # Check for informative messages about rule download
-        self.assertIn('Downloading Suricata rules', content,
-                      'Should log when downloading rules')
-        self.assertIn('Suricata rules downloaded successfully', content,
-                      'Should log when rules download completes')
+        self.assertIn('Internet access detected', content,
+                      'Should log when internet is detected')
+        self.assertIn('updating Suricata rules', content,
+                      'Should log when updating rules')
+        self.assertIn('Suricata rules updated successfully', content,
+                      'Should log when rules update completes')
+
+
+class TestAirgapFallback(unittest.TestCase):
+    def test_has_internet_access_function_exists(self):
+        """Verify has_internet_access helper is defined"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('def has_internet_access():', content,
+                      'has_internet_access function must exist')
+
+    def test_internet_check_connects_to_rules_server(self):
+        """Verify internet check targets the actual rules server"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('rules.emergingthreats.net', content,
+                      'Must check connectivity to rules server')
+        self.assertIn('socket.create_connection', content,
+                      'Must use socket.create_connection for check')
+
+    def test_baked_in_rules_path_defined(self):
+        """Verify baked-in rules path is referenced"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("/usr/share/suricata/rules", content,
+                      'Must reference baked-in rules path')
+
+    def test_fallback_uses_shutil_copytree(self):
+        """Verify air-gapped fallback copies baked-in rules"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('shutil.copytree', content,
+                      'Must use shutil.copytree for baked-in rules')
+        self.assertIn('dirs_exist_ok=True', content,
+                      'Must safely overwrite existing rules')
+
+    def test_airgap_log_messages_present(self):
+        """Verify log messages for air-gapped path exist"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('No internet access detected', content,
+                      'Should log when falling back to baked-in rules')
+        self.assertIn('Baked-in rules copied successfully', content,
+                      'Should log when baked-in rules are copied')
+        self.assertIn('no baked-in rules found and no internet access', content,
+                      'Should warn when no rules are available')
 
 
 class TestServerStartupBanner(unittest.TestCase):
