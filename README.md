@@ -2,6 +2,34 @@
 
 A standalone web application for analyzing PCAP files using Suricata. View security alerts, browse network metadata (DNS, HTTP, TLS, flows), extract ASCII transcripts, view per-packet hexdumps, and carve individual streams — all from a single-page UI.
 
+## Table of Contents
+
+- [Quick Demo](#quick-demo)
+- [Quick Installation](#quick-installation)
+  - [OhMyDebn](#ohmydebn)
+  - [Docker](#docker)
+    - [docker run](#docker-run)
+    - [docker compose](#docker-compose)
+    - [Build Your Own Image](#build-your-own-image)
+    - [Air-Gapped / Offline Deployment](#air-gapped--offline-deployment)
+  - [Podman](#podman)
+    - [podman run](#podman-run)
+    - [podman compose](#podman-compose)
+    - [Build Your Own Image](#build-your-own-image-1)
+    - [Air-Gapped / Offline Deployment](#air-gapped--offline-deployment-1)
+- [Usage](#usage)
+  - [Analyze a PCAP](#analyze-a-pcap)
+  - [Navigate Results](#navigate-results)
+  - [Stream Analysis](#stream-analysis)
+- [Data Storage](#data-storage)
+- [Running without Docker or Podman](#running-without-docker-or-podman)
+  - [Environment Variables](#environment-variables)
+- [Configuration](#configuration)
+- [Security](#security)
+- [Development](#development)
+- [Testing](#testing)
+- [License](#license)
+
 ## Screenshots
 
 The welcome screen allows you to upload a PCAP file or load a previous analysis:

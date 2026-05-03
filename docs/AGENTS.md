@@ -25,3 +25,7 @@ If the copyright year changed, update `static/LICENSE` accordingly.
 
 Check for D3 releases at https://github.com/d3/d3/releases.
 Recommended cadence: every 6–12 months, or immediately if a security CVE is announced.
+
+## README Maintenance
+
+When adding, removing, or renaming sections in `README.md`, always update the **Table of Contents** at the top of the file. GitHub auto-generates anchor IDs from heading text (lowercased, spaces→hyphens, special chars stripped). Duplicate heading names get `-1`, `-2`, etc. suffixes.
