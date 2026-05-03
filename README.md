@@ -47,23 +47,23 @@ The fastest way to try OhMyPCAP is with our online demo:
 https://securityonion.net/pcap
 
 Please note the following:
-- this is a cloud based service so please do not share any sensitive PCAP files or any other sensitive info
+- this is a cloud-based service so please do not share any sensitive PCAP files or any other sensitive info
 - free accounts are limited to 60 minutes of usage before the instance is automatically terminated
 - if you need a private or permanent instance of OhMyPCAP, then you can proceed to the next section to perform a local installation of OhMyPCAP
 
 ## Quick Installation
 
-For a private or permanent instance of OhMyPCAP, most folks will want to use our pre-built container image. We publish images for both Docker and Podman. If you prefer not to use a pre-built image, then there are other options shown [below](#manual-installation).
+For a private or permanent instance of OhMyPCAP, most folks will want to use our pre-built container image. We publish a container image that is compatible with both Docker and Podman. If you prefer not to use a pre-built image, then there are other options shown [below](#manual-installation).
 
 ### OhMyDebn
 
-If you are running the latest version of [OhMyDebn](https://ohmydebn.org), then you can just press `Ctrl + Alt + P` to automatically install and run OhMyPCAP and then you can skip to the Usage section below.
+If you are running the latest version of [OhMyDebn](https://ohmydebn.org), then you can just press `Ctrl + Alt + P` to automatically install and run OhMyPCAP and then you can skip to the [Usage](#usage) section below.
 
 ### Docker
 
 #### docker run
 
-If you prefer "docker run", then here are the steps you can use on Debian 13 or compatible distros:
+If you prefer `docker run`, then here are the steps you can use on Debian 13 or compatible distros:
 ```bash
 # Install and configure docker.io
 sudo apt update && sudo apt -y install docker.io && sudo usermod -aG docker $USER
@@ -75,7 +75,7 @@ newgrp docker -c "docker run -v ~/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougb
 
 #### docker compose
 
-If you prefer to use "docker compose", then here are the steps you can use on Debian 13 or compatible distros:
+If you prefer to use `docker compose`, then here are the steps you can use on Debian 13 or compatible distros:
 ```bash
 # Install and configure docker.io and docker-compose
 sudo apt update && sudo apt -y install docker.io docker-compose && sudo usermod -aG docker $USER
@@ -144,7 +144,7 @@ No `usermod` or `newgrp` is needed — Podman runs rootless by default. Use `$HO
 
 #### podman compose
 
-If you prefer to use "podman compose", then here are the steps you can use on Debian 13 or compatible distros:
+If you prefer to use `podman compose`, then here are the steps you can use on Debian 13 or compatible distros:
 ```bash
 # Install and configure podman and podman-compose
 sudo apt update && sudo apt -y install podman podman-compose
@@ -197,7 +197,7 @@ podman run --userns=keep-id --user $(id -u):$(id -g) \
 
 OhMyPCAP will check for internet access, update its NIDS rules if online (or use the baked-in rules if offline), and then prompt you to open http://localhost:8000/ohmypcap.html in your browser.
 
-To stop, just press Ctrl-C in the terminal window running OhMyPCAP or close the terminal window altogether.
+To stop a `docker run` or `podman run` instance, just press Ctrl-C in the terminal window or close the terminal window altogether. For `docker compose` or `podman compose`, use `docker compose down` or `podman compose down`.
 
 ## Manual Installation
 
@@ -308,10 +308,10 @@ See [docs/AGENTS.md](docs/AGENTS.md) for agent-focused guidance on maintaining O
 
 ```bash
 # Server tests
-python3 -m unittest test_server -v
+python3 -m unittest tests.test_server -v
 
 # UI tests
-python3 -m unittest test_ui -v
+python3 -m unittest tests.test_ui -v
 
 # All tests
 python3 -m unittest discover -v
