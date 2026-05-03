@@ -9,12 +9,15 @@
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0d1117; color: #c9d1d9; line-height: 1.6; }
         .container { width: 100%; padding: 20px; box-sizing: border-box; padding-bottom: 80px; }
         header { background: linear-gradient(135deg, #161b22 0%, #21262d 100%); padding: 30px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #30363d; }
+        #mainHeader { padding: 0; background: transparent; border: none; }
         h1 { font-size: 2rem; color: #58a6ff; }
         .subtitle { color: #8b949e; font-size: 0.9rem; }
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .stat-card { background: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d; text-align: center; cursor: pointer; }
         .stat-card:hover { border-color: #58a6ff; }
         .stat-card.tab-active { border-color: #58a6ff; background: #21262d; }
+        .stat-card.stat-disabled { opacity: 0.5; cursor: default; }
+        .stat-card.stat-disabled:hover { border-color: #30363d; }
         .stat-number { font-size: 2.5rem; font-weight: bold; }
         .stat-label { color: #8b949e; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
         .section { background: #161b22; overflow: hidden; }
@@ -187,16 +190,13 @@
         
         <header id="mainHeader" style="display: none;">
             <div id="headerContent" style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;"></div>
-            <div id="instructions" style="color: #8b949e; font-size: 0.8rem; margin-top: 8px; text-align: center;">
-                <span style="color: #58a6ff;">💡</span> Start by reviewing security alerts and then you can change to one of the other data types like DNS, HTTP, or TLS. When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript and optionally download the PCAP file for that stream.
-            </div>
         </header>
         
         <div id="filterBarContainer"></div>
         <div class="stats-grid" id="statsGrid"></div>
         <div class="sankey-panel" id="sankeyPanel" style="display: none;"></div>
         <div id="aggregations"></div>
-        <div class="data-panel">
+        <div class="data-panel" id="dataPanel" style="display: none;">
             <div class="data-panel-heading">Data Table</div>
             <div id="sections"></div>
         </div>
@@ -574,6 +574,7 @@
             document.getElementById('sankeyPanel').innerHTML = '';
             document.getElementById('aggregations').innerHTML = '';
             document.getElementById('sections').innerHTML = '';
+            document.getElementById('dataPanel').style.display = 'none';
             document.getElementById('inputBoxes').style.display = 'block';
             
             // Load previous analyses
@@ -1071,10 +1072,8 @@
                 return;
             }
             if (!events || events.length === 0) {
-                sankeyPanel.style.display = 'none';
                 return;
             }
-            sankeyPanel.style.display = '';
             sankeyPanel.innerHTML = '<div class="section-toggle-bar" onclick="toggleDiagram()">▾ Sankey Diagram</div><div class="sankey-content"></div>';
             const svgContainer = sankeyPanel.querySelector('.sankey-content');
             const data = buildSankeyData(events);
@@ -1316,8 +1315,12 @@
             const activeType = visibleSection ? visibleSection.id.replace('section-', '') : (stats[0] && stats[0].id);
             grid.innerHTML = stats.map(s => {
                 const countDisplay = hasFilters ? `${s.count} / ${s.total}` : String(s.count);
+                const isClickable = s.count > 0;
+                const activeClass = s.id === activeType ? ' tab-active' : '';
+                const disabledClass = isClickable ? '' : ' stat-disabled';
+                const onclickAttr = isClickable ? `onclick="showTab('section-${s.id}', this)"` : '';
                 return `
-                    <div class="stat-card${s.id === activeType ? ' tab-active' : ''}" onclick="showTab('section-${s.id}', this)">
+                    <div class="stat-card${activeClass}${disabledClass}" ${onclickAttr}>
                         <div class="stat-number" style="color: ${s.color}">${countDisplay}</div>
                         <div class="stat-label">${s.label}</div>
                     </div>
@@ -1437,6 +1440,28 @@
                 case 'Source Port': return String(e.src_port || '');
                 case 'Dest IP': return e.dest_ip || '';
                 case 'Dest Port': return String(e.dest_port || '');
+                case 'Alert': return e.alert?.signature || '';
+                case 'Category': return e.alert?.category || '';
+                case 'Severity': return 'Sev ' + (e.alert?.severity || 0);
+                case 'Query': return e.dns?.rrname || '';
+                case 'Method': return e.http?.http_method || '';
+                case 'Host': return e.http?.hostname || '';
+                case 'URL': return e.http?.url || '';
+                case 'Status': return String(e.http?.status || '');
+                case 'User-Agent': return (e.http?.http_user_agent || '').slice(0, 50);
+                case 'SNI / Host': return e.tls?.sni || '-';
+                case 'Version': return e.tls?.version || '-';
+                case 'Subject': return (e.tls?.subject || '-').slice(0, 40);
+                case 'Issuer': return (e.tls?.issuerdn || '-').slice(0, 40);
+                case 'Pkts →': return String(e.flow?.pkts_toserver || 0);
+                case 'Pkts ←': return String(e.flow?.pkts_toclient || 0);
+                case 'Bytes →': return String(e.flow?.bytes_toserver || 0);
+                case 'Bytes ←': return String(e.flow?.bytes_toclient || 0);
+                case 'State': return e.flow?.state || '';
+                case 'Alerted': return e.flow?.alerted ? 'Yes' : 'No';
+                case 'Filename': return e.fileinfo?.filename || '';
+                case 'Command': return e.ftp?.command || '';
+                case 'Message': return e.anomaly?.message || '';
                 case 'Detail': {
                     const etype = e.event_type || '';
                     if (etype === 'alert') return e.alert?.signature || '';
@@ -1789,16 +1814,20 @@
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📁 ${pcapPath.substring(0, pcapPath.lastIndexOf('/') + 1)}</span>
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📅 ${ts[0]?.slice(0, 19) || ''} to ${ts[ts.length-1]?.slice(0, 19) || ''}</span>
                             </div>
-
+                            <div style="color: #8b949e; font-size: 0.8rem; margin-top: 8px; text-align: center;">
+                                <span style="color: #58a6ff;">💡</span> Start by reviewing security alerts and then you can change to one of the other data types like DNS, HTTP, or TLS. When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript and optionally download the PCAP file for that stream.
+                            </div>
                         </div>
                      `;
                     document.getElementById('mainHeader').style.display = 'block';
+                    document.getElementById('dataPanel').style.display = '';
                     updateFilterBarVisibility();
                     
                     buildSections();
                     
                     const sankeyPanel = document.getElementById('sankeyPanel');
                     if (sankeyPanel) {
+                        sankeyPanel.style.display = diagramMode ? '' : 'none';
                         updateSankeyDiagram(allEvents);
                     }
                     

@@ -731,6 +731,19 @@ class TestAggregationTables(unittest.TestCase):
     def test_has_extract_all_value_function(self):
         self.assertIn('function extractAllValue', JS_CONTENT)
 
+    def test_extractAllValue_handles_per_type_columns(self):
+        """extractAllValue must handle per-type columns (Alert, Query, URL, etc.)
+        so filters set on one tab work correctly in the 'All Events' view."""
+        func_body = JS_CONTENT.split('function extractAllValue')[1].split('function buildAggregationTablesAll')[0]
+        self.assertIn("case 'Alert':", func_body,
+                      'extractAllValue must handle Alert column')
+        self.assertIn("case 'Query':", func_body,
+                      'extractAllValue must handle Query column')
+        self.assertIn("case 'URL':", func_body,
+                      'extractAllValue must handle URL column')
+        self.assertIn("case 'Method':", func_body,
+                      'extractAllValue must handle Method column')
+
     def test_has_build_aggregations_section_function(self):
         self.assertIn('function buildAggregationsSection', JS_CONTENT)
 

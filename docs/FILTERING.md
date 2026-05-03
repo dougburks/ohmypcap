@@ -43,7 +43,7 @@ Per-event-type columns differ from "All Events" columns:
 |---|---|---|
 | Time, Protocol, Source IP, Source Port, Dest IP, Dest Port | Alert, Category, Severity, Query, Method, Host, URL, User-Agent, Status, SNI / Host, Version, Subject, Issuer, Pkts →, Pkts ←, Bytes →, Bytes ←, State, Alerted, Type (DNS record type) | Type (event type), Detail |
 
-When filtering, `extractAllValue()` returns `''` for columns that don't exist in the current view (e.g., a filter on "Severity" in the "All Events" view). `extractValue()` is called for all per-type columns regardless of whether the column is in the type's column list, because events may carry cross-type metadata (e.g., a `fileinfo` event from an HTTP transfer may include `http.hostname`).
+When filtering, both `extractValue()` and `extractAllValue()` handle all per-type columns. `extractAllValue()` supports the full set of per-type columns (Alert, Category, Severity, Query, Method, Host, URL, Status, User-Agent, SNI / Host, Version, Subject, Issuer, Pkts →, Pkts ←, Bytes →, Bytes ←, State, Alerted, Filename, Command, Message) so that a filter set on one tab (e.g., Alert on the Alerts tab) correctly matches events when switching to "All Events". Only truly unknown columns return `''`.
 
 ## Known Gotchas
 
