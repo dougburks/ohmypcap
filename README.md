@@ -242,9 +242,9 @@ Once you've connected to OhMyPCAP in your browser, here are some of the things y
 After Suricata finishes processing, the UI displays:
 
 - **Stats Grid** — clickable cards showing event counts by type (Alerts, DNS, HTTP, TLS, Flows, etc.)
-- **Sankey Diagram** — toggle the "Diagram" switch to visualize network flow relationships (Source IP → Dest IP → Dest Port)
-- **Data Tables** — sortable tables with expandable detail rows showing full event JSON, ASCII transcripts, and hexdumps
+- **Sankey Diagram** — expand the collapsible heading to visualize network flow relationships (Source IP → Dest IP → Dest Port)
 - **Aggregation Tables** — frequency counts for each column; click a value to filter
+- **Data Table** — sortable table with expandable detail rows showing full event JSON, ASCII transcripts, and hexdumps
 - **Filtering** — apply filters by clicking aggregation values; filter chips show active filters; filters persist across all tabs and the Sankey diagram
 
 ### Stream Analysis
