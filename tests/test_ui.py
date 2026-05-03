@@ -744,6 +744,21 @@ class TestAggregationTables(unittest.TestCase):
         self.assertIn("case 'Method':", func_body,
                       'extractAllValue must handle Method column')
 
+    def test_extractValue_handles_detail_column(self):
+        """extractValue must handle 'Detail' column for all event types so
+        filters set in the 'All Events' view work correctly on per-type tabs."""
+        func_body = JS_CONTENT.split('function extractValue')[1].split('function buildAggregationTables')[0]
+        self.assertIn("case 'Detail':", func_body,
+                      'extractValue must handle Detail column')
+        self.assertIn("e.event_type", func_body,
+                      'extractValue Detail must check event_type')
+        self.assertIn("e.alert?.signature", func_body,
+                      'extractValue Detail must handle alert events')
+        self.assertIn("e.dns?.rrname", func_body,
+                      'extractValue Detail must handle dns events')
+        self.assertIn("e.tls?.sni", func_body,
+                      'extractValue Detail must handle tls events')
+
     def test_has_build_aggregations_section_function(self):
         self.assertIn('function buildAggregationsSection', JS_CONTENT)
 

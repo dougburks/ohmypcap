@@ -1550,6 +1550,18 @@
                 case 'State': return e.flow?.state || '';
                 case 'Alerted': return e.flow?.alerted ? 'Yes' : 'No';
                 case 'Filename': return e.fileinfo?.filename || '';
+                case 'Detail': {
+                    const etype = e.event_type || '';
+                    if (etype === 'alert') return e.alert?.signature || '';
+                    if (etype === 'dns') return e.dns?.rrname || '';
+                    if (etype === 'http') return (e.http?.http_method || '') + ' ' + (e.http?.url || '');
+                    if (etype === 'tls') return e.tls?.sni || '';
+                    if (etype === 'flow') return `${e.src_ip || ''}:${e.src_port || ''} → ${e.dest_ip || ''}:${e.dest_port || ''}`;
+                    if (etype === 'ftp') return e.ftp?.command || '';
+                    if (etype === 'anomaly') return e.anomaly?.message || '';
+                    if (etype === 'fileinfo') return e.fileinfo?.filename || '';
+                    return '';
+                }
                 default: return '';
             }
         }
