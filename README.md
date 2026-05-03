@@ -104,6 +104,7 @@ Toggle the "Aggregation" switch in the upper right to enable:
 
 Click any row in a data table to expand it, then:
 - **ASCII Transcript** — view decoded TCP/UDP payload as readable text
+- **Hexdump** — view per-packet hex dumps with collapsible packet headers
 - **Download PCAP** — carve that specific stream into a standalone `.pcap` file
 
 ## Data Storage

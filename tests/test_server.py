@@ -433,6 +433,26 @@ class TestAPIEndpoints(unittest.TestCase):
         status, _ = self._get('/api/ascii-stream?src=1.2.3.4')
         self.assertEqual(status, 400)
 
+    def test_hexdump_stream_requires_md5(self):
+        status, _ = self._get('/api/hexdump-stream?src=1.2.3.4&sport=80&dst=5.6.7.8&dport=443')
+        self.assertEqual(status, 400)
+
+    def test_hexdump_stream_invalid_ip(self):
+        status, _ = self._get('/api/hexdump-stream?src=bad&sport=80&dst=1.2.3.4&dport=443&md5=' + 'a' * 32)
+        self.assertEqual(status, 400)
+
+    def test_hexdump_stream_invalid_port(self):
+        status, _ = self._get('/api/hexdump-stream?src=1.2.3.4&sport=99999&dst=5.6.7.8&dport=80&md5=' + 'a' * 32)
+        self.assertEqual(status, 400)
+
+    def test_hexdump_stream_command_injection(self):
+        status, _ = self._get('/api/hexdump-stream?src=1.2.3.4&sport=80;ls&dst=5.6.7.8&dport=443&md5=' + 'a' * 32)
+        self.assertEqual(status, 400)
+
+    def test_hexdump_stream_missing_params(self):
+        status, _ = self._get('/api/hexdump-stream?src=1.2.3.4&md5=' + 'a' * 32)
+        self.assertEqual(status, 400)
+
     def test_upload_traversal_filename(self):
         # Use unique PCAP content to avoid collision with test_upload_same_pcap_in_different_zips
         pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x02' * 100

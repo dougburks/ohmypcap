@@ -621,6 +621,36 @@ class TestUXFeatures(unittest.TestCase):
         self.assertIn('cursor: pointer', HTML_CONTENT)
         self.assertIn('sort-arrow', JS_CONTENT)
 
+    def test_hexdump_function_exists(self):
+        self.assertIn('function switchStreamView', JS_CONTENT)
+        self.assertIn('function loadHexdumpData', JS_CONTENT)
+
+    def test_hexdump_toggle_functions_exist(self):
+        self.assertIn('function togglePacket', JS_CONTENT)
+        self.assertIn('function expandAllPackets', JS_CONTENT)
+        self.assertIn('function collapseAllPackets', JS_CONTENT)
+
+    def test_hexdump_expand_collapse_selector_uses_direct_child(self):
+        """expandAllPackets and collapseAllPackets must use > span:first-child
+        to avoid overwriting nested colored IP spans."""
+        self.assertIn("querySelectorAll('.packet-header > span:first-child')", JS_CONTENT)
+
+    def test_hexdump_button_in_detail_row(self):
+        self.assertIn('Hexdump', HTML_CONTENT)
+        self.assertIn("onclick=\"switchStreamView(", HTML_CONTENT)
+        self.assertIn('.view-tabs', HTML_CONTENT)
+        self.assertIn('.view-tab', HTML_CONTENT)
+
+    def test_hexdump_packet_css(self):
+        self.assertIn('.packet-block', HTML_CONTENT)
+        self.assertIn('.packet-header', HTML_CONTENT)
+        self.assertIn('.packet-content', HTML_CONTENT)
+        self.assertIn('.view-tabs', HTML_CONTENT)
+        self.assertIn('.view-tab', HTML_CONTENT)
+
+    def test_hexdump_colorized_headers(self):
+        self.assertIn('function colorizePacketHeader', JS_CONTENT)
+
 
 class TestSecurityInUI(unittest.TestCase):
     def test_no_inline_event_handlers_with_dangerous_patterns(self):

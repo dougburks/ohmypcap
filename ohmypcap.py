@@ -594,6 +594,78 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception:
                 self._send_error(500, 'Internal server error')
 
+        elif path == '/api/hexdump-stream':
+            src = params.get('src', [''])[0]
+            sport = params.get('sport', [''])[0]
+            dst = params.get('dst', [''])[0]
+            dport = params.get('dport', [''])[0]
+            md5 = params.get('md5', [''])[0]
+
+            if not md5:
+                self._send_error(400, 'md5 parameter required')
+                return
+
+            if not (validate_ip(src) and validate_ip(dst) and validate_port(sport) and validate_port(dport)):
+                self._send_error(400, 'Invalid IP or port')
+                return
+
+            if not re.match(r'^[a-f0-9]{32}$', md5):
+                self._send_error(400, 'Invalid MD5')
+                return
+            dir_path = os.path.join(DATA_DIR, md5)
+            if not is_safe_path(DATA_DIR, dir_path):
+                self._send_error(400, 'Invalid path')
+                return
+            pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)] if os.path.exists(dir_path) else []
+            pcap = os.path.join(dir_path, pcap_files[0]) if pcap_files else None
+
+            if not pcap:
+                self._send_error(404, 'No pcap file found')
+                return
+
+            try:
+                result = subprocess.run(
+                    ['tcpdump', '-r', pcap, '-X', '-nn',
+                     f'host {src} and host {dst} and (port {sport} or port {dport})'],
+                    capture_output=True, text=True, timeout=60
+                )
+                packets = []
+                current_packet = None
+                total_chars = 0
+                truncated = False
+
+                for line in result.stdout.split('\n'):
+                    if not line.strip():
+                        if current_packet:
+                            packets.append(current_packet)
+                            current_packet = None
+                        continue
+
+                    if line.startswith('\t0x'):
+                        if current_packet:
+                            current_packet['lines'].append(line.strip())
+                            total_chars += len(line)
+                    else:
+                        if current_packet:
+                            packets.append(current_packet)
+                        current_packet = {'header': line.strip(), 'lines': []}
+
+                    if len(packets) >= 500 or total_chars > MAX_TRANSCRIPT_SIZE:
+                        truncated = True
+                        break
+
+                if current_packet:
+                    packets.append(current_packet)
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'packets': packets, 'truncated': truncated}).encode())
+            except subprocess.TimeoutExpired:
+                self._send_error(500, 'Hexdump extraction timed out')
+            except Exception:
+                self._send_error(500, 'Internal server error')
+
         elif path == '/api/analyses':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')

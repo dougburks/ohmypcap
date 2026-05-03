@@ -108,6 +108,19 @@
         .section-toggle-bar:hover { background: #30363d; }
         .sankey-content { padding: 20px; }
         .agg-content { padding: 15px 20px 5px; }
+        .packet-block { border: 1px solid #30363d; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
+        .packet-header { background: #21262d; padding: 8px 12px; cursor: pointer; font-family: monospace; font-size: 0.8rem; color: #c9d1d9; display: flex; align-items: center; gap: 8px; }
+        .packet-header:hover { background: #30363d; }
+        .packet-content { padding: 10px 12px; background: #0d1117; }
+        .packet-content.hidden { display: none; }
+        .packet-content pre { margin: 0; font-family: monospace; font-size: 0.75rem; color: #c9d1d9; white-space: pre-wrap; word-break: break-all; }
+        .packet-controls { display: flex; justify-content: flex-start; gap: 10px; margin-bottom: 10px; }
+        .packet-control-btn { background: none; border: 1px solid #30363d; color: #8b949e; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
+        .packet-control-btn:hover { background: #30363d; color: #c9d1d9; }
+        .view-tabs { display: flex; gap: 0; border-bottom: 1px solid #30363d; margin-bottom: 10px; }
+        .view-tab { background: none; border: none; color: #8b949e; padding: 6px 12px; cursor: pointer; font-size: 0.8rem; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+        .view-tab:hover { color: #c9d1d9; }
+        .view-tab.active { color: #c9d1d9; border-bottom-color: #58a6ff; }
         .sankey-close { position: absolute; top: 10px; right: 15px; background: none; border: none; color: #8b949e; font-size: 1.2rem; font-weight: 600; cursor: pointer; line-height: 1; padding: 0; z-index: 10; }
         .sankey-close:hover { color: #ff6b6b; }
         .sankey-svg { width: 100%; height: auto; display: block; }
@@ -367,6 +380,94 @@
             }
         }
         
+        async function switchStreamView(view, src, sport, dst, dport, btn) {
+            const wrapper = btn.closest('div[id^="ascii-"]');
+            const asciiEl = wrapper.querySelector('.ascii-transcript');
+            const hexdumpEl = wrapper.querySelector('.hexdump-content');
+            const tabs = wrapper.querySelectorAll('.view-tab');
+            
+            tabs.forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            
+            if (view === 'hexdump') {
+                asciiEl.style.display = 'none';
+                hexdumpEl.style.display = '';
+                if (hexdumpEl.dataset.loaded !== 'true') {
+                    hexdumpEl.innerHTML = '<div style="color:#8b949e;padding:10px 0;"><span class="ascii-loading"></span>Loading hexdump...</div>';
+                    await loadHexdumpData(src, sport, dst, dport, hexdumpEl);
+                }
+            } else {
+                hexdumpEl.style.display = 'none';
+                asciiEl.style.display = '';
+            }
+        }
+        
+        async function loadHexdumpData(src, sport, dst, dport, container) {
+            const md5Param = currentMd5 ? '&md5=' + encodeURIComponent(currentMd5) : '';
+            const url = `/api/hexdump-stream?src=${encodeURIComponent(src)}&sport=${encodeURIComponent(sport)}&dst=${encodeURIComponent(dst)}&dport=${encodeURIComponent(dport)}${md5Param}`;
+            
+            try {
+                const resp = await fetch(url);
+                const data = await resp.json();
+                
+                if (data.packets && data.packets.length > 0) {
+                    let html = '<div class="packet-controls"><button class="packet-control-btn" onclick="expandAllPackets(this.parentNode.parentNode)">Expand All</button><button class="packet-control-btn" onclick="collapseAllPackets(this.parentNode.parentNode)">Collapse All</button></div>';
+                    
+                    data.packets.forEach((pkt, i) => {
+                        const isExpanded = false;
+                        const arrow = isExpanded ? '▾' : '▸';
+                        const colorizedHeader = colorizePacketHeader(escapeHtml(pkt.header), src, dst);
+                        html += `
+                            <div class="packet-block">
+                                <div class="packet-header" onclick="togglePacket(this)">
+                                    <span>${arrow}</span><span>${colorizedHeader}</span>
+                                </div>
+                                <div class="packet-content${isExpanded ? '' : ' hidden'}">
+                                    <pre>${escapeHtml(pkt.lines.join('\n'))}</pre>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    if (data.truncated) {
+                        html += '<div style="margin-top:10px;color:#8b949e;font-style:italic;">[Truncated - stream too large. Use Download PCAP to view full capture.]</div>';
+                    }
+                    
+                    container.innerHTML = html;
+                    container.dataset.loaded = 'true';
+                } else {
+                    container.innerHTML = '<div style="color:#8b949e;">No packets found</div>';
+                    container.dataset.loaded = 'true';
+                }
+            } catch(err) {
+                container.innerHTML = 'Error loading hexdump: ' + escapeHtml(err.message);
+            }
+        }
+        
+        function colorizePacketHeader(header, src, dst) {
+            return header
+                .replace(new RegExp(escapeHtml(src), 'g'), `<span style="color:#ff6b6b">${escapeHtml(src)}</span>`)
+                .replace(new RegExp(escapeHtml(dst), 'g'), `<span style="color:#58a6ff">${escapeHtml(dst)}</span>`);
+        }
+        
+        function togglePacket(headerEl) {
+            const contentEl = headerEl.nextElementSibling;
+            const arrowEl = headerEl.querySelector('span:first-child');
+            const isHidden = contentEl.classList.contains('hidden');
+            arrowEl.textContent = isHidden ? '▾' : '▸';
+            contentEl.classList.toggle('hidden');
+        }
+        
+        function expandAllPackets(container) {
+            container.querySelectorAll('.packet-content').forEach(el => el.classList.remove('hidden'));
+            container.querySelectorAll('.packet-header > span:first-child').forEach(el => el.textContent = '▾');
+        }
+        
+        function collapseAllPackets(container) {
+            container.querySelectorAll('.packet-content').forEach(el => el.classList.add('hidden'));
+            container.querySelectorAll('.packet-header > span:first-child').forEach(el => el.textContent = '▸');
+        }
+        
         function formatEvent(e) {
             const ts = (e.timestamp || '').slice(0, 19);
             let html = `<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; font-size: 0.85rem; min-width: 0;">`;
@@ -470,7 +571,7 @@
             html += `</div>`;
             
             if (e.src_ip && e.src_port && e.dest_ip && e.dest_port) {
-                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 10px;"><span style="color: #8b949e;">ASCII Transcript</span><button class="stream-btn" onclick="downloadPcap('${e.src_ip}', '${e.src_port}', '${e.dest_ip}', '${e.dest_port}')" style="margin-left: 10px; padding: 4px 10px;">Download PCAP</button></div><div class="ascii-transcript" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0; white-space: pre-wrap; overflow-wrap: break-word;"></div></div>`;
+                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 10px;"><div class="view-tabs"><button class="view-tab active" onclick="switchStreamView('ascii','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">ASCII Transcript</button><button class="view-tab" onclick="switchStreamView('hexdump','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">Hexdump</button></div><button class="stream-btn" onclick="downloadPcap('${e.src_ip}','${e.src_port}','${e.dest_ip}','${e.dest_port}')" style="margin-left: 12px;">Download PCAP</button></div><div class="stream-view-container" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0;"><div class="ascii-transcript" style="white-space: pre-wrap; overflow-wrap: break-word;"></div><div class="hexdump-content" style="display: none;"></div></div></div>`;
             }
             
             return html;
