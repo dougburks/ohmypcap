@@ -20,13 +20,13 @@ After analysis, you can view security alerts, network metadata, and extract stre
   - [Docker](#docker)
     - [docker run](#docker-run)
     - [docker compose](#docker-compose)
-    - [Build Your Own Image](#build-your-own-image)
-    - [Air-Gapped / Offline Deployment](#air-gapped--offline-deployment)
+    - [Air-Gapped / Offline Deployment for Docker](#air-gapped--offline-deployment-for-docker)
+    - [Build Your Own Docker Image](#build-your-own-docker-image)
   - [Podman](#podman)
     - [podman run](#podman-run)
     - [podman compose](#podman-compose)
-    - [Build Your Own Image](#build-your-own-image-1)
-    - [Air-Gapped / Offline Deployment](#air-gapped--offline-deployment-1)
+    - [Air-Gapped / Offline Deployment for Podman](#air-gapped--offline-deployment-for-podman)
+    - [Build Your Own Podman Image](#build-your-own-podman-image)
 - [Manual Installation](#manual-installation)
   - [Environment Variables](#environment-variables)
 - [Usage](#usage)
@@ -97,19 +97,7 @@ To restart:
 docker compose restart
 ```
 
-#### Build Your Own Image
-
-If you prefer to build your own Docker image, you can clone this github repo and then build the image:
-
-```bash
-git clone https://github.com/dougburks/ohmypcap
-cd ohmypcap
-docker build -t ohmypcap .
-mkdir -p ~/ohmypcap-data
-docker run -v ~/ohmypcap-data:/data -p 8000:8000 ohmypcap
-```
-
-#### Air-Gapped / Offline Deployment
+#### Air-Gapped / Offline Deployment for Docker
 
 The Docker image bakes in the Emerging Threats Open ruleset at build time, so it works without internet access. To deploy on an isolated network:
 
@@ -122,6 +110,18 @@ docker save ghcr.io/dougburks/ohmypcap:main > ohmypcap-airgap.tar
 # Then on the air-gapped machine:
 docker load < ohmypcap-airgap.tar
 docker run -v ~/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main
+```
+
+#### Build Your Own Docker Image
+
+If you prefer to build your own Docker image, you can clone this github repo and then build the image:
+
+```bash
+git clone https://github.com/dougburks/ohmypcap
+cd ohmypcap
+docker build -t ohmypcap .
+mkdir -p ~/ohmypcap-data
+docker run -v ~/ohmypcap-data:/data -p 8000:8000 ohmypcap
 ```
 
 ### Podman
@@ -166,20 +166,7 @@ To restart:
 podman compose restart
 ```
 
-#### Build Your Own Image
-
-If you prefer to build your own Podman image, you can clone this github repo and then build the image:
-
-```bash
-git clone https://github.com/dougburks/ohmypcap
-cd ohmypcap
-podman build -t ohmypcap .
-mkdir -p ~/ohmypcap-data
-podman run --userns=keep-id --user $(id -u):$(id -g) \
-  -v $HOME/ohmypcap-data:/data -p 8000:8000 ohmypcap
-```
-
-#### Air-Gapped / Offline Deployment
+#### Air-Gapped / Offline Deployment for Podman
 
 The Podman image bakes in the Emerging Threats Open ruleset at build time, so it works without internet access. To deploy on an isolated network:
 
@@ -193,6 +180,19 @@ podman save ghcr.io/dougburks/ohmypcap:main > ohmypcap-airgap.tar
 podman load < ohmypcap-airgap.tar
 podman run --userns=keep-id --user $(id -u):$(id -g) \
   -v $HOME/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main
+```
+
+#### Build Your Own Podman Image
+
+If you prefer to build your own Podman image, you can clone this github repo and then build the image:
+
+```bash
+git clone https://github.com/dougburks/ohmypcap
+cd ohmypcap
+podman build -t ohmypcap .
+mkdir -p ~/ohmypcap-data
+podman run --userns=keep-id --user $(id -u):$(id -g) \
+  -v $HOME/ohmypcap-data:/data -p 8000:8000 ohmypcap
 ```
 
 OhMyPCAP will check for internet access, update its NIDS rules if online (or use the baked-in rules if offline), and then prompt you to open http://localhost:8000/ohmypcap.html in your browser.
