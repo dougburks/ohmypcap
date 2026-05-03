@@ -453,6 +453,17 @@ class TestAPIEndpoints(unittest.TestCase):
         status, _ = self._get('/api/hexdump-stream?src=1.2.3.4&md5=' + 'a' * 32)
         self.assertEqual(status, 400)
 
+    def test_stream_filter_uses_and_not_or(self):
+        """download-stream and hexdump-stream must use 'and port' not 'or port'
+        to avoid pulling in unrelated UDP flows sharing the same destination port."""
+        import inspect
+        import ohmypcap
+        source = inspect.getsource(ohmypcap)
+        # Find the tcpdump filter lines for hexdump and download
+        self.assertIn("f'host {src} and host {dst} and port {sport} and port {dport}'", source)
+        self.assertIn("f\"host {src} and host {dst} and port {sport} and port {dport}\"", source)
+        self.assertNotIn("or port {dport}", source)
+
     def test_upload_traversal_filename(self):
         # Use unique PCAP content to avoid collision with test_upload_same_pcap_in_different_zips
         pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x02' * 100

@@ -485,7 +485,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
             try:
                 result = subprocess.run(
-                    ['tcpdump', '-r', pcap, '-w', '-', f"(host {src} and host {dst} and (port {sport} or port {dport}))"],
+                    ['tcpdump', '-r', pcap, '-w', '-', f"host {src} and host {dst} and port {sport} and port {dport}"],
                     capture_output=True, timeout=60
                 )
                 if result.returncode == 0 and len(result.stdout) > 0:
@@ -626,7 +626,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 result = subprocess.run(
                     ['tcpdump', '-r', pcap, '-X', '-nn',
-                     f'host {src} and host {dst} and (port {sport} or port {dport})'],
+                     f'host {src} and host {dst} and port {sport} and port {dport}'],
                     capture_output=True, text=True, timeout=60
                 )
                 packets = []

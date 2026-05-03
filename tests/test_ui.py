@@ -648,8 +648,16 @@ class TestUXFeatures(unittest.TestCase):
         self.assertIn('.view-tabs', HTML_CONTENT)
         self.assertIn('.view-tab', HTML_CONTENT)
 
-    def test_hexdump_colorized_headers(self):
-        self.assertIn('function colorizePacketHeader', JS_CONTENT)
+    def test_hexdump_direction_classes(self):
+        """Each packet block must have a src-dir or dst-dir class for colored left border."""
+        self.assertIn('.packet-block.src-dir', HTML_CONTENT)
+        self.assertIn('.packet-block.dst-dir', HTML_CONTENT)
+        self.assertNotIn('function colorizePacketHeader', JS_CONTENT)
+
+    def test_hexdump_direction_detection(self):
+        """loadHexdumpData must detect direction by splitting on ' > ' and checking src."""
+        self.assertIn("pkt.header.split(' > ')", JS_CONTENT)
+        self.assertIn("dirParts[0].includes(src)", JS_CONTENT)
 
 
 class TestSecurityInUI(unittest.TestCase):

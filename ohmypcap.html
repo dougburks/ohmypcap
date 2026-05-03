@@ -109,6 +109,8 @@
         .sankey-content { padding: 20px; }
         .agg-content { padding: 15px 20px 5px; }
         .packet-block { border: 1px solid #30363d; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
+        .packet-block.src-dir { border-left: 3px solid #ff6b6b; }
+        .packet-block.dst-dir { border-left: 3px solid #58a6ff; }
         .packet-header { background: #21262d; padding: 8px 12px; cursor: pointer; font-family: monospace; font-size: 0.8rem; color: #c9d1d9; display: flex; align-items: center; gap: 8px; }
         .packet-header:hover { background: #30363d; }
         .packet-content { padding: 10px 12px; background: #0d1117; }
@@ -416,11 +418,13 @@
                     data.packets.forEach((pkt, i) => {
                         const isExpanded = false;
                         const arrow = isExpanded ? '▾' : '▸';
-                        const colorizedHeader = colorizePacketHeader(escapeHtml(pkt.header), src, dst);
+                        const dirParts = pkt.header.split(' > ');
+                        const isSrc = dirParts.length >= 2 ? dirParts[0].includes(src) : pkt.header.indexOf(src) < pkt.header.indexOf(dst);
+                        const dirClass = isSrc ? 'src-dir' : 'dst-dir';
                         html += `
-                            <div class="packet-block">
+                            <div class="packet-block ${dirClass}">
                                 <div class="packet-header" onclick="togglePacket(this)">
-                                    <span>${arrow}</span><span>${colorizedHeader}</span>
+                                    <span>${arrow}</span><span>${escapeHtml(pkt.header)}</span>
                                 </div>
                                 <div class="packet-content${isExpanded ? '' : ' hidden'}">
                                     <pre>${escapeHtml(pkt.lines.join('\n'))}</pre>
@@ -442,12 +446,6 @@
             } catch(err) {
                 container.innerHTML = 'Error loading hexdump: ' + escapeHtml(err.message);
             }
-        }
-        
-        function colorizePacketHeader(header, src, dst) {
-            return header
-                .replace(new RegExp(escapeHtml(src), 'g'), `<span style="color:#ff6b6b">${escapeHtml(src)}</span>`)
-                .replace(new RegExp(escapeHtml(dst), 'g'), `<span style="color:#58a6ff">${escapeHtml(dst)}</span>`);
         }
         
         function togglePacket(headerEl) {
@@ -571,7 +569,7 @@
             html += `</div>`;
             
             if (e.src_ip && e.src_port && e.dest_ip && e.dest_port) {
-                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 10px;"><div class="view-tabs"><button class="view-tab active" onclick="switchStreamView('ascii','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">ASCII Transcript</button><button class="view-tab" onclick="switchStreamView('hexdump','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">Hexdump</button></div><button class="stream-btn" onclick="downloadPcap('${e.src_ip}','${e.src_port}','${e.dest_ip}','${e.dest_port}')" style="margin-left: 12px;">Download PCAP</button></div><div class="stream-view-container" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0;"><div class="ascii-transcript" style="white-space: pre-wrap; overflow-wrap: break-word;"></div><div class="hexdump-content" style="display: none;"></div></div></div>`;
+                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="color: #8b949e; font-size: 0.85rem; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 5px;">Payload</div><div style="display: flex; justify-content: flex-start; align-items: center; margin-bottom: 10px;"><div class="view-tabs"><button class="view-tab active" onclick="switchStreamView('ascii','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">ASCII Transcript</button><button class="view-tab" onclick="switchStreamView('hexdump','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">Hexdump</button></div><button class="stream-btn" onclick="downloadPcap('${e.src_ip}','${e.src_port}','${e.dest_ip}','${e.dest_port}')" style="margin-left: 12px;">Download PCAP</button></div><div class="stream-view-container" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0;"><div class="ascii-transcript" style="white-space: pre-wrap; overflow-wrap: break-word;"></div><div class="hexdump-content" style="display: none;"></div></div></div>`;
             }
             
             return html;

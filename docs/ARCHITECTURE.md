@@ -9,8 +9,8 @@ Browser ──HTTP──▶ ohmypcap.py (Python HTTP server, port 8000)
                       │
                       ├──▶ Suricata (subprocess, analyzes PCAP → eve.json)
                       ├──▶ SQLite (indexes eve.json → events.db)
-                      ├──▶ tcpdump (carves individual streams)
-                      └──▶ tshark (extracts ASCII transcripts)
+                       ├──▶ tcpdump (carves individual streams & hexdumps)
+                       └──▶ tshark (extracts ASCII transcripts)
 ```
 
 All state is file-based under `~/ohmypcap-data/`. No database server, no external services.
@@ -25,7 +25,7 @@ A stdlib-only Python HTTP server (`http.server.SimpleHTTPRequestHandler`). Handl
 2. **Client polls** `/api/check-status` until Suricata finishes
 3. **Suricata callback** (background thread) → indexes eve.json into SQLite
 4. **Client loads analysis** → UI fetches events via `/api/events`
-5. **User interacts** → stream carving (`tcpdump`), ASCII extraction (`tshark`), filtering (client-side)
+5. **User interacts** → stream carving (`tcpdump`), ASCII extraction (`tshark`), hexdump (`tcpdump -X`), filtering (client-side)
 
 ### Data Storage
 
