@@ -809,7 +809,7 @@ class TestFiltering(unittest.TestCase):
         self.assertIn('.footer', HTML_CONTENT)
 
     def test_has_footer_with_version(self):
-        self.assertIn('OhMyPCAP 1.1.0', HTML_CONTENT)
+        self.assertIn('OhMyPCAP 2.0.0', HTML_CONTENT)
 
     def test_has_footer_with_copyright(self):
         self.assertIn('Security Onion Solutions, LLC', HTML_CONTENT)
