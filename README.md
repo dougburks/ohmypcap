@@ -2,6 +2,16 @@
 
 A standalone web application for analyzing PCAP files using Suricata. View security alerts, browse network metadata (DNS, HTTP, TLS, flows), extract ASCII transcripts, view per-packet hexdumps, and carve individual streams — all from a single-page UI.
 
+## Screenshots
+
+The welcome screen allows you to upload a PCAP file or load a previous analysis:
+
+![Welcome screen](docs/images/ohmypcap-welcome.png)
+
+After analysis, you can view security alerts, network metadata, and extract streams:
+
+![Analysis screen](docs/images/ohmypcap-analysis.png)
+
 ## Table of Contents
 
 - [Quick Demo](#quick-demo)
@@ -29,16 +39,6 @@ A standalone web application for analyzing PCAP files using Suricata. View secur
 - [Development](#development)
 - [Testing](#testing)
 - [License](#license)
-
-## Screenshots
-
-The welcome screen allows you to upload a PCAP file or load a previous analysis:
-
-![Welcome screen](docs/images/ohmypcap-welcome.png)
-
-After analysis, you can view security alerts, network metadata, and extract streams:
-
-![Analysis screen](docs/images/ohmypcap-analysis.png)
 
 ## Quick Demo
 
