@@ -27,13 +27,13 @@ After analysis, you can view security alerts, network metadata, and extract stre
     - [podman compose](#podman-compose)
     - [Build Your Own Image](#build-your-own-image-1)
     - [Air-Gapped / Offline Deployment](#air-gapped--offline-deployment-1)
+- [Manual Installation](#manual-installation)
+  - [Environment Variables](#environment-variables)
 - [Usage](#usage)
   - [Analyze a PCAP](#analyze-a-pcap)
   - [Navigate Results](#navigate-results)
   - [Stream Analysis](#stream-analysis)
 - [Data Storage](#data-storage)
-- [Running without Docker or Podman](#running-without-docker-or-podman)
-  - [Environment Variables](#environment-variables)
 - [Configuration](#configuration)
 - [Security](#security)
 - [Development](#development)
@@ -53,7 +53,7 @@ Please note the following:
 
 ## Quick Installation
 
-For a private or permanent instance of OhMyPCAP, most folks will want to use our pre-built container image. We publish images for both Docker and Podman. If you prefer not to use a pre-built image, then there are other options shown [below](#running-without-docker-or-podman).
+For a private or permanent instance of OhMyPCAP, most folks will want to use our pre-built container image. We publish images for both Docker and Podman. If you prefer not to use a pre-built image, then there are other options shown [below](#manual-installation).
 
 ### OhMyDebn
 
@@ -199,6 +199,33 @@ OhMyPCAP will check for internet access, update its NIDS rules if online (or use
 
 To stop, just press Ctrl-C in the terminal window running OhMyPCAP or close the terminal window altogether.
 
+## Manual Installation
+
+If you prefer to run without Docker or Podman, then you will need these prerequisites:
+
+- **Python 3** (stdlib only — no pip packages required)
+- **Suricata** — for PCAP analysis and rule-based alerting
+- **suricata-update** — for downloading/updating Suricata rules (internet access required; the app will warn and continue without rules if offline)
+- **tcpdump** — for stream carving (`/api/download-stream`) and hexdump extraction (`/api/hexdump-stream`)
+- **tshark** — for ASCII transcript extraction (`/api/ascii-stream`)
+
+Once you have the prerequisites, then you can clone this github repo and run the server:
+```bash
+python3 ohmypcap.py
+```
+
+Then open http://localhost:8000/ohmypcap.html in your browser.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATA_DIR` | `~/ohmypcap-data` | Directory for analyzed PCAPs and Suricata config |
+| `BIND_ADDRESS` | `127.0.0.1` | Address to bind the HTTP server to |
+| `PORT` | `8000` | HTTP server port |
+
+Environment variables override the hardcoded defaults at startup.
+
 ## Usage
 
 Once you've connected to OhMyPCAP in your browser, here are some of the things you can do.
@@ -244,33 +271,6 @@ All analyzed PCAPs are stored in `~/ohmypcap-data/`. Each analysis gets a subdir
     events.db                  # SQLite index (auto-created after analysis)
     name.txt                   # Human-readable display name
 ```
-
-## Running without Docker or Podman
-
-If you prefer to run without Docker or Podman, then you will need these prerequisites:
-
-- **Python 3** (stdlib only — no pip packages required)
-- **Suricata** — for PCAP analysis and rule-based alerting
-- **suricata-update** — for downloading/updating Suricata rules (internet access required; the app will warn and continue without rules if offline)
-- **tcpdump** — for stream carving (`/api/download-stream`) and hexdump extraction (`/api/hexdump-stream`)
-- **tshark** — for ASCII transcript extraction (`/api/ascii-stream`)
-
-Once you have the prerequisites, then you can clone this github repo and run the server:
-```bash
-python3 ohmypcap.py
-```
-
-Then open http://localhost:8000/ohmypcap.html in your browser.
-
-### Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `DATA_DIR` | `~/ohmypcap-data` | Directory for analyzed PCAPs and Suricata config |
-| `BIND_ADDRESS` | `127.0.0.1` | Address to bind the HTTP server to |
-| `PORT` | `8000` | HTTP server port |
-
-Environment variables override the hardcoded defaults at startup.
 
 ## Configuration
 
