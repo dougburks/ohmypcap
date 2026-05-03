@@ -95,7 +95,7 @@ Analysis View (PCAP loaded)
   ├── Filter Bar (active filters as removable chips)
   ├── Stats Grid (clickable event-type cards, shows filtered/total counts when active)
   ├── Sankey Diagram (diagram mode — Source IP → Dest IP → Dest Port, reflects current filters)
-  ├── Aggregations (aggregation mode — frequency counts per column)
+  ├── Aggregations (frequency counts per column)
   └── Data Sections (tabbed tables)
 ```
 
@@ -122,7 +122,7 @@ let tabDataCache = {};       // cached event data per type
 | Rendering | `buildStats()`, `buildSections()`, `buildSection()`, `buildAllEvents()`, `buildRowForEvent()` | Build HTML |
 | Aggregation | `buildAggregationTables()`, `buildAggregationTablesAll()`, `buildAggregationsSection()`, `buildAggregationsSectionAll()` | Frequency grids |
 | Filtering | `applyFilter()`, `clearFilter()`, `clearAllFilters()`, `getFilteredEvents()` | Filter management |
-| Streams | `downloadPcap()`, `loadAsciiTranscript()`, `toggleRow()` | Stream analysis |
+| Streams | `downloadPcap()`, `loadAsciiTranscript()`, `loadHexdumpData()`, `switchStreamView()`, `togglePacket()`, `toggleRow()` | Stream analysis |
 | Utilities | `escapeHtml()`, `formatEvent()`, `extractValue()`, `extractAllValue()`, `getColumnsForType()` | Helpers |
 
 ### Column System
