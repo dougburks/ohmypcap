@@ -18,6 +18,7 @@ import shutil
 import sys
 import threading
 
+VERSION = '2.0.0'
 PORT = int(os.environ.get('PORT', 8000))
 BIND_ADDRESS = os.environ.get('BIND_ADDRESS', '127.0.0.1')
 DATA_DIR = os.environ.get('DATA_DIR', os.path.expanduser('~/ohmypcap-data'))
@@ -1169,21 +1170,29 @@ if __name__ == '__main__':
         print("Please install them and try again.")
         sys.exit(1)
     
-    # Run setup - handles rules download first
-    setup_suricata_config()
-    
-    # Then show banner
-    print(r"""
+    # Show banner immediately so users know the app is alive
+    title = f'Welcome to OhMyPCAP {VERSION}!'
+    padding = ' ' * (61 - len(title))
+    print(f"""
     ================================================================
-    | Welcome to OhMyPCAP!                                         |
+    | {title}{padding}|
     |                                                              |
     | Analyze pcap files from the web or your local collection.    |
     |                                                              |
     | View alerts and then slice and dice your network metadata!   |
     ================================================================
     """)
-    
-    print(f"OhMyPCAP running at http://{BIND_ADDRESS}:{PORT}/ohmypcap.html\n")
+
+    # Run setup - handles rules download first
+    setup_suricata_config()
+
+    msg = f'OhMyPCAP running at http://{BIND_ADDRESS}:{PORT}/ohmypcap.html'
+    padding = ' ' * (61 - len(msg))
+    print(f"""
+    ================================================================
+    | {msg}{padding}|
+    ================================================================
+    """)
     
     with ThreadedTCPServer((BIND_ADDRESS, PORT), Handler) as httpd:
         httpd.serve_forever()

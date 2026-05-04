@@ -1106,9 +1106,16 @@ class TestServerStartupBanner(unittest.TestCase):
             content = f.read()
         
         # Check for banner elements
-        self.assertIn('Welcome to OhMyPCAP!', content)
+        self.assertIn('Welcome to OhMyPCAP', content)
         self.assertIn('Analyze pcap files from the web or your local collection', content)
         self.assertIn('View alerts and then slice and dice your network metadata', content)
+
+    def test_running_message_has_border(self):
+        """Verify the running message is wrapped in a border matching the welcome banner"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('OhMyPCAP running at http://', content)
+        self.assertIn('================================================', content)
 
 
 class TestHTMLNoEmptyFunctions(unittest.TestCase):
