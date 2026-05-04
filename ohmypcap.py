@@ -346,6 +346,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self._add_security_headers()
+        # Prevent browser caching of HTML and static assets so upgrades
+        # are reflected immediately without manual cache clearing.
+        if self.path.endswith('.html') or self.path.startswith('/static/'):
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
         super().end_headers()
 
     def _send_error(self, code, message):

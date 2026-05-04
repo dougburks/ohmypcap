@@ -879,6 +879,16 @@ class TestSecurityHeaders(unittest.TestCase):
         self.assertIn('def end_headers(self):', content)
         self.assertIn('self._add_security_headers()', content)
 
+    def test_html_cache_control_headers(self):
+        """Verify Cache-Control headers are sent for HTML and static assets"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("no-cache, no-store, must-revalidate", content)
+        self.assertIn("self.path.endswith('.html')", content)
+        self.assertIn("self.path.startswith('/static/')", content)
+        self.assertIn("Pragma', 'no-cache'", content)
+        self.assertIn("Expires', '0'", content)
+
 
 class TestSubprocessTimeouts(unittest.TestCase):
     def test_tcpdump_has_timeout(self):
