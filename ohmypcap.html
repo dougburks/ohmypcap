@@ -9,29 +9,34 @@
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0d1117; color: #c9d1d9; line-height: 1.6; }
         .container { width: 100%; padding: 20px; box-sizing: border-box; padding-bottom: 80px; }
         header { background: linear-gradient(135deg, #161b22 0%, #21262d 100%); padding: 30px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #30363d; }
+        #mainHeader { padding: 0; background: transparent; border: none; }
         h1 { font-size: 2rem; color: #58a6ff; }
         .subtitle { color: #8b949e; font-size: 0.9rem; }
-        .stats-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 15px; margin-bottom: 20px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .stat-card { background: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d; text-align: center; cursor: pointer; }
         .stat-card:hover { border-color: #58a6ff; }
         .stat-card.tab-active { border-color: #58a6ff; background: #21262d; }
+        .stat-card.stat-disabled { opacity: 0.5; cursor: default; }
+        .stat-card.stat-disabled:hover { border-color: #30363d; }
         .stat-number { font-size: 2.5rem; font-weight: bold; }
         .stat-label { color: #8b949e; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
-        .section { background: #161b22; border-radius: 12px 12px 0 0; margin-bottom: 20px; border: 1px solid #30363d; overflow: hidden; }
+        .section { background: #161b22; overflow: hidden; }
         .section-hidden { display: none; }
         .section-header { background: #21262d; padding: 15px 20px; font-size: 1.1rem; font-weight: 600; color: #f0f6fc; }
-        .section-content { padding: 20px; overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .section-content { padding: 20px; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; table-layout: fixed; }
         th { text-align: left; padding: 12px; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; cursor: pointer; position: sticky; top: 0; z-index: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         th:hover { background: #30363d; }
-        td { padding: 12px; border-bottom: 1px solid #30363d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        td { padding: 12px; border-bottom: 1px solid #30363d; overflow-wrap: break-word; vertical-align: top; }
         tr { cursor: pointer; }
         tr:hover { background: #21262d; }
         tr.expanded-row td { border-bottom: none; }
         .detail-row { display: none; }
         .detail-row.visible { display: table-row; }
-        .detail-row td { padding: 15px 20px; background: #0d1117; }
-        .detail-content { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem; color: #c9d1d9; word-break: break-all; }
+        .detail-row td { padding: 15px 20px; background: #0d1117; white-space: normal; }
+        .detail-content { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem; color: #c9d1d9; overflow-wrap: break-word; }
+        .ascii-transcript div { overflow-wrap: break-word; word-break: break-all; }
+        .ascii-loading { display: inline-block; width: 12px; height: 12px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; vertical-align: middle; }
         .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
         .badge-info { background: rgba(88, 166, 255, 0.2); color: #58a6ff; }
         .badge-danger { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
@@ -59,21 +64,23 @@
         .modal-content { background: #161b22; border: 1px solid #30363d; border-radius: 12px; width: 90%; max-width: 900px; max-height: 80vh; overflow: auto; padding: 20px; }
         .modal-header { display: flex; justify-content: flex-start; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
         .modal-header h3 { color: #f0f6fc; }
-        .modal-close { background: none; border: none; color: #8b949e; font-size: 1.5rem; cursor: pointer; }
-        .stream-output { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem; white-space: pre-wrap; color: #c9d1d9; background: #0d1117; padding: 15px; border-radius: 8px; overflow-x: auto; }
+        .modal-close { background: none; border: none; color: #8b949e; font-size: 1.5rem; cursor: pointer; margin-left: auto; }
+        .stream-output { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-all; color: #c9d1d9; background: #0d1117; padding: 15px; border-radius: 8px; }
         .sort-arrow { margin-left: 5px; font-size: 0.6rem; }
         .loading { text-align: center; padding: 40px; color: #8b949e; }
         .agg-row { cursor: pointer; }
         .agg-row:hover { background: #30363d !important; }
         .agg-table { display: block; margin-bottom: 12px; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #161b22; }
-        .agg-table .agg-header { display: flex; width: 100%; justify-content: center; align-items: center; text-align: center; padding: 12px; box-sizing: border-box; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; }
-        .agg-table table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .agg-table .agg-header { display: flex; width: 100%; justify-content: space-between; align-items: center; padding: 12px; box-sizing: border-box; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; }
+        .agg-close { background: none; border: none; color: #8b949e; font-size: 1rem; cursor: pointer; line-height: 1; padding: 0 4px; margin-left: 8px; }
+        .agg-close:hover { color: #ff6b6b; }
+        .agg-table table { width: 100%; table-layout: auto; border-collapse: collapse; font-size: 0.9rem; }
         .agg-table th { text-align: left; padding: 12px; background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid #30363d; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .agg-table th:hover { background: #30363d; }
-        .agg-table td { padding: 12px; background: transparent; border-bottom: 1px solid #30363d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .agg-table td { padding: 12px; background: transparent; border-bottom: 1px solid #30363d; }
         .agg-table tr { cursor: pointer; }
         .agg-table tr:hover { background: #21262d; }
-        .filter-bar { background: #1c2333; border: 1px solid #58a6ff; border-radius: 8px; padding: 10px 15px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .filter-bar { background: #1c2333; border: 1px solid #58a6ff; border-radius: 8px; padding: 10px 15px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .filter-label { color: #58a6ff; font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
         .filter-chip { background: #58a6ff; color: #0d1117; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
         .filter-chip-remove { cursor: pointer; font-size: 1rem; line-height: 1; opacity: 0.7; }
@@ -82,14 +89,52 @@
         .filter-clear-all:hover { background: rgba(255, 107, 107, 0.1); }
         .filtered-row { background: rgba(88, 166, 255, 0.05); }
         .agg-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 0; padding: 0 0 5px; }
-        .agg-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .agg-section { flex: 0 1 auto; margin-bottom: 0; }
+        .agg-cell { overflow-wrap: break-word; word-break: break-word; }
         .footer { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; color: #8b949e; font-size: 0.85rem; border-top: 1px solid #30363d; background: #161b22; z-index: 1000; }
         .advanced-toggle { display: flex; align-items: center; gap: 10px; color: #8b949e; font-size: 0.85rem; }
         .advanced-toggle input[type="checkbox"] { appearance: none; width: 40px; height: 20px; background: #30363d; border-radius: 10px; position: relative; cursor: pointer; outline: none; }
         .advanced-toggle input[type="checkbox"]::before { content: ''; position: absolute; width: 16px; height: 16px; background: #8b949e; border-radius: 50%; top: 2px; left: 2px; transition: 0.2s; }
         .advanced-toggle input[type="checkbox"]:checked { background: #58a6ff; }
         .advanced-toggle input[type="checkbox"]:checked::before { left: 22px; background: #fff; }
+        .drop-zone-active { border-color: #58a6ff !important; background: #1c2333 !important; }
+        .sankey-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
+        .agg-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
+        .data-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
+        .data-panel-heading { background: #21262d; padding: 12px 20px; color: #8b949e; font-size: 0.85rem; font-weight: 600; user-select: none; border-bottom: 1px solid #30363d; }
+        #mainHeader { margin-bottom: 20px; }
+        #aggregations { margin-bottom: 20px; }
+        .section-toggle-bar { background: #21262d; padding: 12px 20px; color: #8b949e; font-size: 0.85rem; font-weight: 600; cursor: pointer; user-select: none; border-bottom: 1px solid #30363d; }
+        .section-toggle-bar:hover { background: #30363d; }
+        .sankey-content { padding: 20px; }
+        .agg-content { padding: 15px 20px 5px; }
+        .packet-block { border: 1px solid #30363d; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
+        .packet-block.src-dir { border-left: 3px solid #ff6b6b; }
+        .packet-block.dst-dir { border-left: 3px solid #58a6ff; }
+        .packet-header { background: #21262d; padding: 8px 12px; cursor: pointer; font-family: monospace; font-size: 0.8rem; color: #c9d1d9; display: flex; align-items: center; gap: 8px; }
+        .packet-header:hover { background: #30363d; }
+        .packet-content { padding: 10px 12px; background: #0d1117; }
+        .packet-content.hidden { display: none; }
+        .packet-content pre { margin: 0; font-family: monospace; font-size: 0.75rem; color: #c9d1d9; white-space: pre-wrap; word-break: break-all; }
+        .packet-controls { display: flex; justify-content: flex-start; gap: 10px; margin-bottom: 10px; }
+        .packet-control-btn { background: none; border: 1px solid #30363d; color: #8b949e; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
+        .packet-control-btn:hover { background: #30363d; color: #c9d1d9; }
+        .view-tabs { display: flex; gap: 0; border-bottom: 1px solid #30363d; margin-bottom: 10px; }
+        .view-tab { background: none; border: none; color: #8b949e; padding: 6px 12px; cursor: pointer; font-size: 0.8rem; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+        .view-tab:hover { color: #c9d1d9; }
+        .view-tab.active { color: #c9d1d9; border-bottom-color: #58a6ff; }
+        .sankey-close { position: absolute; top: 10px; right: 15px; background: none; border: none; color: #8b949e; font-size: 1.2rem; font-weight: 600; cursor: pointer; line-height: 1; padding: 0; z-index: 10; }
+        .sankey-close:hover { color: #ff6b6b; }
+        .sankey-svg { width: 100%; height: auto; display: block; }
+        .sankey-node rect { fill: #21262d; stroke: #30363d; stroke-width: 1; rx: 4; shape-rendering: crispEdges; }
+        .sankey-link { fill: none; stroke-opacity: 0.35; transition: stroke-opacity 0.2s; cursor: pointer; }
+        .sankey-link:hover { stroke-opacity: 0.7; }
+        .sankey-node rect { fill: #21262d; stroke: #30363d; stroke-width: 1; rx: 4; shape-rendering: crispEdges; cursor: pointer; }
+        .sankey-node text { fill: #c9d1d9; font-size: 10px; font-family: monospace; pointer-events: none; text-shadow: 0 0 3px #0d1117, 0 0 3px #0d1117; }
+        .sankey-title { fill: #8b949e; font-size: 12px; font-weight: 600; text-transform: uppercase; }
     </style>
+    <script src="static/d3.min.js"></script>
+    <script src="static/d3-sankey.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -107,7 +152,22 @@
             <div class="loading-modal">
                 <div class="spinner"><div class="spinner-dot"></div></div>
                 <div class="loading-text" id="loadingText">Loading...</div>
-                <div class="loading-subtext">Parsing events, this may take a moment for large captures</div>
+                <div class="loading-subtext">This may take a minute or two depending on file size</div>
+            </div>
+        </div>
+        
+        <div class="modal" id="errorModal">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3 style="color: #ff6b6b;">Error</h3>
+                    <button class="modal-close" onclick="closeErrorModal()">&times;</button>
+                </div>
+                <div style="padding: 20px;">
+                    <p id="errorMessage" style="color: #c9d1d9; margin-bottom: 20px;"></p>
+                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                        <button onclick="closeErrorModal()" style="background: #30363d; color: #c9d1d9; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Close</button>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -126,25 +186,42 @@
                 </div>
             </div>
         </div>
+
+        <div class="modal" id="reanalyzeConfirmModal">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3 style="color: #58a6ff;">Confirm Re-analyze</h3>
+                    <button class="modal-close" onclick="closeReanalyzeModal()">&times;</button>
+                </div>
+                <div style="padding: 20px;">
+                    <p style="color: #c9d1d9; margin-bottom: 20px;">This will delete the existing analysis for <span id="reanalyzeFileName" style="font-weight: 600; color: #f0f6fc;"></span> and re-run Suricata. The PCAP file will be preserved.</p>
+                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                        <button onclick="closeReanalyzeModal()" style="background: #30363d; color: #c9d1d9; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Cancel</button>
+                        <button onclick="confirmReanalyze()" style="background: #58a6ff; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Re-analyze</button>
+                    </div>
+                </div>
+            </div>
+        </div>
         
         <header id="mainHeader" style="display: none;">
             <div id="headerContent" style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;"></div>
-            <div id="instructions" style="color: #8b949e; font-size: 0.8rem; margin-top: 8px;">
-                <span style="color: #58a6ff;">💡</span> Start by reviewing security alerts. Drill into one of the rows to see the ASCII transcript and optionally download the PCAP file for that stream. Once you've reviewed the security alerts, then you can change to one of the other data types like DNS, HTTP, or TLS. If you need to see aggregate values or do filtering, click the Advanced toggle in the upper right.
-            </div>
         </header>
         
-        <div class="stats-grid" id="statsGrid"></div>
         <div id="filterBarContainer"></div>
+        <div class="stats-grid" id="statsGrid"></div>
+        <div class="sankey-panel" id="sankeyPanel" style="display: none;"></div>
         <div id="aggregations"></div>
-        <div id="sections"></div>
+        <div class="data-panel" id="dataPanel" style="display: none;">
+            <div class="data-panel-heading">Data Table</div>
+            <div id="sections"></div>
+        </div>
         
         <div id="inputBoxes" style="display: none; padding: 20px;"></div>
         
         <script>
         function escapeHtml(str) {
-            if (!str) return '';
-            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            if (str == null) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
         
         function showTab(sectionId, el) {
@@ -188,20 +265,23 @@
                 }
                 if (sectionEl) buildAllEvents();
                 if (sectionEl && advancedMode) buildAggregationsSectionAll();
-                if (!advancedMode) updateFilterBarVisibility();
+                updateFilterBarVisibility();
+                const filtered = getFilteredEvents('section-all', allEvents, 'all');
+                updateSankeyDiagram(filtered);
                 return;
             }
             
             if (tabDataCache[eventType]) {
                 sections[eventType] = tabDataCache[eventType];
+                const filtered = getFilteredEvents(sectionId, tabDataCache[eventType], eventType);
                 if (advancedMode && sectionEl) {
-                    const filtered = getFilteredEvents(sectionEl.id, tabDataCache[eventType], eventType);
                     buildAggregationsSection(eventType, filtered);
                     buildSection(eventType, tabDataCache[eventType]);
                 } else if (sectionEl) {
                     buildSection(eventType, tabDataCache[eventType]);
-                    updateFilterBarVisibility();
                 }
+                updateFilterBarVisibility();
+                updateSankeyDiagram(filtered);
                 return;
             }
             
@@ -211,14 +291,15 @@
                 tabDataCache[eventType] = events;
                 
                 sections[eventType] = events;
+                const filtered = getFilteredEvents(sectionId, events, eventType);
                 if (advancedMode) {
                     if (sectionEl) {
-                        const filtered = getFilteredEvents(sectionEl.id, events, eventType);
                         buildAggregationsSection(eventType, filtered);
                     }
                 }
                 if (sectionEl) buildSection(eventType, events);
-                if (!advancedMode) updateFilterBarVisibility();
+                updateFilterBarVisibility();
+                updateSankeyDiagram(filtered);
             } catch(e) {
                 console.error('Failed to load tab data:', e);
                 if (sectionEl) {
@@ -246,6 +327,7 @@
                             const dstPort = parts[3];
                             const pre = asciiDiv.querySelector('.ascii-transcript');
                             if (pre && !pre.innerHTML) {
+                                pre.innerHTML = '<div style="color:#8b949e;padding:10px 0;display:flex;align-items:center;gap:8px;"><span class="ascii-loading"></span>Loading ASCII transcript...</div>';
                                 loadAsciiTranscript(srcIp, srcPort, dstIp, dstPort, pre);
                             }
                         }
@@ -255,8 +337,8 @@
         }
         
         async function loadAsciiTranscript(src, sport, dst, dport, pre) {
-            const md5Param = currentMd5 ? '&md5=' + currentMd5 : '';
-            const url = `/api/ascii-stream?src=${src}&sport=${sport}&dst=${dst}&dport=${dport}${md5Param}`;
+            const md5Param = currentMd5 ? '&md5=' + encodeURIComponent(currentMd5) : '';
+            const url = `/api/ascii-stream?src=${encodeURIComponent(src)}&sport=${encodeURIComponent(sport)}&dst=${encodeURIComponent(dst)}&dport=${encodeURIComponent(dport)}${md5Param}`;
             try {
                 const resp = await fetch(url);
                 const text = await resp.text();
@@ -300,117 +382,202 @@
             }
         }
         
+        async function switchStreamView(view, src, sport, dst, dport, btn) {
+            const wrapper = btn.closest('div[id^="ascii-"]');
+            const asciiEl = wrapper.querySelector('.ascii-transcript');
+            const hexdumpEl = wrapper.querySelector('.hexdump-content');
+            const tabs = wrapper.querySelectorAll('.view-tab');
+            
+            tabs.forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            
+            if (view === 'hexdump') {
+                asciiEl.style.display = 'none';
+                hexdumpEl.style.display = '';
+                if (hexdumpEl.dataset.loaded !== 'true') {
+                    hexdumpEl.innerHTML = '<div style="color:#8b949e;padding:10px 0;"><span class="ascii-loading"></span>Loading hexdump...</div>';
+                    await loadHexdumpData(src, sport, dst, dport, hexdumpEl);
+                }
+            } else {
+                hexdumpEl.style.display = 'none';
+                asciiEl.style.display = '';
+            }
+        }
+        
+        async function loadHexdumpData(src, sport, dst, dport, container) {
+            const md5Param = currentMd5 ? '&md5=' + encodeURIComponent(currentMd5) : '';
+            const url = `/api/hexdump-stream?src=${encodeURIComponent(src)}&sport=${encodeURIComponent(sport)}&dst=${encodeURIComponent(dst)}&dport=${encodeURIComponent(dport)}${md5Param}`;
+            
+            try {
+                const resp = await fetch(url);
+                const data = await resp.json();
+                
+                if (data.packets && data.packets.length > 0) {
+                    let html = '<div class="packet-controls"><button class="packet-control-btn" onclick="expandAllPackets(this.parentNode.parentNode)">Expand All</button><button class="packet-control-btn" onclick="collapseAllPackets(this.parentNode.parentNode)">Collapse All</button></div>';
+                    
+                    data.packets.forEach((pkt, i) => {
+                        const isExpanded = false;
+                        const arrow = isExpanded ? '▾' : '▸';
+                        const dirParts = pkt.header.split(' > ');
+                        const isSrc = dirParts.length >= 2 ? dirParts[0].includes(src) : pkt.header.indexOf(src) < pkt.header.indexOf(dst);
+                        const dirClass = isSrc ? 'src-dir' : 'dst-dir';
+                        html += `
+                            <div class="packet-block ${dirClass}">
+                                <div class="packet-header" onclick="togglePacket(this)">
+                                    <span>${arrow}</span><span>${escapeHtml(pkt.header)}</span>
+                                </div>
+                                <div class="packet-content${isExpanded ? '' : ' hidden'}">
+                                    <pre>${escapeHtml(pkt.lines.join('\n'))}</pre>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    if (data.truncated) {
+                        html += '<div style="margin-top:10px;color:#8b949e;font-style:italic;">[Truncated - stream too large. Use Download PCAP to view full capture.]</div>';
+                    }
+                    
+                    container.innerHTML = html;
+                    container.dataset.loaded = 'true';
+                } else {
+                    container.innerHTML = '<div style="color:#8b949e;">No packets found</div>';
+                    container.dataset.loaded = 'true';
+                }
+            } catch(err) {
+                container.innerHTML = 'Error loading hexdump: ' + escapeHtml(err.message);
+            }
+        }
+        
+        function togglePacket(headerEl) {
+            const contentEl = headerEl.nextElementSibling;
+            const arrowEl = headerEl.querySelector('span:first-child');
+            const isHidden = contentEl.classList.contains('hidden');
+            arrowEl.textContent = isHidden ? '▾' : '▸';
+            contentEl.classList.toggle('hidden');
+        }
+        
+        function expandAllPackets(container) {
+            container.querySelectorAll('.packet-content').forEach(el => el.classList.remove('hidden'));
+            container.querySelectorAll('.packet-header > span:first-child').forEach(el => el.textContent = '▾');
+        }
+        
+        function collapseAllPackets(container) {
+            container.querySelectorAll('.packet-content').forEach(el => el.classList.add('hidden'));
+            container.querySelectorAll('.packet-header > span:first-child').forEach(el => el.textContent = '▸');
+        }
+        
         function formatEvent(e) {
             const ts = (e.timestamp || '').slice(0, 19);
-            let html = `<div style="display: grid; grid-template-columns: 120px 1fr; gap: 8px; font-size: 0.85rem;">`;
-            html += `<span style="color: #8b949e;">Timestamp</span><span>${ts}</span>`;
-            html += `<span style="color: #8b949e;">Event Type</span><span><span class="badge badge-info">${e.event_type || ''}</span></span>`;
-            html += `<span style="color: #8b949e;">Protocol</span><span>${e.proto || ''}</span>`;
-            html += `<span style="color: #8b949e;">Flow ID</span><span>${e.flow_id || ''}</span>`;
-            html += `<span style="color: #8b949e;">PCAP Count</span><span>${e.pcap_cnt || ''}</span>`;
+            let html = `<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; font-size: 0.85rem; min-width: 0;">`;
+            html += `<span style="color: #8b949e;">Timestamp</span><span>${escapeHtml(ts)}</span>`;
+            html += `<span style="color: #8b949e;">Event Type</span><span><span class="badge badge-info">${escapeHtml(e.event_type || '')}</span></span>`;
+            html += `<span style="color: #8b949e;">Protocol</span><span>${escapeHtml(e.proto || '')}</span>`;
+            html += `<span style="color: #8b949e;">Flow ID</span><span>${escapeHtml(String(e.flow_id || ''))}</span>`;
+            html += `<span style="color: #8b949e;">PCAP Count</span><span>${escapeHtml(String(e.pcap_cnt || ''))}</span>`;
             
             html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px;">Connection</span>`;
-            html += `<span style="color: #8b949e;">Source IP</span><span class="mono">${e.src_ip || ''}</span><span style="color: #8b949e;">Source Port</span><span class="mono">${e.src_port || ''}</span>`;
-            html += `<span style="color: #8b949e;">Dest IP</span><span class="mono">${e.dest_ip || ''}</span><span style="color: #8b949e;">Dest Port</span><span class="mono">${e.dest_port || ''}</span>`;
+            html += `<span style="color: #8b949e;">Source IP</span><span class="mono">${escapeHtml(e.src_ip || '')}</span><span style="color: #8b949e;">Source Port</span><span class="mono">${escapeHtml(String(e.src_port || ''))}</span>`;
+            html += `<span style="color: #8b949e;">Dest IP</span><span class="mono">${escapeHtml(e.dest_ip || '')}</span><span style="color: #8b949e;">Dest Port</span><span class="mono">${escapeHtml(String(e.dest_port || ''))}</span>`;
             
             if (e.event_type === 'alert') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #ff6b6b;">Alert Details</span>`;
-                html += `<span style="color: #8b949e;">Signature</span><span>${e.alert?.signature || ''}</span>`;
-                html += `<span style="color: #8b949e;">Category</span><span><span class="badge badge-danger">${e.alert?.category || ''}</span></span>`;
-                html += `<span style="color: #8b949e;">Severity</span><span>${e.alert?.severity || ''}</span>`;
-                html += `<span style="color: #8b949e;">Action</span><span>${e.alert?.action || ''}</span>`;
-                html += `<span style="color: #8b949e;">GID</span><span>${e.alert?.gid || ''}</span>`;
-                html += `<span style="color: #8b949e;">SID</span><span>${e.alert?.signature_id || ''}</span>`;
+                html += `<span style="color: #8b949e;">Signature</span><span>${escapeHtml(e.alert?.signature || '')}</span>`;
+                html += `<span style="color: #8b949e;">Category</span><span><span class="badge badge-danger">${escapeHtml(e.alert?.category || '')}</span></span>`;
+                html += `<span style="color: #8b949e;">Severity</span><span>${escapeHtml(String(e.alert?.severity || ''))}</span>`;
+                html += `<span style="color: #8b949e;">Action</span><span>${escapeHtml(e.alert?.action || '')}</span>`;
+                html += `<span style="color: #8b949e;">GID</span><span>${escapeHtml(String(e.alert?.gid || ''))}</span>`;
+                html += `<span style="color: #8b949e;">SID</span><span>${escapeHtml(String(e.alert?.signature_id || ''))}</span>`;
+                html += `<span style="color: #8b949e;">Rule</span><span class="mono" style="white-space: pre-wrap; overflow-wrap: break-word; min-width: 0;">${escapeHtml(e.alert?.rule || '')}</span>`;
             }
             
             if (e.event_type === 'dns') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #66bb6a;">DNS Details</span>`;
-                html += `<span style="color: #8b949e;">Type</span><span>${e.dns?.type || ''}</span>`;
-                html += `<span style="color: #8b949e;">Query Name</span><span class="mono">${e.dns?.rrname || ''}</span>`;
-                html += `<span style="color: #8b949e;">Query Type</span><span>${e.dns?.rrtype || ''}</span>`;
+                html += `<span style="color: #8b949e;">Type</span><span>${escapeHtml(e.dns?.type || '')}</span>`;
+                html += `<span style="color: #8b949e;">Query Name</span><span class="mono">${escapeHtml(e.dns?.rrname || '')}</span>`;
+                html += `<span style="color: #8b949e;">Query Type</span><span>${escapeHtml(e.dns?.rrtype || '')}</span>`;
                 if (e.dns?.answers) {
-                    html += `<span style="color: #8b949e;">Answers</span><span class="mono">${e.dns.answers.map(a => a.rdata).join(', ')}</span>`;
+                    html += `<span style="color: #8b949e;">Answers</span><span class="mono">${escapeHtml(e.dns.answers.map(a => a.rdata).join(', '))}</span>`;
                 }
             }
             
             if (e.event_type === 'http') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #ffa726;">HTTP Details</span>`;
-                html += `<span style="color: #8b949e;">Method</span><span><span class="badge badge-info">${e.http?.http_method || ''}</span></span>`;
-                html += `<span style="color: #8b949e;">URL</span><span class="mono">${e.http?.url || ''}</span>`;
-                html += `<span style="color: #8b949e;">Host</span><span class="mono">${e.http?.hostname || ''}</span>`;
-                html += `<span style="color: #8b949e;">Status</span><span>${e.http?.status || ''}</span>`;
-                html += `<span style="color: #8b949e;">User Agent</span><span style="word-break: break-all;">${e.http?.http_user_agent || ''}</span>`;
-                html += `<span style="color: #8b949e;">Content Type</span><span>${e.http?.http_content_type || ''}</span>`;
+                html += `<span style="color: #8b949e;">Method</span><span><span class="badge badge-info">${escapeHtml(e.http?.http_method || '')}</span></span>`;
+                html += `<span style="color: #8b949e;">Host</span><span class="mono">${escapeHtml(e.http?.hostname || '')}</span>`;
+                html += `<span style="color: #8b949e;">URL</span><span class="mono">${escapeHtml(e.http?.url || '')}</span>`;
+                html += `<span style="color: #8b949e;">User Agent</span><span style="word-break: break-all;">${escapeHtml(e.http?.http_user_agent || '')}</span>`;
+                html += `<span style="color: #8b949e;">Status</span><span>${escapeHtml(String(e.http?.status || ''))}</span>`;
+                html += `<span style="color: #8b949e;">Content Type</span><span>${escapeHtml(e.http?.http_content_type || '')}</span>`;
             }
             
             if (e.event_type === 'tls') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #58a6ff;">TLS Details</span>`;
-                html += `<span style="color: #8b949e;">SNI</span><span class="mono">${e.tls?.sni || ''}</span>`;
-                html += `<span style="color: #8b949e;">Version</span><span><span class="badge badge-info">${e.tls?.version || ''}</span></span>`;
-                html += `<span style="color: #8b949e;">Subject</span><span class="mono">${e.tls?.subject || ''}</span>`;
-                html += `<span style="color: #8b949e;">Issuer</span><span class="mono">${e.tls?.issuerdn || ''}</span>`;
-                html += `<span style="color: #8b949e;">Not Before</span><span>${e.tls?.notbefore || ''}</span>`;
-                html += `<span style="color: #8b949e;">Not After</span><span>${e.tls?.notafter || ''}</span>`;
-                html += `<span style="color: #8b949e;">Fingerprint</span><span class="mono">${e.tls?.fingerprint || ''}</span>`;
+                html += `<span style="color: #8b949e;">SNI</span><span class="mono">${escapeHtml(e.tls?.sni || '')}</span>`;
+                html += `<span style="color: #8b949e;">Version</span><span><span class="badge badge-info">${escapeHtml(e.tls?.version || '')}</span></span>`;
+                html += `<span style="color: #8b949e;">Subject</span><span class="mono">${escapeHtml(e.tls?.subject || '')}</span>`;
+                html += `<span style="color: #8b949e;">Issuer</span><span class="mono">${escapeHtml(e.tls?.issuerdn || '')}</span>`;
+                html += `<span style="color: #8b949e;">Not Before</span><span>${escapeHtml(e.tls?.notbefore || '')}</span>`;
+                html += `<span style="color: #8b949e;">Not After</span><span>${escapeHtml(e.tls?.notafter || '')}</span>`;
+                html += `<span style="color: #8b949e;">Fingerprint</span><span class="mono">${escapeHtml(e.tls?.fingerprint || '')}</span>`;
             }
             
             if (e.event_type === 'flow') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #bc8cff;">Flow Details</span>`;
-                html += `<span style="color: #8b949e;">State</span><span>${e.flow?.state || ''}</span>`;
-                html += `<span style="color: #8b949e;">Age</span><span>${e.flow?.age || ''} seconds</span>`;
-                html += `<span style="color: #8b949e;">Pkts to Server</span><span>${(e.flow?.pkts_toserver || 0).toLocaleString()}</span>`;
-                html += `<span style="color: #8b949e;">Pkts to Client</span><span>${(e.flow?.pkts_toclient || 0).toLocaleString()}</span>`;
-                html += `<span style="color: #8b949e;">Bytes to Server</span><span>${(e.flow?.bytes_toserver || 0).toLocaleString()}</span>`;
-                html += `<span style="color: #8b949e;">Bytes to Client</span><span>${(e.flow?.bytes_toclient || 0).toLocaleString()}</span>`;
-                html += `<span style="color: #8b949e;">Alerted</span><span>${e.flow?.alerted ? 'Yes' : 'No'}</span>`;
+                html += `<span style="color: #8b949e;">State</span><span>${escapeHtml(e.flow?.state || '')}</span>`;
+                html += `<span style="color: #8b949e;">Age</span><span>${escapeHtml(String(e.flow?.age || ''))} seconds</span>`;
+                html += `<span style="color: #8b949e;">Pkts to Server</span><span>${escapeHtml(String((e.flow?.pkts_toserver || 0).toLocaleString()))}</span>`;
+                html += `<span style="color: #8b949e;">Pkts to Client</span><span>${escapeHtml(String((e.flow?.pkts_toclient || 0).toLocaleString()))}</span>`;
+                html += `<span style="color: #8b949e;">Bytes to Server</span><span>${escapeHtml(String((e.flow?.bytes_toserver || 0).toLocaleString()))}</span>`;
+                html += `<span style="color: #8b949e;">Bytes to Client</span><span>${escapeHtml(String((e.flow?.bytes_toclient || 0).toLocaleString()))}</span>`;
+                html += `<span style="color: #8b949e;">Alerted</span><span>${escapeHtml(e.flow?.alerted ? 'Yes' : 'No')}</span>`;
             }
             
             if (e.event_type === 'ftp') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #00bcd4;">FTP Details</span>`;
-                html += `<span style="color: #8b949e;">Command</span><span>${e.ftp?.command || ''}</span>`;
-                html += `<span style="color: #8b949e;">Reply</span><span>${e.ftp?.reply || ''}</span>`;
-                html += `<span style="color: #8b949e;">Data Channel</span><span>${e.ftp?.data_channel?.active ? 'Active' : 'Passive'}</span>`;
+                html += `<span style="color: #8b949e;">Command</span><span>${escapeHtml(e.ftp?.command || '')}</span>`;
+                html += `<span style="color: #8b949e;">Reply</span><span>${escapeHtml(String(e.ftp?.reply || ''))}</span>`;
+                html += `<span style="color: #8b949e;">Data Channel</span><span>${escapeHtml(e.ftp?.data_channel?.active ? 'Active' : 'Passive')}</span>`;
             }
             
             if (e.event_type === 'anomaly') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #ff9800;">Anomaly Details</span>`;
-                html += `<span style="color: #8b949e;">Type</span><span>${e.anomaly?.type || ''}</span>`;
-                html += `<span style="color: #8b949e;">Message</span><span>${e.anomaly?.message || ''}</span>`;
+                html += `<span style="color: #8b949e;">Type</span><span>${escapeHtml(e.anomaly?.type || '')}</span>`;
+                html += `<span style="color: #8b949e;">Message</span><span>${escapeHtml(e.anomaly?.message || '')}</span>`;
             }
             
             if (e.event_type === 'fileinfo') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #9c27b0;">File Info</span>`;
-                html += `<span style="color: #8b949e;">Filename</span><span class="mono">${e.fileinfo?.filename || ''}</span>`;
-                html += `<span style="color: #8b949e;">Magic</span><span>${e.fileinfo?.magic || ''}</span>`;
-                html += `<span style="color: #8b949e;">MD5</span><span class="mono">${e.fileinfo?.md5 || ''}</span>`;
-                html += `<span style="color: #8b949e;">SHA1</span><span class="mono">${e.fileinfo?.sha1 || ''}</span>`;
-                html += `<span style="color: #8b949e;">SHA256</span><span class="mono">${e.fileinfo?.sha256 || ''}</span>`;
-                html += `<span style="color: #8b949e;">Size</span><span>${(e.fileinfo?.size || 0).toLocaleString()} bytes</span>`;
+                html += `<span style="color: #8b949e;">Filename</span><span class="mono">${escapeHtml(e.fileinfo?.filename || '')}</span>`;
+                html += `<span style="color: #8b949e;">Magic</span><span>${escapeHtml(e.fileinfo?.magic || '')}</span>`;
+                html += `<span style="color: #8b949e;">MD5</span><span class="mono">${escapeHtml(e.fileinfo?.md5 || '')}</span>`;
+                html += `<span style="color: #8b949e;">SHA1</span><span class="mono">${escapeHtml(e.fileinfo?.sha1 || '')}</span>`;
+                html += `<span style="color: #8b949e;">SHA256</span><span class="mono">${escapeHtml(e.fileinfo?.sha256 || '')}</span>`;
+                html += `<span style="color: #8b949e;">Size</span><span>${escapeHtml(String((e.fileinfo?.size || 0).toLocaleString()))} bytes</span>`;
             }
             
             if (e.event_type === 'stats') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #9e9e9e;">Stats Details</span>`;
                 if (e.stats?.capture) {
-                    html += `<span style="color: #8b949e;">Kernel Packets</span><span>${(e.stats.capture.kernel_packets || 0).toLocaleString()}</span>`;
-                    html += `<span style="color: #8b949e;">Kernel Drops</span><span>${(e.stats.capture.kernel_drops || 0).toLocaleString()}</span>`;
+                    html += `<span style="color: #8b949e;">Kernel Packets</span><span>${escapeHtml(String((e.stats.capture.kernel_packets || 0).toLocaleString()))}</span>`;
+                    html += `<span style="color: #8b949e;">Kernel Drops</span><span>${escapeHtml(String((e.stats.capture.kernel_drops || 0).toLocaleString()))}</span>`;
                 }
                 if (e.stats?.detect) {
-                    html += `<span style="color: #8b949e;">Alerts</span><span>${(e.stats.detect.alert || 0).toLocaleString()}</span>`;
+                    html += `<span style="color: #8b949e;">Alerts</span><span>${escapeHtml(String((e.stats.detect.alert || 0).toLocaleString()))}</span>`;
                 }
             }
             
             html += `</div>`;
             
             if (e.src_ip && e.src_port && e.dest_ip && e.dest_port) {
-                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 10px;"><span style="color: #8b949e;">ASCII Transcript</span><button class="stream-btn" onclick="downloadPcap('${e.src_ip}', '${e.src_port}', '${e.dest_ip}', '${e.dest_port}')" style="margin-left: 10px; padding: 4px 10px;">Download PCAP</button></div><div class="ascii-transcript" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0;"></div></div>`;
+                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="color: #8b949e; font-size: 0.85rem; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 5px;">Payload</div><div style="display: flex; justify-content: flex-start; align-items: center; margin-bottom: 10px;"><div class="view-tabs"><button class="view-tab active" onclick="switchStreamView('ascii','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">ASCII Transcript</button><button class="view-tab" onclick="switchStreamView('hexdump','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">Hexdump</button></div><button class="stream-btn" onclick="downloadPcap('${e.src_ip}','${e.src_port}','${e.dest_ip}','${e.dest_port}')" style="margin-left: 12px;">Download PCAP</button></div><div class="stream-view-container" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0;"><div class="ascii-transcript" style="white-space: pre-wrap; overflow-wrap: break-word;"></div><div class="hexdump-content" style="display: none;"></div></div></div>`;
             }
             
             return html;
         }
         
         function downloadPcap(src, sport, dst, dport) {
-            const md5Param = currentMd5 ? '&md5=' + currentMd5 : '';
-            const url = `/api/download-stream?src=${src}&sport=${sport}&dst=${dst}&dport=${dport}${md5Param}`;
+            const md5Param = currentMd5 ? '&md5=' + encodeURIComponent(currentMd5) : '';
+            const url = `/api/download-stream?src=${encodeURIComponent(src)}&sport=${encodeURIComponent(sport)}&dst=${encodeURIComponent(dst)}&dport=${encodeURIComponent(dport)}${md5Param}`;
             const a = document.createElement('a');
             a.href = url;
             a.download = `stream_${src}_${sport}_to_${dst}_${dport}.pcap`;
@@ -502,8 +669,11 @@
             }
             document.getElementById('mainHeader').style.display = 'none';
             document.getElementById('statsGrid').innerHTML = '';
+            document.getElementById('sankeyPanel').style.display = 'none';
+            document.getElementById('sankeyPanel').innerHTML = '';
             document.getElementById('aggregations').innerHTML = '';
             document.getElementById('sections').innerHTML = '';
+            document.getElementById('dataPanel').style.display = 'none';
             document.getElementById('inputBoxes').style.display = 'block';
             
             // Load previous analyses
@@ -515,6 +685,7 @@
                     previousHtml = analyses.map(a => 
                         `<div style="display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid #30363d;">
                             <a href="?pcap=${a.md5}" onclick="event.preventDefault(); loadAnalysis('${a.md5}');" style="color: #58a6ff; text-decoration: none; flex: 1;">📁 ${a.pcap}</a>
+                            <button onclick="openReanalyzeModal('${a.md5}', '${a.pcap}')" style="background: #30363d; border: none; color: #58a6ff; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px; margin-right: 4px;" title="Re-analyze">🔄</button>
                             <button onclick="openDeleteAnalysis('${a.md5}', '${a.pcap}')" style="background: #30363d; border: none; color: #ff6b6b; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px;" title="Delete">🗑️</button>
                         </div>`
                     ).join('');
@@ -540,31 +711,31 @@
                     <div style="display: flex; justify-content: center; margin-bottom: 20px;">
                         <div style="background: #161b22; padding: 25px 40px; border-radius: 8px; border: 1px solid #30363d; flex: 1;">
                             <p style="color: #8b949e; font-size: 0.95rem;">
-                                💡 Supported formats: .pcap, .pcapng, .cap, or .trace.
-                            </p>
-                            <p style="color: #8b949e; font-size: 0.95rem; margin-top: 15px;">
                                 💡 Maximum file size is 1000MB. Processing may take a minute or two depending on the size of the file.
                             </p>
                             <p style="color: #8b949e; font-size: 0.95rem; margin-top: 15px;">
-                                💡 The URL field can automatically handle zipped pcap files including those from <a href="https://www.malware-traffic-analysis.net" target="_blank" style="color: #58a6ff; text-decoration: none;">malware-traffic-analysis.net</a> that are password protected.
+                                💡 The following pcap formats are supported: .pcap, .pcapng, .cap, or .trace. These formats are also supported inside of .zip files and password-protected .zip files using common passwords.
                             </p>
                             <p style="color: #8b949e; font-size: 0.95rem; margin-top: 15px;">
-                                💡 If you don't already have a pcap in mind, just click the Go button below and it will automatically download a pcap from <a href="https://www.malware-traffic-analysis.net" target="_blank" style="color: #58a6ff; text-decoration: none;">malware-traffic-analysis.net</a>. There are lots of other fun pcap files to be found at that site!
+                                💡 If you don't already have a pcap in mind, just click the Go button below and it will automatically download a pcap from <a href="https://www.malware-traffic-analysis.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">malware-traffic-analysis.net</a>. There are lots of other fun pcap files to be found at that site!
                             </p>
                         </div>
                     </div>
-                    <div style="display: flex; gap: 20px; justify-content: center; margin-bottom: 20px;">
-                        <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; flex: 2;">
-                            <div style="color: #8b949e; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 15px; font-weight: 600;">⬇️ Download PCAP from URL</div>
-                            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-                                <input type="text" id="pcapUrl" value="https://www.malware-traffic-analysis.net/2026/02/03/2026-02-03-GuLoader-for-AgentTesla-style-infection-with-FTP-data-exfil.pcap.zip" onfocus="this.value=''" style="background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 8px 12px; border-radius: 4px; font-size: 0.95rem; flex: 1;">
+                    <div style="display: flex; flex-direction: column; gap: 20px; margin-bottom: 20px;">
+                        <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; width: 100%; box-sizing: border-box;">
+                            <div style="color: #8b949e; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 15px; font-weight: 600;">⬇️ Import pcap from URL or local filesystem</div>
+                            <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+                                <input type="text" id="pcapUrl" value="https://www.malware-traffic-analysis.net/2026/02/03/2026-02-03-GuLoader-for-AgentTesla-style-infection-with-FTP-data-exfil.pcap.zip" onfocus="this.value=''" onkeydown="if(event.key==='Enter')loadFromUrl()" style="background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 8px 12px; border-radius: 4px; font-size: 0.95rem; flex: 1;">
                                 <button onclick="loadFromUrl()" style="background: #58a6ff; color: #0d1117; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.95rem; border: none;">Go</button>
                             </div>
-                        </div>
-                        <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; flex: 1;">
-                            <div style="color: #8b949e; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 15px; font-weight: 600;">📤 Upload local PCAP file</div>
-                            <input type="file" id="pcapUpload" accept=".pcap,.pcapng,.cap,.trace" onchange="uploadPcap()" style="display: none;">
-                            <label for="pcapUpload" style="background: #0d1117; color: #58a6ff; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 0.95rem; border: 1px solid #30363d; display: block; text-align: center;">Choose File</label>
+                            <div style="text-align: center; color: #8b949e; font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 15px;">— OR —</div>
+                            <input type="file" id="pcapUpload" accept=".pcap,.pcapng,.cap,.trace,.zip" onchange="uploadPcap()" style="display: none;">
+                            <div id="dropZone" style="background: #0d1117; color: #58a6ff; padding: 20px; border-radius: 4px; cursor: pointer; font-size: 0.95rem; border: 2px dashed #30363d; text-align: center; transition: border-color 0.2s, background 0.2s;"
+                                 ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)"
+                                 onclick="document.getElementById('pcapUpload').click()">
+                                <div style="font-size: 1.5rem; margin-bottom: 8px;">📂</div>
+                                <div>Choose file or drag and drop here</div>
+                            </div>
                         </div>
                     </div>
                     <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d;">
@@ -572,7 +743,7 @@
                         <div id="previousAnalysesList">${previousHtml}</div>
                     </div>
                     <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; margin-top: 20px;">
-                        <div style="color: #8b949e; font-size: 0.9rem; margin-bottom: 10px; text-align: center;">OhMyPCAP provides basic pcap analysis. Need more advanced functionality?<br>Take a look at the <a href="https://securityonion.net" target="_blank" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion</a> platform available in a free Community Edition!<br>If you need enterprise features, consider upgrading to <a href="https://securityonion.com/pro" target="_blank" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion Pro</a>!</div>
+                        <div style="color: #8b949e; font-size: 0.9rem; margin-bottom: 10px; text-align: center;">OhMyPCAP provides basic pcap analysis. Need more advanced functionality?<br>Take a look at the <a href="https://securityonion.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion</a> platform available in a free Community Edition!<br>If you need enterprise features, consider upgrading to <a href="https://securityonion.com/pro" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion Pro</a>!</div>
                         <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
                             <thead>
                                 <tr style="border-bottom: 1px solid #30363d;">
@@ -712,13 +883,13 @@
                             </tbody>
                         </table>
                         <div style="margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; font-size: 0.85rem;">
-                            <a href="https://securityonion.net" target="_blank" style="color: #58a6ff; text-decoration: none;">Security Onion</a>
+                            <a href="https://securityonion.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">Security Onion</a>
                             <span style="color: #30363d;">|</span>
-                            <a href="http://securityonion.net/docs/about" target="_blank" style="color: #58a6ff; text-decoration: none;">Security Onion Documentation</a>
+                            <a href="http://securityonion.net/docs/about" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">Security Onion Documentation</a>
                             <span style="color: #30363d;">|</span>
-                            <a href="https://securityonion.com/pro" target="_blank" style="color: #58a6ff; text-decoration: none;">Security Onion Pro</a>
+                            <a href="https://securityonion.com/pro" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">Security Onion Pro</a>
                             <span style="color: #30363d;">|</span>
-                            <a href="http://securityonion.net/docs/security-onion-pro" target="_blank" style="color: #58a6ff; text-decoration: none;">Security Onion Pro Documentation</a>
+                            <a href="http://securityonion.net/docs/security-onion-pro" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">Security Onion Pro Documentation</a>
                         </div>
                     </div>
                 </div>
@@ -734,6 +905,45 @@
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') closeModal();
         });
+        
+        // Single delegated listener for advanced toggle (prevents memory leak from repeated loadAnalysis calls)
+        function toggleDiagram() {
+            diagramMode = !diagramMode;
+            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            if (visibleSection) {
+                const eventType = visibleSection.id.replace('section-', '');
+                if (eventType === 'all') {
+                    const filtered = getFilteredEvents('section-all', allEvents, 'all');
+                    updateSankeyDiagram(filtered);
+                } else {
+                    const events = tabDataCache[eventType] || sections[eventType] || [];
+                    const filtered = getFilteredEvents(visibleSection.id, events, eventType);
+                    updateSankeyDiagram(filtered);
+                }
+            }
+        }
+        
+        function toggleAggregations() {
+            advancedMode = !advancedMode;
+            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            if (!visibleSection) return;
+            const eventType = visibleSection.id.replace('section-', '');
+            if (advancedMode) {
+                hiddenAggregations = new Set();
+                if (eventType === 'all') {
+                    buildAggregationsSectionAll();
+                } else {
+                    const events = tabDataCache[eventType] || sections[eventType] || [];
+                    const filtered = getFilteredEvents(visibleSection.id, events, eventType);
+                    buildAggregationsSection(eventType, filtered);
+                }
+            } else {
+                const aggContainer = document.getElementById('aggregations');
+                if (aggContainer) {
+                    aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                }
+            }
+        }
         
         const typeLabels = {
             alert: 'Security Alerts',
@@ -758,7 +968,217 @@
             stats: '#9e9e9e',
             tls: '#58a6ff'
         };
-        
+
+        function buildSankeyData(events) {
+            const nodeMap = new Map();
+            const linkMap = new Map();
+
+            function getNodeId(name, column) {
+                return column + ':' + name;
+            }
+
+            function addNode(name, column) {
+                const id = getNodeId(name, column);
+                if (!nodeMap.has(id)) {
+                    nodeMap.set(id, { id: id, name: name, column: column });
+                }
+                return id;
+            }
+
+            function addLink(sourceId, targetId) {
+                const key = sourceId + '->' + targetId;
+                if (!linkMap.has(key)) {
+                    linkMap.set(key, { source: sourceId, target: targetId, value: 0 });
+                }
+                linkMap.get(key).value += 1;
+            }
+
+            for (const e of events) {
+                if (!e || e.event_type === 'stats') continue;
+                const src = e.src_ip || '?';
+                const dst = e.dest_ip || '?';
+                const port = String(e.dest_port || '?');
+                const srcId = addNode(src, 0);
+                const dstId = addNode(dst, 1);
+                const portId = addNode(port, 2);
+                addLink(srcId, dstId);
+                addLink(dstId, portId);
+            }
+
+            function capColumn(columnIndex, limit) {
+                const columnNodes = Array.from(nodeMap.values()).filter(n => n.column === columnIndex);
+                if (columnNodes.length <= limit) return;
+                columnNodes.sort((a, b) => {
+                    const av = Array.from(linkMap.values()).filter(l => l.source === a.id || l.target === a.id).reduce((s, l) => s + l.value, 0);
+                    const bv = Array.from(linkMap.values()).filter(l => l.source === b.id || l.target === b.id).reduce((s, l) => s + l.value, 0);
+                    return bv - av;
+                });
+                const keepIds = new Set(columnNodes.slice(0, limit).map(n => n.id));
+                const otherId = addNode('Other', columnIndex);
+
+                for (const node of columnNodes.slice(limit)) {
+                    nodeMap.delete(node.id);
+                }
+
+                const newLinks = new Map();
+                for (const [key, link] of linkMap) {
+                    const s = link.source;
+                    const t = link.target;
+                    const sExists = nodeMap.has(s);
+                    const tExists = nodeMap.has(t);
+                    if (sExists && tExists) {
+                        newLinks.set(key, link);
+                    } else if (!sExists && tExists) {
+                        const newKey = otherId + '->' + t;
+                        const existing = newLinks.get(newKey);
+                        if (existing) { existing.value += link.value; }
+                        else { newLinks.set(newKey, { source: otherId, target: t, value: link.value }); }
+                    } else if (sExists && !tExists) {
+                        const newKey = s + '->' + otherId;
+                        const existing = newLinks.get(newKey);
+                        if (existing) { existing.value += link.value; }
+                        else { newLinks.set(newKey, { source: s, target: otherId, value: link.value }); }
+                    }
+                }
+                linkMap.clear();
+                for (const [k, v] of newLinks) { linkMap.set(k, v); }
+            }
+
+            capColumn(0, 50);
+            capColumn(1, 50);
+            capColumn(2, 50);
+
+            return { nodes: Array.from(nodeMap.values()), links: Array.from(linkMap.values()) };
+        }
+
+        function renderSankeySVG(data, container) {
+            const width = container.clientWidth || 900;
+            const nodesByCol = [[], [], []];
+            for (const n of data.nodes) { nodesByCol[n.column].push(n); }
+            const maxColNodes = Math.max(nodesByCol[0].length, nodesByCol[1].length, nodesByCol[2].length);
+            const minNodeH = 8;
+            const nodeGap = 4;
+            const height = Math.max(400, maxColNodes * (minNodeH + nodeGap) + 60);
+            container.innerHTML = '';
+
+            if (!data.nodes.length) return;
+
+            const svg = d3.select(container).append('svg')
+                .attr('class', 'sankey-svg')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('viewBox', [0, 0, width, height]);
+
+            const nodeIndex = new Map();
+            data.nodes.forEach((n, i) => nodeIndex.set(n.id, i));
+
+            const graph = {
+                nodes: data.nodes.map(n => ({ name: n.name, column: n.column })),
+                links: data.links.map(l => ({
+                    source: nodeIndex.get(l.source),
+                    target: nodeIndex.get(l.target),
+                    value: l.value
+                }))
+            };
+
+            const sankey = d3.sankey()
+                .nodeWidth(18)
+                .nodePadding(nodeGap)
+                .extent([[30, 35], [width - 30, height - 10]]);
+
+            let { nodes, links } = sankey(graph);
+
+            function ipToColor(ip) {
+                let hash = 0;
+                for (let i = 0; i < ip.length; i++) { hash = ((hash << 5) - hash) + ip.charCodeAt(i); }
+                return 'hsl(' + (Math.abs(hash) % 360) + ', 70%, 60%)';
+            }
+
+            const linkGroup = svg.append('g');
+            linkGroup.selectAll('path')
+                .data(links)
+                .join('path')
+                .attr('class', 'sankey-link')
+                .attr('d', d3.sankeyLinkHorizontal())
+                .attr('stroke', d => ipToColor(d.source.name))
+                .attr('stroke-width', d => Math.max(d.width, 1))
+                .on('click', function(event, d) {
+                    const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+                    if (!visibleSection) return;
+                    applyFilters(visibleSection.id, [
+                        {column: getColumnNameFromSankeyColumn(d.source.column), value: d.source.name},
+                        {column: getColumnNameFromSankeyColumn(d.target.column), value: d.target.name}
+                    ]);
+                })
+                .append('title')
+                .text(d => d.source.name + ' \u2192 ' + d.target.name + ' (' + d.value + ')');
+
+            const nodeGroup = svg.append('g')
+                .selectAll('g')
+                .data(nodes)
+                .join('g')
+                .attr('class', 'sankey-node')
+                .attr('transform', d => 'translate(' + d.x0 + ',' + d.y0 + ')');
+
+            nodeGroup.append('rect')
+                .attr('height', d => d.y1 - d.y0)
+                .attr('width', d => d.x1 - d.x0)
+                .on('click', function(event, d) {
+                    const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+                    if (!visibleSection) return;
+                    applyFilters(visibleSection.id, [
+                        {column: getColumnNameFromSankeyColumn(d.column), value: d.name}
+                    ]);
+                })
+                .append('title')
+                .text(d => d.name + ' (' + d.value + ')');
+
+            nodeGroup.append('text')
+                .attr('x', d => d.x0 < width / 2 ? (d.x1 - d.x0) + 5 : -5)
+                .attr('y', d => (d.y1 - d.y0) / 2)
+                .attr('dy', '0.35em')
+                .attr('text-anchor', d => d.x0 < width / 2 ? 'start' : 'end')
+                .style('opacity', d => (d.y1 - d.y0) >= minNodeH ? 1 : 0)
+                .text(d => {
+                    const label = d.name + ' (' + d.value + ')';
+                    return label.length > 24 ? d.name.slice(0, 21) + '\u2026 (' + d.value + ')' : label;
+                });
+
+            const colLabels = ['Source IP', 'Dest IP', 'Dest Port'];
+            const colCenters = [0, 1, 2].map(i => {
+                const colNodes = nodes.filter(n => n.column === i);
+                if (!colNodes.length) return width * (i + 0.5) / 3;
+                return d3.mean(colNodes, n => (n.x0 + n.x1) / 2);
+            });
+
+            svg.append('g')
+                .selectAll('text')
+                .data(colLabels)
+                .join('text')
+                .attr('class', 'sankey-title')
+                .attr('x', (d, i) => colCenters[i])
+                .attr('y', 20)
+                .attr('text-anchor', 'middle')
+                .text(d => d);
+        }
+
+        function updateSankeyDiagram(events) {
+            const sankeyPanel = document.getElementById('sankeyPanel');
+            if (!sankeyPanel) return;
+            sankeyPanel.innerHTML = '';
+            if (!diagramMode) {
+                sankeyPanel.innerHTML = '<div class="section-toggle-bar" onclick="toggleDiagram()">▸ Sankey Diagram</div>';
+                return;
+            }
+            if (!events || events.length === 0) {
+                return;
+            }
+            sankeyPanel.innerHTML = '<div class="section-toggle-bar" onclick="toggleDiagram()">▾ Sankey Diagram</div><div class="sankey-content"></div>';
+            const svgContainer = sankeyPanel.querySelector('.sankey-content');
+            const data = buildSankeyData(events);
+            renderSankeySVG(data, svgContainer);
+        }
+
         function getColumnsForType(eventType) {
             switch(eventType) {
                 case 'alert':
@@ -766,11 +1186,13 @@
                 case 'dns':
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Query', 'Type'];
                 case 'http':
-                    return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Method', 'URL', 'Status', 'User-Agent'];
+                    return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Method', 'Host', 'URL', 'User-Agent', 'Status'];
                 case 'tls':
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'SNI / Host', 'Version', 'Subject', 'Issuer'];
                 case 'flow':
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Pkts →', 'Pkts ←', 'Bytes →', 'Bytes ←', 'State', 'Alerted'];
+                case 'fileinfo':
+                    return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Filename'];
                 default:
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port'];
             }
@@ -797,23 +1219,24 @@
                     const colors = { 1: '#ff6b6b', 2: '#ffa726', 3: '#ffca28', 4: '#66bb6a' };
                     const sevColor = colors[sev] || '#8b949e';
                     colSpan = 9;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td>${escapeHtml(sig)}</td><td><span class="badge badge-danger">${cat}</span></td><td><span class="badge" style="background:${sevColor}33;color:${sevColor}">Sev ${sev}</span></td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td>${escapeHtml(sig)}</td><td><span class="badge badge-danger">${escapeHtml(cat)}</span></td><td><span class="badge" style="background:${sevColor}33;color:${sevColor}">Sev ${sev}</span></td></tr>`;
                     break;
                 case 'dns':
                     const rrname = e.dns?.rrname || '';
                     const rrtype = e.dns?.rrtype || '';
                     colSpan = 8;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td class="mono">${rrname}</td><td><span class="badge badge-info">${rrtype}</span></td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td class="mono">${escapeHtml(rrname)}</td><td><span class="badge badge-info">${escapeHtml(rrtype)}</span></td></tr>`;
                     break;
                 case 'http':
                     const method = e.http?.http_method || '';
+                    const host = e.http?.hostname || '';
                     const url = e.http?.url || '';
                     const status = e.http?.status || '';
                     const ua = (e.http?.http_user_agent || '').slice(0, 30);
                     const streamId = `${srcIp},${srcPort},${dstIp},${dstPort}`;
                     const statusBadge = status && parseInt(status) < 400 ? 'badge-success' : status && parseInt(status) < 500 ? 'badge-warning' : 'badge-danger';
-                    colSpan = 10;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td><span class="badge badge-info">${method}</span></td><td class="mono">${url}</td><td><span class="badge ${statusBadge}">${status}</span></td><td>${ua}</td></tr>`;
+                    colSpan = 11;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td><span class="badge badge-info">${escapeHtml(method)}</span></td><td class="mono">${escapeHtml(host)}</td><td class="mono">${escapeHtml(url)}</td><td>${escapeHtml(ua)}</td><td><span class="badge ${statusBadge}">${escapeHtml(String(status))}</span></td></tr>`;
                     break;
                 case 'tls':
                     const sni = e.tls?.sni || '-';
@@ -822,7 +1245,7 @@
                     let issuer = e.tls?.issuerdn || '-';
                     if (issuer && issuer.includes('CN=')) issuer = issuer.split('CN=')[1].split(',')[0];
                     colSpan = 10;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td class="mono">${sni}</td><td><span class="badge badge-info">${version}</span></td><td class="mono">${subject}</td><td class="mono">${issuer.slice(0, 30)}</td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td class="mono">${escapeHtml(sni)}</td><td><span class="badge badge-info">${escapeHtml(version)}</span></td><td class="mono">${escapeHtml(subject)}</td><td class="mono">${escapeHtml(issuer.slice(0, 30))}</td></tr>`;
                     break;
                 case 'flow':
                     const pktsTs = e.flow?.pkts_toserver || 0;
@@ -834,11 +1257,16 @@
                     const alertedBadge = alerted ? 'badge-danger' : 'badge-success';
                     const alertedText = alerted ? 'Yes' : 'No';
                     colSpan = 12;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td>${pktsTs.toLocaleString()}</td><td>${pktsTc.toLocaleString()}</td><td>${bytesTs.toLocaleString()}</td><td>${bytesTc.toLocaleString()}</td><td>${state}</td><td><span class="badge ${alertedBadge}">${alertedText}</span></td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td>${escapeHtml(String(pktsTs.toLocaleString()))}</td><td>${escapeHtml(String(pktsTc.toLocaleString()))}</td><td>${escapeHtml(String(bytesTs.toLocaleString()))}</td><td>${escapeHtml(String(bytesTc.toLocaleString()))}</td><td>${escapeHtml(state)}</td><td><span class="badge ${alertedBadge}">${escapeHtml(alertedText)}</span></td></tr>`;
+                    break;
+                case 'fileinfo':
+                    const filename = e.fileinfo?.filename || '';
+                    colSpan = 7;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td class="mono">${escapeHtml(filename)}</td></tr>`;
                     break;
                 default:
                     colSpan = 6;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td></tr>`;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td></tr>`;
             }
             
             return row + `<tr class="detail-row"><td colspan="${colSpan}"><div class="detail-content">${formatted}</div></td></tr>`;
@@ -866,11 +1294,17 @@
             const container = document.getElementById(sectionId);
             if (!container) return;
             
-            let html = '<div class="section-content"><table><thead><tr>';
-            columns.forEach(h => html += `<th>${h}</th>`);
-            html += '</tr></thead><tbody>';
-            rows.forEach(r => html += r);
-            html += '</tbody></table></div>';
+            let html = '<div class="section-content">';
+            if (rows.length === 0 && Object.keys(currentFilters).length > 0) {
+                html += '<div style="padding: 40px; text-align: center; color: #8b949e; font-size: 0.95rem;">🔍 No events match the current filters</div>';
+            } else {
+                html += '<table><thead><tr>';
+                columns.forEach(h => html += `<th>${h}</th>`);
+                html += '</tr></thead><tbody>';
+                rows.forEach(r => html += r);
+                html += '</tbody></table>';
+            }
+            html += '</div>';
             
             try {
                 container.innerHTML = html;
@@ -884,21 +1318,14 @@
             const aggContainer = document.getElementById('aggregations');
             if (!aggContainer) return;
             
-            const sectionId = `section-${eventType}`;
-            
-            let html = '';
-            
-            if (Object.keys(currentFilters).length > 0) {
-                html += '<div class="filter-bar"><span class="filter-label">🔍 Filtered:</span>';
-                for (const [col, val] of Object.entries(currentFilters)) {
-                    html += `<span class="filter-chip">${col}: ${escapeHtml(val)} <span class="filter-chip-remove" onclick="clearFilter('${col}')">&times;</span></span>`;
-                }
-                html += '<button class="filter-clear-all" onclick="clearAllFilters()">Clear All</button></div>';
+            if (!advancedMode) {
+                aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                return;
             }
             
-            html += buildAggregationTables(events, eventType);
+            const sectionId = `section-${eventType}`;
             
-            aggContainer.innerHTML = html;
+            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + buildAggregationTables(events, eventType) + '</div></div>';
         }
         
         function buildFilterBarHtml() {
@@ -916,48 +1343,89 @@
             const filterBarContainer = document.getElementById('filterBarContainer');
             if (!filterBarContainer) return;
             
-            if (!advancedMode) {
-                if (Object.keys(currentFilters).length > 0) {
-                    filterBarContainer.innerHTML = buildFilterBarHtml();
-                    filterBarContainer.style.display = 'block';
-                } else {
-                    filterBarContainer.innerHTML = '';
-                    filterBarContainer.style.display = 'none';
-                }
+            if (Object.keys(currentFilters).length > 0) {
+                filterBarContainer.innerHTML = buildFilterBarHtml();
+                filterBarContainer.style.display = 'block';
+            } else {
+                filterBarContainer.innerHTML = '';
+                filterBarContainer.style.display = 'none';
             }
         }
         
         let eventStats = {};
         
-         function buildStats() {
-             const grid = document.getElementById('statsGrid');
-             const stats = [];
-             
-             eventTypes.forEach(type => {
+        function eventMatchesFilters(event) {
+            if (Object.keys(currentFilters).length === 0) return true;
+            for (const [col, val] of Object.entries(currentFilters)) {
+                let extracted;
+                if (col === 'Type' || col === 'Detail') {
+                    const types = { alert: '🔴', dns: '🟢', http: '🟠', tls: '🔵', flow: '🟣', ftp: '📁', anomaly: '⚠️', fileinfo: '📄' };
+                    const allColumns = ['Time', 'Type', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Detail'];
+                    const allColIndex = allColumns.indexOf(col);
+                    extracted = extractAllValue(event, col, allColIndex, types);
+                } else {
+                    extracted = extractValue(event, col, -1);
+                }
+                if (extracted !== val) return false;
+            }
+            return true;
+        }
+
+        function computeFilteredStats() {
+            const stats = {};
+            const events = allEvents.filter(e => e.event_type !== 'stats');
+            for (const e of events) {
+                if (eventMatchesFilters(e)) {
+                    const type = e.event_type || 'unknown';
+                    stats[type] = (stats[type] || 0) + 1;
+                }
+            }
+            return stats;
+        }
+
+        function buildStats(filteredStats) {
+            const grid = document.getElementById('statsGrid');
+            const stats = [];
+            const hasFilters = Object.keys(currentFilters).length > 0;
+            
+            eventTypes.forEach(type => {
+                const total = eventStats[type] || 0;
+                const filtered = filteredStats ? (filteredStats[type] || 0) : total;
                 stats.push({
                     id: type,
                     label: typeLabels[type] || type.toUpperCase(),
-                    count: eventStats[type] || 0,
+                    count: filtered,
+                    total: total,
                     color: typeColors[type] || '#58a6ff'
                 });
-             });
-             
-             const allCount = Object.values(eventStats).reduce((a, b) => a + b, 0) - (eventStats['stats'] || 0);
-             stats.push({
-                 id: 'all',
-                 label: 'All Events',
-                 count: allCount,
-                 color: '#f0f6fc'
-             });
-             
-             const firstActive = stats[0].id;
-             grid.innerHTML = stats.map(s => `
-                 <div class="stat-card${s.id === firstActive ? ' tab-active' : ''}" onclick="showTab('section-${s.id}', this)">
-                     <div class="stat-number" style="color: ${s.color}">${s.count}</div>
-                     <div class="stat-label">${s.label}</div>
-                 </div>
-             `).join('');
-         }
+            });
+            
+            const allFiltered = stats.reduce((a, s) => a + s.count, 0);
+            const allTotal = Object.values(eventStats).reduce((a, b) => a + b, 0) - (eventStats['stats'] || 0);
+            stats.push({
+                id: 'all',
+                label: 'All Events',
+                count: allFiltered,
+                total: allTotal,
+                color: '#f0f6fc'
+            });
+            
+            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            const activeType = visibleSection ? visibleSection.id.replace('section-', '') : (stats[0] && stats[0].id);
+            grid.innerHTML = stats.map(s => {
+                const countDisplay = hasFilters ? `${s.count} / ${s.total}` : String(s.count);
+                const isClickable = s.count > 0;
+                const activeClass = s.id === activeType ? ' tab-active' : '';
+                const disabledClass = isClickable ? '' : ' stat-disabled';
+                const onclickAttr = isClickable ? `onclick="showTab('section-${s.id}', this)"` : '';
+                return `
+                    <div class="stat-card${activeClass}${disabledClass}" ${onclickAttr}>
+                        <div class="stat-number" style="color: ${s.color}">${countDisplay}</div>
+                        <div class="stat-label">${s.label}</div>
+                    </div>
+                `;
+            }).join('');
+        }
         
         function buildSections() {
             const sectionsEl = document.getElementById('sections');
@@ -1020,11 +1488,17 @@
             });
             
             const container = document.getElementById(sectionId);
-            let html = '<div class="section-content"><table><thead><tr>';
-            allColumns.forEach(h => html += `<th>${h}</th>`);
-            html += '</tr></thead><tbody>';
-            rows.forEach(r => html += r);
-            html += '</tbody></table></div>';
+            let html = '<div class="section-content">';
+            if (rows.length === 0 && Object.keys(currentFilters).length > 0) {
+                html += '<div style="padding: 40px; text-align: center; color: #8b949e; font-size: 0.95rem;">🔍 No events match the current filters</div>';
+            } else {
+                html += '<table><thead><tr>';
+                allColumns.forEach(h => html += `<th>${h}</th>`);
+                html += '</tr></thead><tbody>';
+                rows.forEach(r => html += r);
+                html += '</tbody></table>';
+            }
+            html += '</div>';
             
             container.innerHTML = html;
         }
@@ -1049,19 +1523,12 @@
                 });
             }
             
-            let html = '';
-            
-            if (Object.keys(currentFilters).length > 0) {
-                html += '<div class="filter-bar"><span class="filter-label">🔍 Filtered:</span>';
-                for (const [col, val] of Object.entries(currentFilters)) {
-                    html += `<span class="filter-chip">${col}: ${escapeHtml(val)} <span class="filter-chip-remove" onclick="clearFilter('${col}')">&times;</span></span>`;
-                }
-                html += '<button class="filter-clear-all" onclick="clearAllFilters()">Clear All</button></div>';
+            if (!advancedMode) {
+                aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                return;
             }
             
-            html += buildAggregationTablesAll(filteredEvents, allColumns, types);
-            
-            aggContainer.innerHTML = html;
+            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + buildAggregationTablesAll(filteredEvents, allColumns, types) + '</div></div>';
         }
         
         function extractAllValue(e, col, colIndex, types) {
@@ -1072,6 +1539,28 @@
                 case 'Source Port': return String(e.src_port || '');
                 case 'Dest IP': return e.dest_ip || '';
                 case 'Dest Port': return String(e.dest_port || '');
+                case 'Alert': return e.alert?.signature || '';
+                case 'Category': return e.alert?.category || '';
+                case 'Severity': return 'Sev ' + (e.alert?.severity || 0);
+                case 'Query': return e.dns?.rrname || '';
+                case 'Method': return e.http?.http_method || '';
+                case 'Host': return e.http?.hostname || '';
+                case 'URL': return e.http?.url || '';
+                case 'Status': return String(e.http?.status || '');
+                case 'User-Agent': return (e.http?.http_user_agent || '').slice(0, 50);
+                case 'SNI / Host': return e.tls?.sni || '-';
+                case 'Version': return e.tls?.version || '-';
+                case 'Subject': return (e.tls?.subject || '-').slice(0, 40);
+                case 'Issuer': return (e.tls?.issuerdn || '-').slice(0, 40);
+                case 'Pkts →': return String(e.flow?.pkts_toserver || 0);
+                case 'Pkts ←': return String(e.flow?.pkts_toclient || 0);
+                case 'Bytes →': return String(e.flow?.bytes_toserver || 0);
+                case 'Bytes ←': return String(e.flow?.bytes_toclient || 0);
+                case 'State': return e.flow?.state || '';
+                case 'Alerted': return e.flow?.alerted ? 'Yes' : 'No';
+                case 'Filename': return e.fileinfo?.filename || '';
+                case 'Command': return e.ftp?.command || '';
+                case 'Message': return e.anomaly?.message || '';
                 case 'Detail': {
                     const etype = e.event_type || '';
                     if (etype === 'alert') return e.alert?.signature || '';
@@ -1092,7 +1581,8 @@
             if (!events || events.length === 0) return '';
             
             const excludeCols = ['Time'];
-            const aggCols = columns.filter(c => !excludeCols.includes(c));
+            const sectionId = 'section-all';
+            const aggCols = columns.filter(c => !excludeCols.includes(c) && !hiddenAggregations.has(sectionId + ':' + c));
             
             let html = '<div class="agg-grid">';
             
@@ -1109,7 +1599,7 @@
                 const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
                 
                 html += `<div class="section agg-section" data-col="${col}"><div class="section-content"><div class="agg-table">
-                    <div class="agg-header">${col}</div>
+                    <div class="agg-header"><span>${col}</span><button class="agg-close" onclick="hideAggregationTable('${sectionId}', '${col.replace(/'/g, "\\'")}')" title="Hide">&times;</button></div>
                     <table>
                         <thead><tr><th style="width:60px;text-align:right;">Count</th><th>Value</th></tr></thead>
                         <tbody>`;
@@ -1144,6 +1634,7 @@
                 case 'Query': return e.dns?.rrname || '';
                 case 'Type': return e.dns?.rrtype || '';
                 case 'Method': return e.http?.http_method || '';
+                case 'Host': return e.http?.hostname || '';
                 case 'URL': return e.http?.url || '';
                 case 'Status': return String(e.http?.status || '');
                 case 'User-Agent': return (e.http?.http_user_agent || '').slice(0, 50);
@@ -1157,6 +1648,19 @@
                 case 'Bytes ←': return String(e.flow?.bytes_toclient || 0);
                 case 'State': return e.flow?.state || '';
                 case 'Alerted': return e.flow?.alerted ? 'Yes' : 'No';
+                case 'Filename': return e.fileinfo?.filename || '';
+                case 'Detail': {
+                    const etype = e.event_type || '';
+                    if (etype === 'alert') return e.alert?.signature || '';
+                    if (etype === 'dns') return e.dns?.rrname || '';
+                    if (etype === 'http') return (e.http?.http_method || '') + ' ' + (e.http?.url || '');
+                    if (etype === 'tls') return e.tls?.sni || '';
+                    if (etype === 'flow') return `${e.src_ip || ''}:${e.src_port || ''} → ${e.dest_ip || ''}:${e.dest_port || ''}`;
+                    if (etype === 'ftp') return e.ftp?.command || '';
+                    if (etype === 'anomaly') return e.anomaly?.message || '';
+                    if (etype === 'fileinfo') return e.fileinfo?.filename || '';
+                    return '';
+                }
                 default: return '';
             }
         }
@@ -1166,7 +1670,8 @@
             
             const columns = getColumnsForType(eventType);
             const excludeCols = ['Time'];
-            const aggCols = columns.filter(c => !excludeCols.includes(c));
+            const sectionId = 'section-' + eventType;
+            const aggCols = columns.filter(c => !excludeCols.includes(c) && !hiddenAggregations.has(sectionId + ':' + c));
             
             let html = '<div class="agg-grid">';
             
@@ -1183,7 +1688,7 @@
                 const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
                 
                 html += `<div class="section agg-section" data-col="${col}"><div class="section-content"><div class="agg-table">
-                    <div class="agg-header">${col}</div>
+                    <div class="agg-header"><span>${col}</span><button class="agg-close" onclick="hideAggregationTable('${sectionId}', '${col.replace(/'/g, "\\'")}')" title="Hide">&times;</button></div>
                     <table>
                         <thead><tr><th style="width:60px;text-align:right;">Count</th><th>Value</th></tr></thead>
                         <tbody>`;
@@ -1211,50 +1716,103 @@
         let currentMd5 = '';
           let currentPcapName = '';
           let currentFilters = {};
-          let currentSectionTypes = {};
           let advancedMode = false;
-        
-        function applyFilter(sectionId, columnName, value) {
-            currentFilters[columnName] = value;
+          let diagramMode = true;
+          let hiddenAggregations = new Set();
+
+        function hideAggregationTable(sectionId, col) {
+            hiddenAggregations.add(sectionId + ':' + col);
+            document.querySelectorAll(`.agg-section[data-col="${col}"]`).forEach(el => {
+                el.style.display = 'none';
+            });
+            const anyVisible = document.querySelectorAll('.agg-section:not([style*="display: none"])').length > 0;
+            if (!anyVisible) {
+                advancedMode = false;
+                const aggContainer = document.getElementById('aggregations');
+                if (aggContainer) {
+                    aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                }
+            }
+        }
+
+        function getColumnNameFromSankeyColumn(col) {
+            return ['Source IP', 'Dest IP', 'Dest Port'][col] || '';
+        }
+
+        function applyFilters(sectionId, filters) {
+            for (const f of filters) {
+                currentFilters[f.column] = f.value;
+            }
             updateFilterBarVisibility();
+            buildStats(computeFilteredStats());
             const eventType = sectionId.replace('section-', '');
             if (eventType === 'all') {
+                const filtered = getFilteredEvents(sectionId, allEvents, eventType);
                 buildAllEvents();
                 buildAggregationsSectionAll();
+                updateSankeyDiagram(filtered);
             } else {
                 buildSection(eventType, sections[eventType]);
                 const filtered = getFilteredEvents(sectionId, sections[eventType], eventType);
                 buildAggregationsSection(eventType, filtered);
+                updateSankeyDiagram(filtered);
             }
         }
-        
+
+        function applyFilter(sectionId, columnName, value) {
+            currentFilters[columnName] = value;
+            updateFilterBarVisibility();
+            buildStats(computeFilteredStats());
+            const eventType = sectionId.replace('section-', '');
+            if (eventType === 'all') {
+                const filtered = getFilteredEvents(sectionId, allEvents, eventType);
+                buildAllEvents();
+                buildAggregationsSectionAll();
+                updateSankeyDiagram(filtered);
+            } else {
+                buildSection(eventType, sections[eventType]);
+                const filtered = getFilteredEvents(sectionId, sections[eventType], eventType);
+                buildAggregationsSection(eventType, filtered);
+                updateSankeyDiagram(filtered);
+            }
+        }
+
         function clearFilter(columnName) {
             delete currentFilters[columnName];
             updateFilterBarVisibility();
+            buildStats(computeFilteredStats());
             const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
             if (!visibleSection) return;
             const eventType = visibleSection.id.replace('section-', '');
             if (eventType === 'all') {
+                const filtered = getFilteredEvents(visibleSection.id, allEvents, eventType);
                 buildAllEvents();
                 buildAggregationsSectionAll();
+                updateSankeyDiagram(filtered);
             } else {
                 buildSection(eventType, sections[eventType]);
-                buildAggregationsSection(eventType, getFilteredEvents(visibleSection.id, sections[eventType], eventType));
+                const filtered = getFilteredEvents(visibleSection.id, sections[eventType], eventType);
+                buildAggregationsSection(eventType, filtered);
+                updateSankeyDiagram(filtered);
             }
         }
-        
+
         function clearAllFilters() {
             currentFilters = {};
             updateFilterBarVisibility();
+            buildStats(computeFilteredStats());
             const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
             if (!visibleSection) return;
             const eventType = visibleSection.id.replace('section-', '');
             if (eventType === 'all') {
                 buildAllEvents();
                 buildAggregationsSectionAll();
+                updateSankeyDiagram(allEvents);
             } else {
                 buildSection(eventType, sections[eventType]);
-                buildAggregationsSection(eventType, getFilteredEvents(visibleSection.id, sections[eventType], eventType));
+                const filtered = getFilteredEvents(visibleSection.id, sections[eventType], eventType);
+                buildAggregationsSection(eventType, filtered);
+                updateSankeyDiagram(filtered);
             }
         }
         
@@ -1289,7 +1847,7 @@
                 const result = await resp.json();
                 
                 if (result.error) {
-                    alert('Error: ' + result.error);
+                    showError(result.error);
                     await showWelcome();
                     return;
                 }
@@ -1309,10 +1867,12 @@
                     sections = {};
                     eventTypes = [];
                     currentFilters = {};
-                    currentSectionTypes = {};
+                    hiddenAggregations = new Set();
                     tabDataCache = {};
                     document.getElementById('sections').innerHTML = '';
                     document.getElementById('statsGrid').innerHTML = '';
+                    document.getElementById('sankeyPanel').innerHTML = '';
+                    document.getElementById('sankeyPanel').style.display = 'none';
                     document.getElementById('inputBoxes').style.display = 'none';
                     
                     showLoading('Loading events...');
@@ -1332,10 +1892,10 @@
                     // eventTypes should not include 'all' - it's added separately by buildStats()
                     eventTypes = types;
                     
-                    buildStats();
-                    
                     const eventsResp = await fetch('/api/events?md5=' + md5 + '&limit=10000&t=' + Date.now());
                     allEvents = await eventsResp.json();
+                    
+                    buildStats(computeFilteredStats());
                     
                     if (allEvents.length === 0) {
                         hideLoading();
@@ -1353,7 +1913,7 @@
                     
                     document.getElementById('headerContent').innerHTML = `
                         <div style="background: #161b22; padding: 12px 20px; border-radius: 8px; border: 1px solid #30363d; flex: 1;">
-                            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 20px;">
+                            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
                                 <a href="#" onclick="showWelcome(); return false;" style="color: #58a6ff; text-decoration: none; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                                         <line x1="19" y1="12" x2="5" y2="12"></line>
@@ -1361,61 +1921,35 @@
                                     </svg>
                                     Back to Overview
                                 </a>
-                                <span style="color: #30363d;">|</span>
-                                <span style="color: #f0f6fc; font-weight: 600; white-space: nowrap;">${currentPcapName}</span>
-                                <span style="color: #30363d;">|</span>
+                                <span style="color: #f0f6fc; font-weight: 600; white-space: nowrap;">📄 ${currentPcapName}</span>
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📁 ${pcapPath.substring(0, pcapPath.lastIndexOf('/') + 1)}</span>
-                                <span style="color: #30363d;">|</span>
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📅 ${ts[0]?.slice(0, 19) || ''} to ${ts[ts.length-1]?.slice(0, 19) || ''}</span>
-                                <span style="color: #30363d;">|</span>
-                                <label class="advanced-toggle" style="margin-left: auto;">
-                                    <input type="checkbox" id="advancedToggle" ${advancedMode ? 'checked' : ''}>
-                                    <span>Advanced</span>
-                                </label>
+                            </div>
+                            <div style="color: #8b949e; font-size: 0.8rem; margin-top: 8px; text-align: center;">
+                                <span style="color: #58a6ff;">💡</span> Start by reviewing security alerts and then you can change to one of the other data types like DNS, HTTP, or TLS. When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript and optionally download the PCAP file for that stream.
                             </div>
                         </div>
                      `;
                     document.getElementById('mainHeader').style.display = 'block';
-                    document.getElementById('aggregations').style.display = advancedMode ? '' : 'none';
+                    document.getElementById('dataPanel').style.display = '';
                     updateFilterBarVisibility();
                     
-                    // Attach toggle event listener after checkbox is created
-                    const toggle = document.getElementById('advancedToggle');
-                    if (toggle) {
-                        toggle.addEventListener('change', function() {
-                            advancedMode = this.checked;
-                            const aggContainer = document.getElementById('aggregations');
-                            const filterBarContainer = document.getElementById('filterBarContainer');
-                            if (aggContainer) {
-                                aggContainer.style.display = advancedMode ? '' : 'none';
-                            }
-                            
-                            if (advancedMode) {
-                                if (filterBarContainer) {
-                                    filterBarContainer.innerHTML = '';
-                                    filterBarContainer.style.display = 'none';
-                                }
-                                const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
-                                if (visibleSection) {
-                                    const eventType = visibleSection.id.replace('section-', '');
-                                    if (eventType === 'all') {
-                                        buildAggregationsSectionAll();
-                                    } else {
-                                        const events = tabDataCache[eventType] || sections[eventType] || [];
-                                        const filtered = getFilteredEvents(visibleSection.id, events, eventType);
-                                        buildAggregationsSection(eventType, filtered);
-                                    }
-                                }
-                            } else {
-                                if (aggContainer) {
-                                    aggContainer.innerHTML = '';
-                                }
-                                updateFilterBarVisibility();
-                            }
-                        });
+                    buildSections();
+                    
+                    const sankeyPanel = document.getElementById('sankeyPanel');
+                    if (sankeyPanel) {
+                        sankeyPanel.style.display = diagramMode ? '' : 'none';
+                        updateSankeyDiagram(allEvents);
                     }
                     
-                    buildSections();
+                    const aggContainer = document.getElementById('aggregations');
+                    if (aggContainer) {
+                        if (advancedMode) {
+                            buildAggregationsSectionAll();
+                        } else {
+                            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                        }
+                    }
                     
                     hideLoading();
                     
@@ -1438,7 +1972,7 @@
             const exampleUrl = 'https://www.malware-traffic-analysis.net/2026/02/03/2026-02-03-GuLoader-for-AgentTesla-style-infection-with-FTP-data-exfil.pcap.zip';
             
             if (!url) {
-                alert('Please enter a URL');
+                showError('Please enter a URL');
                 return;
             }
             
@@ -1462,32 +1996,40 @@
                     urlInput.value = exampleUrl;
                 } else {
                     hideLoading();
-                    alert('Error: ' + (result.error || 'Unknown error'));
+                    showError(result.error || 'Unknown error');
                 }
             } catch(err) {
                 hideLoading();
-                alert('Error: ' + err.message);
+                showError(err.message);
             }
         }
         
-        async function uploadPcap() {
+        async function uploadPcap(droppedFile) {
             const fileInput = document.getElementById('pcapUpload');
-            const file = fileInput.files[0];
+            const file = droppedFile || fileInput.files[0];
             if (!file) return;
-            
-            
-            
+
+            showLoading('Uploading and extracting PCAP...');
+
             const formData = new FormData();
             formData.append('pcap', file);
-            
+
             try {
                 const resp = await fetch('/api/upload', {
                     method: 'POST',
                     body: formData
                 });
                 const result = await resp.json();
-                
+
+                if (!resp.ok || result.error) {
+                    hideLoading();
+                    showError(result.error || 'Upload failed');
+                    fileInput.value = '';
+                    return;
+                }
+
                 if (result.status === 'ready') {
+                    hideLoading();
                     await loadAnalysis(result.md5);
                 } else if (result.status === 'processing') {
                     showLoading('Analyzing PCAP...');
@@ -1495,10 +2037,40 @@
                 }
             } catch(err) {
                 hideLoading();
-                
+                showError(err.message);
             }
             
             fileInput.value = '';
+        }
+        
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.getElementById('dropZone').classList.add('drop-zone-active');
+        }
+        
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.getElementById('dropZone').classList.remove('drop-zone-active');
+        }
+        
+        function handleDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.getElementById('dropZone').classList.remove('drop-zone-active');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const file = files[0];
+                const validExts = ['.pcap', '.pcapng', '.cap', '.trace', '.zip'];
+                const hasValidExt = validExts.some(ext => file.name.toLowerCase().endsWith(ext));
+                if (!hasValidExt) {
+                    showError('Please drop a .pcap, .pcapng, .cap, .trace, or .zip file');
+                    return;
+                }
+                uploadPcap(file);
+            }
         }
         
         async function checkStatus(md5) {
@@ -1523,9 +2095,12 @@
                 }
             }
             
+            hideLoading();
+            showError('Analysis timed out. The PCAP may be very large or Suricata may have encountered an error.');
         }
         
         let pendingDelete = null;
+        let pendingReanalyze = null;
         
         function openDeleteAnalysis(md5, name) {
             pendingDelete = { md5, name };
@@ -1536,6 +2111,15 @@
         function closeDeleteModal() {
             pendingDelete = null;
             document.getElementById('deleteConfirmModal').classList.remove('active');
+        }
+        
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorModal').classList.add('active');
+        }
+        
+        function closeErrorModal() {
+            document.getElementById('errorModal').classList.remove('active');
         }
         
         async function confirmDelete() {
@@ -1551,10 +2135,51 @@
                 if (result.success) {
                     showWelcome();
                 } else {
-                    alert('Error: ' + (result.error || 'Could not delete'));
+                    showError(result.error || 'Could not delete');
                 }
             } catch(err) {
-                alert('Error: ' + err.message);
+                showError(err.message);
+            }
+        }
+        
+        function openReanalyzeModal(md5, name) {
+            pendingReanalyze = { md5, name };
+            document.getElementById('reanalyzeFileName').textContent = name;
+            document.getElementById('reanalyzeConfirmModal').classList.add('active');
+        }
+        
+        function closeReanalyzeModal() {
+            pendingReanalyze = null;
+            document.getElementById('reanalyzeConfirmModal').classList.remove('active');
+        }
+        
+        async function confirmReanalyze() {
+            if (!pendingReanalyze) return;
+            const { md5, name } = pendingReanalyze;
+            pendingReanalyze = null;
+            closeReanalyzeModal();
+            
+            showLoading('Re-analyzing ' + name + '...');
+            try {
+                const resp = await fetch('/api/reanalyze', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({md5: md5})
+                });
+                const result = await resp.json();
+                if (result.error) {
+                    hideLoading();
+                    showError(result.error);
+                    return;
+                }
+                if (result.status === 'processing') {
+                    await checkStatus(md5);
+                } else {
+                    hideLoading();
+                }
+            } catch(err) {
+                hideLoading();
+                showError(err.message);
             }
         }
         
@@ -1583,8 +2208,8 @@
         </script>
     </div>
     <div class="footer">
-        <a href="https://github.com/dougburks/ohmypcap" target="_blank" style="color: #58a6ff; text-decoration: none;">OhMyPCAP 1.0.0</a>
-        <a href="https://securityonion.com" target="_blank" style="color: #58a6ff; text-decoration: none;">&copy; 2026 Security Onion Solutions, LLC</a>
+        <a href="https://github.com/dougburks/ohmypcap" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">OhMyPCAP 2.0.0</a>
+        <a href="https://securityonion.com" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">&copy; 2026 Security Onion Solutions, LLC</a>
     </div>
 </body>
 </html>

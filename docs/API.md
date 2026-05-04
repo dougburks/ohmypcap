@@ -106,6 +106,26 @@ Extracts ASCII payload from a TCP/UDP stream using `tshark`. Tries TCP first, fa
 
 ---
 
+### `GET /api/hexdump-stream`
+
+Extracts per-packet hex dumps from a TCP/UDP stream using `tcpdump -X`. Truncated to 100,000 characters or 500 packets.
+
+**Query Parameters:**
+
+| Parameter | Required | Description |
+|---|---|---|
+| `src` | Yes | Source IP address |
+| `sport` | Yes | Source port |
+| `dst` | Yes | Destination IP address |
+| `dport` | Yes | Destination port |
+| `md5` | No | MD5 hash of a historical analysis (defaults to current session) |
+
+**Response:** `application/json` — `{"packets": [{"header": "...", "lines": ["..."]}], "truncated": false}`.
+
+**Validation:** IP addresses and ports are validated before passing to tcpdump. Invalid values return `400`.
+
+---
+
 ### `GET /api/analyses`
 
 Lists all previously-analyzed PCAPs.

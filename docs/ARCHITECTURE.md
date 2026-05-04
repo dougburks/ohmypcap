@@ -9,8 +9,8 @@ Browser ──HTTP──▶ ohmypcap.py (Python HTTP server, port 8000)
                       │
                       ├──▶ Suricata (subprocess, analyzes PCAP → eve.json)
                       ├──▶ SQLite (indexes eve.json → events.db)
-                      ├──▶ tcpdump (carves individual streams)
-                      └──▶ tshark (extracts ASCII transcripts)
+                       ├──▶ tcpdump (carves individual streams & hexdumps)
+                       └──▶ tshark (extracts ASCII transcripts)
 ```
 
 All state is file-based under `~/ohmypcap-data/`. No database server, no external services.
@@ -25,7 +25,7 @@ A stdlib-only Python HTTP server (`http.server.SimpleHTTPRequestHandler`). Handl
 2. **Client polls** `/api/check-status` until Suricata finishes
 3. **Suricata callback** (background thread) → indexes eve.json into SQLite
 4. **Client loads analysis** → UI fetches events via `/api/events`
-5. **User interacts** → stream carving (`tcpdump`), ASCII extraction (`tshark`), filtering (client-side)
+5. **User interacts** → stream carving (`tcpdump`), ASCII extraction (`tshark`), hexdump (`tcpdump -X`), filtering (client-side)
 
 ### Data Storage
 
@@ -34,7 +34,7 @@ A stdlib-only Python HTTP server (`http.server.SimpleHTTPRequestHandler`). Handl
   suricata/
     suricata.yaml          # Copied from /etc/suricata/, rule path rewritten
     rules/
-      suricata.rules       # Downloaded by suricata-update
+      suricata.rules       # Downloaded by suricata-update (online) or copied from baked-in image (offline/air-gapped)
     disable.conf
   <md5>/
     <filename>.pcap        # Original PCAP
@@ -68,7 +68,7 @@ The `json_data` column stores the complete original event, allowing the server t
 
 | Type | Description | Key fields |
 |---|---|---|
-| `alert` | Suricata rule matches | `alert.signature`, `alert.severity`, `alert.category` |
+| `alert` | Suricata rule matches | `alert.signature`, `alert.severity`, `alert.category`, `alert.rule` |
 | `dns` | DNS queries/responses | `dns.rrname`, `dns.rrtype`, `dns.rcode` |
 | `http` | HTTP requests | `http.http_method`, `http.url`, `http.http_content_type`, `http.status` |
 | `tls` | TLS handshakes | `tls.sni`, `tls.version`, `tls.subject`, `tls.issuer` |
@@ -90,10 +90,12 @@ Welcome Screen (no PCAP loaded)
   └── Previous analyses list
 
 Analysis View (PCAP loaded)
-  ├── Header (back button, name, date range, Advanced toggle)
-  ├── Stats Grid (clickable event-type cards)
-  ├── Filter Bar (non-advanced mode)
-  ├── Aggregations (advanced mode)
+  ├── Header (back button, name, path, date range)
+  ├── Visualizations bar (Diagram toggle, Aggregation toggle)
+  ├── Filter Bar (active filters as removable chips)
+  ├── Stats Grid (clickable event-type cards, shows filtered/total counts when active)
+  ├── Sankey Diagram (diagram mode — Source IP → Dest IP → Dest Port, reflects current filters)
+  ├── Aggregations (frequency counts per column)
   └── Data Sections (tabbed tables)
 ```
 
@@ -120,7 +122,7 @@ let tabDataCache = {};       // cached event data per type
 | Rendering | `buildStats()`, `buildSections()`, `buildSection()`, `buildAllEvents()`, `buildRowForEvent()` | Build HTML |
 | Aggregation | `buildAggregationTables()`, `buildAggregationTablesAll()`, `buildAggregationsSection()`, `buildAggregationsSectionAll()` | Frequency grids |
 | Filtering | `applyFilter()`, `clearFilter()`, `clearAllFilters()`, `getFilteredEvents()` | Filter management |
-| Streams | `downloadPcap()`, `loadAsciiTranscript()`, `toggleRow()` | Stream analysis |
+| Streams | `downloadPcap()`, `loadAsciiTranscript()`, `loadHexdumpData()`, `switchStreamView()`, `togglePacket()`, `toggleRow()` | Stream analysis |
 | Utilities | `escapeHtml()`, `formatEvent()`, `extractValue()`, `extractAllValue()`, `getColumnsForType()` | Helpers |
 
 ### Column System
@@ -129,7 +131,7 @@ Each event type has its own column set. The "All Events" view uses a unified col
 
 **Shared columns (all types):** Time, Protocol, Source IP, Source Port, Dest IP, Dest Port
 
-**Per-type columns:** Alert, Category, Severity (alerts); Query, Type (DNS); Method, URL, Status, User-Agent (HTTP); SNI / Host, Version, Subject, Issuer (TLS); Pkts →, Pkts ←, Bytes →, Bytes ←, State, Alerted (flows); Command (FTP); Message (anomaly); Filename (fileinfo)
+**Per-type columns:** Alert, Category, Severity (alerts); Query, Type (DNS); Method, Host, URL, User-Agent, Status (HTTP); SNI / Host, Version, Subject, Issuer (TLS); Pkts →, Pkts ←, Bytes →, Bytes ←, State, Alerted (flows); Command (FTP); Message (anomaly); Filename (fileinfo)
 
 **All-events columns:** Type (event type), Detail (type-specific summary)
 

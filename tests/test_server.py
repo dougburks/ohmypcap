@@ -206,6 +206,25 @@ class TestPcapContentValidation(unittest.TestCase):
         data = b'\x00' * 3
         self.assertFalse(server.validate_pcap_content(data))
 
+    def test_zip_magic_accepted(self):
+        data = b'PK\x03\x04' + b'\x00' * 20
+        self.assertTrue(server.validate_pcap_content(data))
+
+    def test_zip_empty_accepted(self):
+        data = b'PK\x05\x06' + b'\x00' * 20
+        self.assertTrue(server.validate_pcap_content(data))
+
+    def test_short_zip_rejected(self):
+        data = b'PK\x03'
+        self.assertFalse(server.validate_pcap_content(data))
+
+    def test_old_zip_suffix_check_removed(self):
+        """Ensure the broken data.endswith(b'.zip') check is gone."""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertNotIn("data.endswith(b'.zip')", content)
+        self.assertNotIn('data.endswith(b".zip")', content)
+
 
 class TestRateLimiting(unittest.TestCase):
     pass
@@ -414,8 +433,40 @@ class TestAPIEndpoints(unittest.TestCase):
         status, _ = self._get('/api/ascii-stream?src=1.2.3.4')
         self.assertEqual(status, 400)
 
+    def test_hexdump_stream_requires_md5(self):
+        status, _ = self._get('/api/hexdump-stream?src=1.2.3.4&sport=80&dst=5.6.7.8&dport=443')
+        self.assertEqual(status, 400)
+
+    def test_hexdump_stream_invalid_ip(self):
+        status, _ = self._get('/api/hexdump-stream?src=bad&sport=80&dst=1.2.3.4&dport=443&md5=' + 'a' * 32)
+        self.assertEqual(status, 400)
+
+    def test_hexdump_stream_invalid_port(self):
+        status, _ = self._get('/api/hexdump-stream?src=1.2.3.4&sport=99999&dst=5.6.7.8&dport=80&md5=' + 'a' * 32)
+        self.assertEqual(status, 400)
+
+    def test_hexdump_stream_command_injection(self):
+        status, _ = self._get('/api/hexdump-stream?src=1.2.3.4&sport=80;ls&dst=5.6.7.8&dport=443&md5=' + 'a' * 32)
+        self.assertEqual(status, 400)
+
+    def test_hexdump_stream_missing_params(self):
+        status, _ = self._get('/api/hexdump-stream?src=1.2.3.4&md5=' + 'a' * 32)
+        self.assertEqual(status, 400)
+
+    def test_stream_filter_uses_and_not_or(self):
+        """download-stream and hexdump-stream must use 'and port' not 'or port'
+        to avoid pulling in unrelated UDP flows sharing the same destination port."""
+        import inspect
+        import ohmypcap
+        source = inspect.getsource(ohmypcap)
+        # Find the tcpdump filter lines for hexdump and download
+        self.assertIn("f'host {src} and host {dst} and port {sport} and port {dport}'", source)
+        self.assertIn("f\"host {src} and host {dst} and port {sport} and port {dport}\"", source)
+        self.assertNotIn("or port {dport}", source)
+
     def test_upload_traversal_filename(self):
-        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x00' * 100
+        # Use unique PCAP content to avoid collision with test_upload_same_pcap_in_different_zips
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x02' * 100
         status, body = self._post_multipart(
             '/api/upload',
             '../../../etc/evil.pcap',
@@ -453,6 +504,75 @@ class TestAPIEndpoints(unittest.TestCase):
         pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x00' * 100
         status, body = self._post_multipart('/api/upload', 'test.txt', pcap_data)
         self.assertEqual(status, 400)
+
+    def test_upload_valid_zip(self):
+        import io
+        import zipfile as zf
+        import hashlib
+        # Use unique PCAP content so this test doesn't collide with test_upload_same_pcap_in_different_zips
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x01' * 100
+        expected_md5 = hashlib.md5(pcap_data).hexdigest()
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('test.pcap', pcap_data)
+        zip_data = zip_buffer.getvalue()
+        status, body = self._post_multipart('/api/upload', 'test.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertIn('md5', data)
+        self.assertEqual(data['md5'], expected_md5,
+                         'MD5 should be computed from extracted PCAP, not the ZIP')
+        self.assertEqual(data['status'], 'processing')
+        # Verify directory was created using PCAP MD5
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, expected_md5, 'test.pcap')))
+
+    def test_upload_tries_password_protected_zips(self):
+        """Upload handler code must attempt common passwords before rejecting protected ZIPs."""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        upload_section = content.split("if safe_filename.endswith('.zip'):")[1].split("pcap_files = [")[0]
+        # Should try no password first
+        self.assertIn("extracted = False", upload_section,
+                      'Must track extraction success')
+        self.assertIn("zip_ref.extractall(tmp_dir)", upload_section,
+                      'Must attempt extraction without password')
+        # Should try common passwords
+        self.assertIn("passwords = [b'infected']", upload_section,
+                      'Must try infected password')
+        self.assertIn("for pwd in passwords:", upload_section,
+                      'Must loop over candidate passwords')
+        # Should try date-based password from filename
+        self.assertIn("re.search(r'(\\d{4})-(\\d{2})-(\\d{2})', safe_filename)", upload_section,
+                      'Must derive date-based password from filename')
+        self.assertIn("'infected_{year}{month}{day}'.encode()", upload_section,
+                      'Must construct MTA-style date password')
+
+    def test_upload_same_pcap_in_different_zips(self):
+        import io
+        import zipfile as zf
+        import hashlib
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x00' * 100
+        expected_md5 = hashlib.md5(pcap_data).hexdigest()
+
+        # First ZIP
+        zip1 = io.BytesIO()
+        with zf.ZipFile(zip1, 'w') as z:
+            z.writestr('capture.pcap', pcap_data)
+        status1, body1 = self._post_multipart('/api/upload', 'first.zip', zip1.getvalue())
+        self.assertEqual(status1, 200)
+        data1 = json.loads(body1)
+        self.assertEqual(data1['md5'], expected_md5)
+
+        # Second ZIP with different name and extra file
+        zip2 = io.BytesIO()
+        with zf.ZipFile(zip2, 'w') as z:
+            z.writestr('readme.txt', 'extra file')
+            z.writestr('network.pcap', pcap_data)
+        status2, body2 = self._post_multipart('/api/upload', 'second.zip', zip2.getvalue())
+        self.assertEqual(status2, 200)
+        data2 = json.loads(body2)
+        self.assertEqual(data2['md5'], expected_md5,
+                         'Same PCAP inside different ZIPs should produce the same MD5')
 
     def test_load_url_no_url_provided(self):
         status, body = self._post('/api/load-url', {})
@@ -561,6 +681,23 @@ class TestErrorMessages(unittest.TestCase):
             content = f.read()
         self.assertNotIn('str(e)', content)
         self.assertNotIn('traceback', content.lower())
+
+
+class TestLoadUrlContentValidation(unittest.TestCase):
+    def test_load_url_validates_downloaded_content(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('validate_pcap_content(file_data)', content)
+        self.assertIn('if not validate_pcap_content(file_data):', content)
+
+    def test_load_url_double_validates_url(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        # Count occurrences of validate_url_safety in the load-url handler
+        load_url_section = content.split("elif self.path == '/api/load-url':")[1]
+        load_url_section = load_url_section.split("elif self.path == '/api/check-status':")[0]
+        self.assertEqual(load_url_section.count('validate_url_safety(url)'), 2,
+                         'load-url should call validate_url_safety twice to prevent DNS rebinding')
 
 
 class TestThreadedServer(unittest.TestCase):
@@ -712,11 +849,204 @@ class TestSuricataConfigRulesPath(unittest.TestCase):
             content = f.read()
         
         # Verify default-rule-path points to our custom directory
-        # Note: Inside Docker, DATA_DIR is mounted as /data
-        self.assertIn('/data/suricata/rules', content,
-                      'suricata.yaml should use custom rules path')
+        expected_path = server.SURICATA_RULES_DIR
+        self.assertIn(expected_path, content,
+                      f'suricata.yaml should use custom rules path {expected_path}')
         self.assertNotIn('/var/lib/suricata/rules', content,
                          'suricata.yaml should not use system rules path')
+
+
+class TestSecurityHeaders(unittest.TestCase):
+    def test_x_frame_options(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("X-Frame-Options', 'DENY'", content)
+
+    def test_x_content_type_options(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("X-Content-Type-Options', 'nosniff'", content)
+
+    def test_content_security_policy(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("Content-Security-Policy", content)
+        self.assertIn("default-src 'self'", content)
+
+    def test_end_headers_calls_security_headers(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('def end_headers(self):', content)
+        self.assertIn('self._add_security_headers()', content)
+
+    def test_html_cache_control_headers(self):
+        """Verify Cache-Control headers are sent for HTML and static assets"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("no-cache, no-store, must-revalidate", content)
+        self.assertIn("self.path.endswith('.html')", content)
+        self.assertIn("self.path.startswith('/static/')", content)
+        self.assertIn("Pragma', 'no-cache'", content)
+        self.assertIn("Expires', '0'", content)
+
+
+class TestSubprocessTimeouts(unittest.TestCase):
+    def test_tcpdump_has_timeout(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        tcpdump_match = re.search(r"\['tcpdump', '-r', pcap, '-w', '-'.*?timeout=(\d+)", content, re.DOTALL)
+        self.assertIsNotNone(tcpdump_match, 'tcpdump call must have timeout')
+        self.assertEqual(tcpdump_match.group(1), '60')
+
+    def test_tshark_has_timeout(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        tshark_matches = re.findall(r"\['tshark', '-r', pcap.*?timeout=(\d+)", content, re.DOTALL)
+        self.assertGreaterEqual(len(tshark_matches), 2, 'Both tshark calls must have timeout')
+        for m in tshark_matches:
+            self.assertEqual(m, '60', 'tshark timeout must be 60 seconds')
+
+    def test_timeout_expired_handled(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('except subprocess.TimeoutExpired:', content)
+
+
+class TestNoDuplicateImports(unittest.TestCase):
+    def test_threading_imported_at_top_level(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        # Should have exactly one 'import threading' at the top level
+        top_level = content.split('class Handler')[0]
+        self.assertEqual(top_level.count('import threading'), 1,
+                         'threading should be imported once at module level')
+        # Should NOT have inline 'import threading' inside methods
+        handler_section = content.split('class Handler')[1]
+        self.assertEqual(handler_section.count('import threading'), 0,
+                         'threading should not be imported inline inside methods')
+
+
+class TestSetupSuricataConfigLogging(unittest.TestCase):
+    def test_copy_warnings_logged(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("print(f'Warning: could not copy", content)
+        self.assertIn("print(f'Warning: could not copy directory", content)
+
+
+class TestSuricataProcessingLock(unittest.TestCase):
+    def test_processing_lock_file_used(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("'.processing'", content)
+        self.assertIn("os.path.exists(processing_lock)", content)
+        self.assertIn("open(processing_lock, 'w').close()", content)
+
+    def test_lock_removed_in_callback(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("os.unlink(processing_lock)", content)
+
+    def test_lock_removed_on_spawn_failure(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        # Count occurrences of unlink inside except blocks
+        # Should appear at least twice: once in callback, once in failure handler
+        self.assertGreaterEqual(content.count("os.unlink(processing_lock)"), 2)
+
+    def test_stale_lock_handled_in_check_status(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        check_status = content.split("elif self.path == '/api/check-status':")[1]
+        self.assertIn("lock_age", check_status)
+        self.assertIn("600", check_status)
+
+
+class TestNameTxtPathSafety(unittest.TestCase):
+    def test_analyses_checks_name_txt_safety(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        analyses_section = content.split("elif path == '/api/analyses':")[1].split("elif path == '/api/load-analysis':")[0]
+        self.assertIn("is_safe_path(dir_path, name_path)", analyses_section,
+                      '/api/analyses must validate name.txt path')
+
+    def test_load_analysis_checks_name_txt_safety(self):
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        load_section = content.split("elif path == '/api/load-analysis':")[1].split("elif path == '/api/delete-analysis':")[0]
+        self.assertIn("is_safe_path(dir_path, name_path)", load_section,
+                      '/api/load-analysis must validate name.txt path')
+
+
+class TestSuricataRuleRawEnabled(unittest.TestCase):
+    def test_rule_raw_set_in_suricata_spawn(self):
+        """Verify that suricata is spawned with --set to enable alert.rule in eve.json"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        # Should appear exactly once in spawn_suricata helper
+        self.assertEqual(content.count("'--set', 'outputs.1.eve-log.types.0.alert.metadata.rule.raw=true'"), 1,
+                         'rule.raw must be set exactly once in spawn_suricata helper')
+        # Helper must be called from all 3 original spawn points plus reanalyze endpoint
+        func_def_pos = content.find('def spawn_suricata(dir_path, pcap_path):')
+        calls_after_def = content[func_def_pos:].count('spawn_suricata(dir_path, pcap_path)') - 1
+        self.assertEqual(calls_after_def, 4,
+                         'spawn_suricata must be called from all 3 upload paths and reanalyze endpoint')
+
+
+class TestReanalyzeEndpoint(unittest.TestCase):
+    def test_reanalyze_endpoint_exists(self):
+        """Verify /api/reanalyze endpoint exists in do_POST."""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("elif self.path == '/api/reanalyze':", content,
+                      'POST /api/reanalyze endpoint must exist')
+
+    def test_reanalyze_deletes_analysis_artifacts(self):
+        """Verify reanalyze removes eve.json, events.db, and .processing."""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        reanalyze_section = content.split("elif self.path == '/api/reanalyze':")[1]
+        self.assertIn("for artifact in ('eve.json', 'events.db', '.processing'):", reanalyze_section,
+                      'reanalyze must loop over analysis artifacts to delete')
+        self.assertIn('os.unlink(artifact_path)', reanalyze_section,
+                      'reanalyze must unlink artifact files')
+
+    def test_reanalyze_keeps_pcap_and_name(self):
+        """Verify reanalyze does NOT delete pcap files or name.txt."""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        reanalyze_section = content.split("elif self.path == '/api/reanalyze':")[1]
+        # Should only unlink artifacts, not rmtree the whole directory
+        self.assertNotIn('shutil.rmtree', reanalyze_section,
+                         'reanalyze must not use rmtree')
+        # name.txt should not appear in an os.path.join inside the loop
+        loop_section = reanalyze_section.split("for artifact in")[1].split("if spawn_suricata")[0]
+        self.assertNotIn("name.txt", loop_section,
+                         'reanalyze loop must not reference name.txt')
+
+    def test_reanalyze_returns_404_if_no_pcap(self):
+        """Verify reanalyze returns 404 when no PCAP is present."""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        reanalyze_section = content.split("elif self.path == '/api/reanalyze':")[1]
+        self.assertIn("self._send_error(404, 'No pcap found')", reanalyze_section,
+                      'reanalyze must return 404 if no PCAP found')
+
+    def test_reanalyze_returns_409_if_already_processing(self):
+        """Verify reanalyze returns 409 when analysis is already in progress."""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        reanalyze_section = content.split("elif self.path == '/api/reanalyze':")[1]
+        self.assertIn("self._send_error(409, 'Analysis already in progress')", reanalyze_section,
+                      'reanalyze must return 409 if already processing')
+
+    def test_reanalyze_calls_spawn_suricata(self):
+        """Verify reanalyze calls spawn_suricata after cleaning artifacts."""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        reanalyze_section = content.split("elif self.path == '/api/reanalyze':")[1]
+        self.assertIn('spawn_suricata(dir_path, pcap_path)', reanalyze_section,
+                      'reanalyze must call spawn_suricata')
 
 
 class TestRuleDownloadPrompt(unittest.TestCase):
@@ -724,12 +1054,59 @@ class TestRuleDownloadPrompt(unittest.TestCase):
         """Verify that suricata-update outputs messages when rules are downloaded"""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        
+
         # Check for informative messages about rule download
-        self.assertIn('Downloading Suricata rules', content,
-                      'Should log when downloading rules')
-        self.assertIn('Suricata rules downloaded successfully', content,
-                      'Should log when rules download completes')
+        self.assertIn('Internet access detected', content,
+                      'Should log when internet is detected')
+        self.assertIn('updating Suricata rules', content,
+                      'Should log when updating rules')
+        self.assertIn('Suricata rules updated successfully', content,
+                      'Should log when rules update completes')
+
+
+class TestAirgapFallback(unittest.TestCase):
+    def test_has_internet_access_function_exists(self):
+        """Verify has_internet_access helper is defined"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('def has_internet_access():', content,
+                      'has_internet_access function must exist')
+
+    def test_internet_check_connects_to_rules_server(self):
+        """Verify internet check targets the actual rules server"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('rules.emergingthreats.net', content,
+                      'Must check connectivity to rules server')
+        self.assertIn('socket.create_connection', content,
+                      'Must use socket.create_connection for check')
+
+    def test_baked_in_rules_path_defined(self):
+        """Verify baked-in rules path is referenced"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn("/usr/share/suricata/rules", content,
+                      'Must reference baked-in rules path')
+
+    def test_fallback_uses_shutil_copytree(self):
+        """Verify air-gapped fallback copies baked-in rules"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('shutil.copytree', content,
+                      'Must use shutil.copytree for baked-in rules')
+        self.assertIn('dirs_exist_ok=True', content,
+                      'Must safely overwrite existing rules')
+
+    def test_airgap_log_messages_present(self):
+        """Verify log messages for air-gapped path exist"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('No internet access detected', content,
+                      'Should log when falling back to baked-in rules')
+        self.assertIn('Baked-in rules copied successfully', content,
+                      'Should log when baked-in rules are copied')
+        self.assertIn('no baked-in rules found and no internet access', content,
+                      'Should warn when no rules are available')
 
 
 class TestServerStartupBanner(unittest.TestCase):
@@ -739,9 +1116,16 @@ class TestServerStartupBanner(unittest.TestCase):
             content = f.read()
         
         # Check for banner elements
-        self.assertIn('Welcome to OhMyPCAP!', content)
+        self.assertIn('Welcome to OhMyPCAP', content)
         self.assertIn('Analyze pcap files from the web or your local collection', content)
         self.assertIn('View alerts and then slice and dice your network metadata', content)
+
+    def test_running_message_has_border(self):
+        """Verify the running message is wrapped in a border matching the welcome banner"""
+        with open(SERVER_FILE, 'r') as f:
+            content = f.read()
+        self.assertIn('OhMyPCAP running at http://', content)
+        self.assertIn('================================================', content)
 
 
 class TestHTMLNoEmptyFunctions(unittest.TestCase):
