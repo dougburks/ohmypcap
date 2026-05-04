@@ -99,15 +99,15 @@ docker compose restart
 
 #### Air-Gapped / Offline Deployment for Docker
 
-The Docker image bakes in the Emerging Threats Open ruleset at build time, so it works without internet access. To deploy on an isolated network:
+Our container image bakes in the Emerging Threats Open ruleset at build time, so it works without internet access. To copy to an isolated network, pull and save the container image using an internet-connected machine:
 
 ```bash
-# On an internet-connected machine
 docker pull ghcr.io/dougburks/ohmypcap:main
-docker save ghcr.io/dougburks/ohmypcap:main > ohmypcap-airgap.tar
+docker save ghcr.io/dougburks/ohmypcap:main > ohmypcap.tar
+```
 
-# Transfer ohmypcap-airgap.tar to the isolated network via USB, etc.
-# Then on the air-gapped machine:
+Then transfer ohmypcap.tar to the isolated network via USB or other media. On the air-gapped machine:
+```bash
 docker load < ohmypcap-airgap.tar
 docker run -v ~/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main
 ```
@@ -140,7 +140,7 @@ podman run --userns=keep-id --user $(id -u):$(id -g) \
   ghcr.io/dougburks/ohmypcap:main
 ```
 
-No `usermod` or `newgrp` is needed — Podman runs rootless by default. Use `$HOME` instead of `~` for the volume mount to avoid path expansion issues. The `--userns=keep-id --user $(id -u):$(id -g)` flags ensure files written to `~/ohmypcap-data` are owned by your host user.
+No `usermod` or `newgrp` is needed since Podman runs rootless by default. Use `$HOME` instead of `~` for the volume mount to avoid path expansion issues. The `--userns=keep-id --user $(id -u):$(id -g)` flags ensure files written to `~/ohmypcap-data` are owned by your host user.
 
 #### podman compose
 
@@ -168,16 +168,16 @@ podman compose restart
 
 #### Air-Gapped / Offline Deployment for Podman
 
-The Podman image bakes in the Emerging Threats Open ruleset at build time, so it works without internet access. To deploy on an isolated network:
+Our container image bakes in the Emerging Threats Open ruleset at build time, so it works without internet access. To copy to an isolated network, pull and save the container image using an internet-connected machine:
 
 ```bash
-# On an internet-connected machine
 podman pull ghcr.io/dougburks/ohmypcap:main
-podman save ghcr.io/dougburks/ohmypcap:main > ohmypcap-airgap.tar
+podman save ghcr.io/dougburks/ohmypcap:main > ohmypcap.tar
+```
 
-# Transfer ohmypcap-airgap.tar to the isolated network via USB, etc.
-# Then on the air-gapped machine:
-podman load < ohmypcap-airgap.tar
+Then transfer ohmypcap.tar to the isolated network via USB or other media. On the air-gapped machine:
+```bash
+podman load < ohmypcap.tar
 podman run --userns=keep-id --user $(id -u):$(id -g) \
   -v $HOME/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main
 ```
