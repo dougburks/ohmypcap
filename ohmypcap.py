@@ -110,6 +110,7 @@ def setup_suricata_config():
     baked_in_rules_dir = '/usr/share/suricata/rules'
     baked_in_rules_exist = os.path.isdir(baked_in_rules_dir) and os.path.exists(os.path.join(baked_in_rules_dir, 'suricata.rules'))
 
+    print("Checking for internet access...")
     if has_internet_access():
         print("Internet access detected — updating Suricata rules...")
         try:
