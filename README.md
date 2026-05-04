@@ -12,6 +12,18 @@ After analysis, you can view security alerts, network metadata, and extract stre
 
 ![Analysis screen](docs/images/ohmypcap-analysis.png)
 
+When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript:
+
+![transcript](docs/images/ohmypcap-transcript.png)
+
+You can also select the hexdump view:
+
+![hexdump](docs/images/ohmypcap-hexdump.png)
+
+To slice and dice your data, expand the Aggregation Tables section and click on values that you want to filter for:
+
+![aggregation-filtering](docs/images/ohmypcap-aggregation-filtering.png)
+
 ## Table of Contents
 
 - [Quick Demo](#quick-demo)
@@ -108,7 +120,7 @@ docker save ghcr.io/dougburks/ohmypcap:main > ohmypcap.tar
 
 Then transfer ohmypcap.tar to the isolated network via USB or other media. On the air-gapped machine:
 ```bash
-docker load < ohmypcap-airgap.tar
+docker load < ohmypcap.tar
 docker run -v ~/ohmypcap-data:/data -p 8000:8000 ghcr.io/dougburks/ohmypcap:main
 ```
 
