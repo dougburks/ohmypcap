@@ -19,7 +19,8 @@
         .stat-card.stat-disabled { opacity: 0.5; cursor: default; }
         .stat-card.stat-disabled:hover { border-color: #30363d; }
         .stat-number { font-size: 2.5rem; font-weight: bold; }
-        .stat-label { color: #8b949e; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-label { color: #8b949e; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; overflow-wrap: break-word; line-height: 1.2; }
+        @media (max-width: 600px) { .stat-card { padding: 15px 10px; } .stat-number { font-size: 1.8rem; } .stat-label { font-size: 0.75rem; letter-spacing: 0.5px; } }
         .section { background: #161b22; overflow: hidden; }
         .section-hidden { display: none; }
         .section-header { background: #21262d; padding: 15px 20px; font-size: 1.1rem; font-weight: 600; color: #f0f6fc; }
@@ -1922,7 +1923,7 @@
                                     Back to Overview
                                 </a>
                                 <span style="color: #f0f6fc; font-weight: 600; white-space: nowrap;">📄 ${currentPcapName}</span>
-                                <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📁 ${pcapPath.substring(0, pcapPath.lastIndexOf('/') + 1)}</span>
+                                <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📁 ${pcapPath.split('/').filter(Boolean).slice(-2, -1)[0] || ''}</span>
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📅 ${ts[0]?.slice(0, 19) || ''} to ${ts[ts.length-1]?.slice(0, 19) || ''}</span>
                             </div>
                             <div style="color: #8b949e; font-size: 0.8rem; margin-top: 8px; text-align: center;">
@@ -2183,8 +2184,38 @@
             }
         }
         
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                if (diagramMode && currentMd5) {
+                    const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+                    if (visibleSection) {
+                        const eventType = visibleSection.id.replace('section-', '');
+                        const events = eventType === 'all' ? allEvents : sections[eventType];
+                        const filtered = getFilteredEvents(visibleSection.id, events, eventType);
+                        updateSankeyDiagram(filtered);
+                    }
+                }
+            }, 300);
+        });
+
         async function init() {
             try {
+                // Fetch and display version from server
+                try {
+                    const verResp = await fetch('/api/version');
+                    if (verResp.ok) {
+                        const verData = await verResp.json();
+                        const link = document.getElementById('footerVersionLink');
+                        if (link && verData.version) {
+                            link.textContent = 'OhMyPCAP ' + verData.version;
+                        }
+                    }
+                } catch(verErr) {
+                    // Ignore version fetch errors — footer shows placeholder
+                }
+
                 // Check for pcap query parameter
                 const urlParams = new URLSearchParams(window.location.search);
                 const pcapMd5 = urlParams.get('pcap');
@@ -2208,7 +2239,7 @@
         </script>
     </div>
     <div class="footer">
-        <a href="https://github.com/dougburks/ohmypcap" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">OhMyPCAP 2.0.0</a>
+        <a href="https://github.com/dougburks/ohmypcap" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;" id="footerVersionLink">OhMyPCAP</a>
         <a href="https://securityonion.com" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">&copy; 2026 Security Onion Solutions, LLC</a>
     </div>
 </body>

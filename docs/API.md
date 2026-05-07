@@ -12,6 +12,14 @@ Redirects to `/ohmypcap.html`.
 
 ---
 
+### `GET /api/version`
+
+Returns the running OhMyPCAP version.
+
+**Response:** `{"version": "2.0.1"}`
+
+---
+
 ### `GET /api/events`
 
 Returns event data from Suricata's eve.json (via SQLite index or direct JSON parse).

@@ -874,8 +874,9 @@ class TestFiltering(unittest.TestCase):
     def test_has_footer_css(self):
         self.assertIn('.footer', HTML_CONTENT)
 
-    def test_has_footer_with_version(self):
-        self.assertIn('OhMyPCAP 2.0.0', HTML_CONTENT)
+    def test_has_footer_with_version_placeholder(self):
+        self.assertIn('OhMyPCAP</a>', HTML_CONTENT)
+        self.assertIn('id="footerVersionLink"', HTML_CONTENT)
 
     def test_has_footer_with_copyright(self):
         self.assertIn('Security Onion Solutions, LLC', HTML_CONTENT)

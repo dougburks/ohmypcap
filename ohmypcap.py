@@ -18,7 +18,7 @@ import shutil
 import sys
 import threading
 
-VERSION = '2.0.0'
+VERSION = '2.0.1'
 PORT = int(os.environ.get('PORT', 8000))
 BIND_ADDRESS = os.environ.get('BIND_ADDRESS', '127.0.0.1')
 DATA_DIR = os.environ.get('DATA_DIR', os.path.expanduser('~/ohmypcap-data'))
@@ -782,6 +782,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(os.path.join(dir_path, pcap_files[0]).encode())
             else:
                 self._send_error(404, 'No pcap found')
+
+        elif path == '/api/version':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'version': VERSION}).encode())
 
         else:
             super().do_GET()

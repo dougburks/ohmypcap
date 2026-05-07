@@ -313,6 +313,13 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), [])
 
+    def test_version_endpoint(self):
+        status, body = self._get('/api/version')
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertIn('version', data)
+        self.assertRegex(data['version'], r'^\d+\.\d+\.\d+$')
+
     def test_events_with_valid_md5(self):
         md5dir = os.path.join(self.tmpdir, 'd41d8cd98f00b204e9800998ecf8427e')
         os.makedirs(md5dir, exist_ok=True)
