@@ -1679,9 +1679,23 @@
 
             buildStats(computeFilteredStats());
 
+            // Remember active section before rebuild
+            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            const activeType = visibleSection ? visibleSection.id.replace('section-', '') : '';
+
             document.getElementById('sections').innerHTML = '';
             tabDataCache = {};
             buildSections();
+
+            // Restore active section after rebuild
+            if (activeType && activeType !== eventTypes[0]) {
+                document.querySelectorAll('.section').forEach(s => s.classList.add('section-hidden'));
+                const sectionEl = document.getElementById('section-' + activeType);
+                if (sectionEl) {
+                    sectionEl.classList.remove('section-hidden');
+                    loadTabData(activeType, null);
+                }
+            }
 
             const sankeyPanel = document.getElementById('sankeyPanel');
             if (sankeyPanel) {

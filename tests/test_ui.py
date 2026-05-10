@@ -1469,6 +1469,26 @@ class TestSearchUI(unittest.TestCase):
         self.assertIn('currentSearch.length > 0 || hasFilters', JS_CONTENT,
                       'updateFilterBarVisibility must check search array length and filters')
 
+    def test_showWelcome_hides_search_bar(self):
+        """REGRESSION: showWelcome must hide searchBarContainer when returning to overview."""
+        func = JS_CONTENT.split('async function showWelcome')[1].split('async function')[0]
+        self.assertIn("document.getElementById('searchBarContainer').style.display = 'none'", func,
+                      'showWelcome must hide search bar when returning to overview')
+
+    def test_refreshAnalysisData_preserves_active_section(self):
+        """REGRESSION: refreshAnalysisData must remember and restore the active section type after rebuild."""
+        func = JS_CONTENT.split('async function refreshAnalysisData')[1].split('async function')[0]
+        self.assertIn("const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)')", func,
+                      'refreshAnalysisData must query visible section before rebuild')
+        self.assertIn("const activeType = visibleSection ? visibleSection.id.replace('section-', '') : ''", func,
+                      'refreshAnalysisData must extract active type from visible section')
+        self.assertIn("if (activeType && activeType !== eventTypes[0])", func,
+                      'refreshAnalysisData must conditionally restore non-default active type')
+        self.assertIn("sectionEl.classList.remove('section-hidden')", func,
+                      'refreshAnalysisData must unhide the restored section')
+        self.assertIn("loadTabData(activeType, null)", func,
+                      'refreshAnalysisData must reload data for restored section')
+
 
 class TestReanalyzeUI(unittest.TestCase):
     def test_reanalyze_button_on_welcome(self):
