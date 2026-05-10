@@ -16,7 +16,7 @@ Redirects to `/ohmypcap.html`.
 
 Returns the running OhMyPCAP version.
 
-**Response:** `{"version": "2.0.1"}`
+**Response:** `{"version": "2.1.0"}`
 
 ---
 
@@ -30,6 +30,7 @@ Returns event data from Suricata's eve.json (via SQLite index or direct JSON par
 |---|---|---|---|
 | `md5` | No | current session | MD5 hash of a historical analysis |
 | `type` | No | all | Filter by event type (`alert`, `dns`, `http`, `tls`, `flow`, `ftp`, `anomaly`, `fileinfo`) |
+| `q` | No | none | Full-text search query (searches all event JSON). Multiple `q` params AND together. |
 | `offset` | No | `0` | Pagination offset |
 | `limit` | No | `1000` | Max events to return (capped at 5000) |
 
@@ -38,6 +39,9 @@ Returns event data from Suricata's eve.json (via SQLite index or direct JSON par
 **Example:**
 ```
 GET /api/events?type=alert&limit=100
+GET /api/events?q=192.168.1.1
+GET /api/events?type=http&q=GET
+GET /api/events?q=tcp&q=80          # AND: events containing both "tcp" and "80"
 ```
 
 ---
@@ -51,6 +55,7 @@ Returns event-type counts for the current or specified analysis.
 | Parameter | Required | Default | Description |
 |---|---|---|---|
 | `md5` | No | current session | MD5 hash of a historical analysis |
+| `q` | No | none | Full-text search query (counts only matching events). Multiple `q` params AND together. |
 
 **Response:** Object mapping event type to count.
 
@@ -63,7 +68,7 @@ Returns event-type counts for the current or specified analysis.
 
 ### `GET /api/count`
 
-Returns total event count, optionally filtered by type.
+Returns total event count, optionally filtered by type or search query.
 
 **Query Parameters:**
 
@@ -71,6 +76,7 @@ Returns total event count, optionally filtered by type.
 |---|---|---|---|
 | `md5` | No | current session | MD5 hash of a historical analysis |
 | `type` | No | all | Filter by event type |
+| `q` | No | none | Full-text search query (counts only matching events). Multiple `q` params AND together. |
 
 **Response:** `{"count": <number>}`
 

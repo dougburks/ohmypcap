@@ -11,20 +11,25 @@ let currentFilters = {};
 
 Filters are **global** — they apply across all tabs (Alert, DNS, HTTP, All Events, etc.). When a filter is set on one tab, it persists when switching to another tab.
 
+Search (`currentSearch`) is a separate server-side full-text filter using SQLite FTS5. It is an **array of terms** — typing `tcp 80` creates two chips `[🔍 "tcp" ×] [🔍 "80" ×]`. Each chip is independently removable. Quoted phrases like `"GET /login"` become a single chip. Search terms AND together on the backend. Search complements column filters: you can search for `192.168.1.1` and then further narrow with aggregation filters. Search is cleared when loading a new PCAP or when clicking **Clear All**.
+
 ## Key Functions
 
 | Function | Role |
 |---|---|
+| `performSearch()` | Splits `searchInput` into terms, pushes to `currentSearch` array, clears input, refreshes data |
+| `clearSearch()` | Clears all `currentSearch` terms, resets input, refreshes data |
+| `clearSearchTerm(index)` | Removes single term at index from `currentSearch`, refreshes data |
 | `applyFilter(sectionId, columnName, value)` | Sets `currentFilters[columnName] = value`, rebuilds table + agg grid + stats + sankey |
 | `clearFilter(columnName)` | Deletes `currentFilters[columnName]`, rebuilds |
-| `clearAllFilters()` | Resets `currentFilters = {}`, rebuilds |
-| `getFilteredEvents(sectionId, events, eventType)` | Returns events matching all active filters |
+| `clearAllFilters()` | Clears **both** `currentSearch` and `currentFilters`, refreshes data from server |
+| `getFilteredEvents(sectionId, events, eventType)` | Returns events matching all active column filters |
 | `buildSection(eventType, events)` | Builds the main data table, applies `currentFilters` internally |
 | `buildAggregationsSection(eventType, events)` | Builds agg grid; **expects pre-filtered events** |
 | `buildAllEvents()` | Builds "All Events" table, applies `currentFilters` internally |
 | `buildAggregationsSectionAll()` | Builds agg grid for "All Events"; applies `currentFilters` internally |
-| `updateFilterBarVisibility()` | Shows/hides the filter bar in `#filterBarContainer` when filters exist |
-| `buildStats(filteredStats)` | Rebuilds stats cards with filtered/total counts when filters are active |
+| `updateFilterBarVisibility()` | Shows/hides the filter bar when search or filters exist |
+| `buildStats(filteredStats)` | Rebuilds stats cards with filtered/total counts when constraints are active |
 | `computeFilteredStats()` | Counts events by type from the filtered subset |
 
 ## Data Flow
@@ -72,6 +77,7 @@ Never use `JSON.stringify()` inside `onclick` attributes — it produces double-
 python3 -m unittest discover tests -v
 ```
 
-All 366 tests must pass. The filtering-related tests are in:
+All 431 tests must pass. The filtering-related tests are in:
 - `TestFilterOnclickQuoting` (6 tests)
 - `TestAdvancedModeFilterBar` (14 tests)
+- `TestSearchUI` (22 tests)

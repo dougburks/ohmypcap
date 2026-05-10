@@ -257,6 +257,7 @@ After Suricata finishes processing, the UI displays:
 - **Sankey Diagram** — expand the collapsible heading to visualize network flow relationships (Source IP → Dest IP → Dest Port)
 - **Aggregation Tables** — frequency counts for each column; click a value to filter
 - **Data Table** — sortable table with expandable detail rows showing full event JSON, ASCII transcripts, and hexdumps
+- **Search** — full-text search across all event data using SQLite FTS5 (falls back to `LIKE` if FTS5 is unavailable)
 - **Filtering** — apply filters by clicking aggregation values; filter chips show active filters; filters persist across all tabs and the Sankey diagram
 
 ### Stream Analysis

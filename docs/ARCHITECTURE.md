@@ -15,9 +15,19 @@ Browser ──HTTP──▶ ohmypcap.py (Python HTTP server, port 8000)
 
 All state is file-based under `~/ohmypcap-data/`. No database server, no external services.
 
-## Server (ohmypcap.py)
+## Server
 
 A stdlib-only Python HTTP server (`http.server.SimpleHTTPRequestHandler`). Handles static file serving for `ohmypcap.html` and JSON API endpoints.
+
+### Modules
+
+| File | Responsibility |
+|---|---|
+| `ohmypcap.py` | HTTP request dispatch, stream carving, ZIP extraction helper |
+| `db.py` | SQLite schema, bulk loading, FTS5 full-text search, query functions |
+| `models.py` | Suricata event field extraction helpers (IP, port, protocol) |
+| `validators.py` | Input validation: IP, port, filename, path safety, URL safety, ZIP slip, PCAP magic bytes |
+| `suricata.py` | Suricata orchestration: executable checks, rules download/config, background spawn |
 
 ### Request Flow
 
@@ -60,9 +70,23 @@ CREATE TABLE events (
 );
 CREATE INDEX idx_event_type ON events(event_type);
 CREATE INDEX idx_timestamp ON events(timestamp);
+CREATE INDEX idx_event_type_timestamp ON events(event_type, timestamp);
+
+-- FTS5 virtual table for full-text search (created when FTS5 is available)
+CREATE VIRTUAL TABLE events_fts USING fts5(
+    json_data,
+    content='events',
+    content_rowid='id'
+);
+
+-- Performance pragmas
+PRAGMA journal_mode = WAL;      -- Better concurrency between readers and writers
+PRAGMA synchronous = NORMAL;    -- Faster writes with WAL crash safety
+PRAGMA busy_timeout = 30000;    -- Retry for 30s when database is locked
+PRAGMA optimize;                -- Gather stats for query planner after bulk load
 ```
 
-The `json_data` column stores the complete original event, allowing the server to return full eve.json objects without re-parsing the source file.
+The `json_data` column stores the complete original event, allowing the server to return full eve.json objects without re-parsing the source file. An optional `events_fts` virtual table enables fast full-text search over all event data. If FTS5 is unavailable, searches fall back to `json_data LIKE '%term%'`.
 
 ### Event Types
 
@@ -78,9 +102,17 @@ The `json_data` column stores the complete original event, allowing the server t
 | `fileinfo` | File transfers | `fileinfo.filename`, `fileinfo.filetype` |
 | `stats` | Suricata internal stats | (excluded from display) |
 
-## UI (ohmypcap.html)
+## UI
 
-A single-page application with all CSS and JavaScript inline. No external dependencies.
+Three files under `static/`:
+
+| File | Content |
+|---|---|
+| `ohmypcap.html` | HTML shell |
+| `static/ohmypcap.css` | All styles |
+| `static/ohmypcap.js` | All JavaScript |
+
+`ohmypcap.html` loads the CSS and JS via `<link>` and `<script src>` tags. D3 and d3-sankey are vendored in `static/` for offline use.
 
 ### UI States
 
@@ -92,7 +124,7 @@ Welcome Screen (no PCAP loaded)
 Analysis View (PCAP loaded)
   ├── Header (back button, name, path, date range)
   ├── Visualizations bar (Diagram toggle, Aggregation toggle)
-  ├── Filter Bar (active filters as removable chips)
+  ├── Filter Bar (active search and filters as removable chips)
   ├── Stats Grid (clickable event-type cards, shows filtered/total counts when active)
   ├── Sankey Diagram (diagram mode — Source IP → Dest IP → Dest Port, reflects current filters)
   ├── Aggregations (frequency counts per column)
@@ -109,6 +141,8 @@ let eventTypes = [];         // available types for current PCAP
 let currentMd5 = '';         // current analysis MD5
 let currentPcapName = '';    // display name
 let currentFilters = {};     // {columnName: value} — global, flat
+let currentSearch = [];      // server-side full-text search terms (array)
+let baseEventStats = {};     // unfiltered totals for stats card denominator
 let advancedMode = false;    // advanced toggle state
 let tabDataCache = {};       // cached event data per type
 ```
@@ -121,7 +155,8 @@ let tabDataCache = {};       // cached event data per type
 | Data Loading | `loadTabData()`, `loadFromUrl()`, `uploadPcap()`, `checkStatus()` | Fetch data from API |
 | Rendering | `buildStats()`, `buildSections()`, `buildSection()`, `buildAllEvents()`, `buildRowForEvent()` | Build HTML |
 | Aggregation | `buildAggregationTables()`, `buildAggregationTablesAll()`, `buildAggregationsSection()`, `buildAggregationsSectionAll()` | Frequency grids |
-| Filtering | `applyFilter()`, `clearFilter()`, `clearAllFilters()`, `getFilteredEvents()` | Filter management |
+| Search | `performSearch()`, `clearSearch()`, `refreshAnalysisData()` | Full-text search via server |
+| Filtering | `applyFilter()`, `clearFilter()`, `clearAllFilters()`, `getFilteredEvents()` | Column filter management |
 | Streams | `downloadPcap()`, `loadAsciiTranscript()`, `loadHexdumpData()`, `switchStreamView()`, `togglePacket()`, `toggleRow()` | Stream analysis |
 | Utilities | `escapeHtml()`, `formatEvent()`, `extractValue()`, `extractAllValue()`, `getColumnsForType()` | Helpers |
 

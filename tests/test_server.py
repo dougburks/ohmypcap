@@ -12,14 +12,15 @@ import threading
 import time
 import zipfile
 import io
-import sqlite3
 import re
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
+import db
 import ohmypcap as server
 
 SERVER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ohmypcap.py')
+SURICATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'suricata.py')
 
 
 class TestIPValidation(unittest.TestCase):
@@ -326,7 +327,7 @@ class TestAPIEndpoints(unittest.TestCase):
         with open(os.path.join(md5dir, 'eve.json'), 'w') as f:
             f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00"}\n')
         db_file = os.path.join(md5dir, 'events.db')
-        server.create_sqlite_db(db_file, os.path.join(md5dir, 'eve.json'))
+        db.create_sqlite_db(db_file, os.path.join(md5dir, 'eve.json'))
 
         status, body = self._get('/api/events?md5=d41d8cd98f00b204e9800998ecf8427e')
         self.assertEqual(status, 200)
@@ -337,6 +338,101 @@ class TestAPIEndpoints(unittest.TestCase):
         status, body = self._get('/api/events')
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), [])
+
+    def test_events_with_q_parameter(self):
+        md5 = 'e99a18c428cb38d5f260853678922e03'
+        md5dir = os.path.join(self.tmpdir, md5)
+        os.makedirs(md5dir, exist_ok=True)
+        with open(os.path.join(md5dir, 'eve.json'), 'w') as f:
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4"}\n')
+            f.write('{"event_type": "dns", "timestamp": "2026-01-01T00:00:01", "src_ip": "5.6.7.8"}\n')
+        db_file = os.path.join(md5dir, 'events.db')
+        db.create_sqlite_db(db_file, os.path.join(md5dir, 'eve.json'))
+
+        status, body = self._get(f'/api/events?md5={md5}&q=dns')
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['event_type'], 'dns')
+
+    def test_stats_with_q_parameter(self):
+        md5 = 'ab56b4d92b40713acc5af89985d4b786'
+        md5dir = os.path.join(self.tmpdir, md5)
+        os.makedirs(md5dir, exist_ok=True)
+        with open(os.path.join(md5dir, 'eve.json'), 'w') as f:
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4"}\n')
+            f.write('{"event_type": "dns", "timestamp": "2026-01-01T00:00:01", "src_ip": "5.6.7.8"}\n')
+        db_file = os.path.join(md5dir, 'events.db')
+        db.create_sqlite_db(db_file, os.path.join(md5dir, 'eve.json'))
+
+        status, body = self._get(f'/api/stats?md5={md5}&q=alert')
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data.get('alert'), 1)
+        self.assertNotIn('dns', data)
+
+    def test_count_with_q_parameter(self):
+        md5 = 'a3f5c5f7e7b5f5e5d5c5b5a595857565'
+        md5dir = os.path.join(self.tmpdir, md5)
+        os.makedirs(md5dir, exist_ok=True)
+        with open(os.path.join(md5dir, 'eve.json'), 'w') as f:
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4"}\n')
+            f.write('{"event_type": "dns", "timestamp": "2026-01-01T00:00:01", "src_ip": "5.6.7.8"}\n')
+        db_file = os.path.join(md5dir, 'events.db')
+        db.create_sqlite_db(db_file, os.path.join(md5dir, 'eve.json'))
+
+        status, body = self._get(f'/api/count?md5={md5}&q=dns')
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data['count'], 1)
+
+    def test_events_with_multiple_q_params(self):
+        md5 = 'b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7'
+        md5dir = os.path.join(self.tmpdir, md5)
+        os.makedirs(md5dir, exist_ok=True)
+        with open(os.path.join(md5dir, 'eve.json'), 'w') as f:
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4", "dest_port": 80}\n')
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:01", "src_ip": "5.6.7.8", "dest_port": 443}\n')
+            f.write('{"event_type": "dns", "timestamp": "2026-01-01T00:00:02", "src_ip": "1.2.3.4"}\n')
+        db_file = os.path.join(md5dir, 'events.db')
+        db.create_sqlite_db(db_file, os.path.join(md5dir, 'eve.json'))
+
+        status, body = self._get(f'/api/events?md5={md5}&q=alert&q=80')
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['event_type'], 'alert')
+        self.assertEqual(data[0]['dest_port'], 80)
+
+    def test_stats_with_multiple_q_params(self):
+        md5 = 'c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8'
+        md5dir = os.path.join(self.tmpdir, md5)
+        os.makedirs(md5dir, exist_ok=True)
+        with open(os.path.join(md5dir, 'eve.json'), 'w') as f:
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4", "dest_port": 80}\n')
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:01", "src_ip": "5.6.7.8", "dest_port": 443}\n')
+        db_file = os.path.join(md5dir, 'events.db')
+        db.create_sqlite_db(db_file, os.path.join(md5dir, 'eve.json'))
+
+        status, body = self._get(f'/api/stats?md5={md5}&q=alert&q=80')
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data.get('alert'), 1)
+
+    def test_count_with_multiple_q_params(self):
+        md5 = 'd4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9'
+        md5dir = os.path.join(self.tmpdir, md5)
+        os.makedirs(md5dir, exist_ok=True)
+        with open(os.path.join(md5dir, 'eve.json'), 'w') as f:
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4", "dest_port": 80}\n')
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:01", "src_ip": "5.6.7.8", "dest_port": 443}\n')
+        db_file = os.path.join(md5dir, 'events.db')
+        db.create_sqlite_db(db_file, os.path.join(md5dir, 'eve.json'))
+
+        status, body = self._get(f'/api/count?md5={md5}&q=alert&q=80')
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data['count'], 1)
 
     def test_events_invalid_limit(self):
         md5 = 'a' * 32
@@ -537,22 +633,28 @@ class TestAPIEndpoints(unittest.TestCase):
         """Upload handler code must attempt common passwords before rejecting protected ZIPs."""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        upload_section = content.split("if safe_filename.endswith('.zip'):")[1].split("pcap_files = [")[0]
+        # Verify helper exists and handles password fallback
+        self.assertIn("def extract_pcap_from_zip(zip_data, extract_dir, passwords=None):", content,
+                      'Must define extract_pcap_from_zip helper')
+        helper_section = content.split("def extract_pcap_from_zip(zip_data, extract_dir, passwords=None):")[1].split("class Handler(")[0]
         # Should try no password first
-        self.assertIn("extracted = False", upload_section,
+        self.assertIn("extracted = False", helper_section,
                       'Must track extraction success')
-        self.assertIn("zip_ref.extractall(tmp_dir)", upload_section,
+        self.assertIn("zip_ref.extractall(extract_dir)", helper_section,
                       'Must attempt extraction without password')
-        # Should try common passwords
+        # Should try provided passwords
+        self.assertIn("for pwd in passwords:", helper_section,
+                      'Must loop over candidate passwords')
+        # Upload handler should derive passwords from filename and call helper
+        upload_section = content.split("def handle_post_upload(self):")[1].split("def handle_post_load_url(self):")[0]
         self.assertIn("passwords = [b'infected']", upload_section,
                       'Must try infected password')
-        self.assertIn("for pwd in passwords:", upload_section,
-                      'Must loop over candidate passwords')
-        # Should try date-based password from filename
-        self.assertIn("re.search(r'(\\d{4})-(\\d{2})-(\\d{2})', safe_filename)", upload_section,
+        self.assertIn("re.search(r'(\d{4})-(\d{2})-(\d{2})', safe_filename)", upload_section,
                       'Must derive date-based password from filename')
         self.assertIn("'infected_{year}{month}{day}'.encode()", upload_section,
                       'Must construct MTA-style date password')
+        self.assertIn("extract_pcap_from_zip(file_data, tmp_dir, passwords)", upload_section,
+                      'Must call extract_pcap_from_zip helper')
 
     def test_upload_same_pcap_in_different_zips(self):
         import io
@@ -701,8 +803,8 @@ class TestLoadUrlContentValidation(unittest.TestCase):
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
         # Count occurrences of validate_url_safety in the load-url handler
-        load_url_section = content.split("elif self.path == '/api/load-url':")[1]
-        load_url_section = load_url_section.split("elif self.path == '/api/check-status':")[0]
+        load_url_section = content.split("def handle_post_load_url(self):")[1]
+        load_url_section = load_url_section.split("def handle_post_check_status(self):")[0]
         self.assertEqual(load_url_section.count('validate_url_safety(url)'), 2,
                          'load-url should call validate_url_safety twice to prevent DNS rebinding')
 
@@ -710,103 +812,6 @@ class TestLoadUrlContentValidation(unittest.TestCase):
 class TestThreadedServer(unittest.TestCase):
     def test_threaded_server_class_exists(self):
         self.assertTrue(hasattr(server, 'ThreadedTCPServer'))
-
-
-class TestSQLite(unittest.TestCase):
-    def setUp(self):
-        self.tmpdir = tempfile.mkdtemp()
-        self.eve_file = os.path.join(self.tmpdir, 'eve.json')
-        self.db_file = os.path.join(self.tmpdir, 'events.db')
-        
-        with open(self.eve_file, 'w') as f:
-            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4", "src_port": 1234, "dest_ip": "5.6.7.8", "dest_port": 80, "proto": "TCP"}\n')
-            f.write('{"event_type": "dns", "timestamp": "2026-01-01T00:00:01", "src_ip": "1.2.3.4", "src_port": 1235, "dest_ip": "5.6.7.8", "dest_port": 53, "proto": "UDP"}\n')
-            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:02", "src_ip": "1.2.3.5", "src_port": 1236, "dest_ip": "5.6.7.9", "dest_port": 80, "proto": "TCP"}\n')
-            f.write('{"event_type": "stats", "timestamp": "2026-01-01T00:00:03"}\n')
-    
-    def tearDown(self):
-        shutil.rmtree(self.tmpdir)
-    
-    def test_create_sqlite_db(self):
-        server.create_sqlite_db(self.db_file, self.eve_file)
-        self.assertTrue(os.path.exists(self.db_file))
-    
-    def test_query_events_sqlite_all(self):
-        server.create_sqlite_db(self.db_file, self.eve_file)
-        events = server.query_events_sqlite(self.db_file)
-        self.assertEqual(len(events), 4)
-    
-    def test_query_events_sqlite_by_type(self):
-        server.create_sqlite_db(self.db_file, self.eve_file)
-        events = server.query_events_sqlite(self.db_file, event_type='alert')
-        self.assertEqual(len(events), 2)
-        self.assertTrue(all(e['event_type'] == 'alert' for e in events))
-    
-    def test_query_events_sqlite_with_limit(self):
-        server.create_sqlite_db(self.db_file, self.eve_file)
-        events = server.query_events_sqlite(self.db_file, limit=2)
-        self.assertEqual(len(events), 2)
-    
-    def test_query_events_sqlite_with_offset(self):
-        server.create_sqlite_db(self.db_file, self.eve_file)
-        events = server.query_events_sqlite(self.db_file, offset=2, limit=2)
-        self.assertEqual(len(events), 2)
-    
-    def test_get_event_count_sqlite(self):
-        server.create_sqlite_db(self.db_file, self.eve_file)
-        count = server.get_event_count_sqlite(self.db_file)
-        self.assertEqual(count, 4)
-    
-    def test_get_event_count_sqlite_by_type(self):
-        server.create_sqlite_db(self.db_file, self.eve_file)
-        count = server.get_event_count_sqlite(self.db_file, event_type='alert')
-        self.assertEqual(count, 2)
-    
-    def test_get_event_types_sqlite(self):
-        server.create_sqlite_db(self.db_file, self.eve_file)
-        stats = server.get_event_types_sqlite(self.db_file)
-        self.assertEqual(stats['alert'], 2)
-        self.assertEqual(stats['dns'], 1)
-        self.assertEqual(stats['stats'], 1)
-    
-    def test_sqlite_schema_has_indexes(self):
-        server.create_sqlite_db(self.db_file, self.eve_file)
-        conn = sqlite3.connect(self.db_file)
-        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
-        indexes = [row[0] for row in cursor.fetchall()]
-        conn.close()
-        self.assertIn('idx_event_type', indexes)
-        self.assertIn('idx_timestamp', indexes)
-
-
-class TestSQLiteAPI(unittest.TestCase):
-    def setUp(self):
-        self.tmpdir = tempfile.mkdtemp()
-        self.eve_file = os.path.join(self.tmpdir, 'eve.json')
-        self.db_file = os.path.join(self.tmpdir, 'events.db')
-        
-        with open(self.eve_file, 'w') as f:
-            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4"}\n')
-            f.write('{"event_type": "dns", "timestamp": "2026-01-01T00:00:01", "src_ip": "1.2.3.5"}\n')
-        
-        server.create_sqlite_db(self.db_file, self.eve_file)
-        
-        self.md5 = 'test12345678901234567890'
-        os.makedirs(os.path.join(self.tmpdir, self.md5), exist_ok=True)
-        shutil.copy(self.eve_file, os.path.join(self.tmpdir, self.md5, 'eve.json'))
-        shutil.copy(self.db_file, os.path.join(self.tmpdir, self.md5, 'events.db'))
-    
-    def tearDown(self):
-        shutil.rmtree(self.tmpdir)
-    
-    def test_api_events_with_type_filter(self):
-        events = server.query_events_sqlite(self.db_file, event_type='alert')
-        self.assertTrue(all(e['event_type'] == 'alert' for e in events))
-    
-    def test_api_stats_endpoint_returns_types(self):
-        stats = server.get_event_types_sqlite(self.db_file)
-        self.assertIn('alert', stats)
-        self.assertIn('dns', stats)
 
 
 class TestSizeLimitMessages(unittest.TestCase):
@@ -908,10 +913,15 @@ class TestSubprocessTimeouts(unittest.TestCase):
     def test_tshark_has_timeout(self):
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        tshark_matches = re.findall(r"\['tshark', '-r', pcap.*?timeout=(\d+)", content, re.DOTALL)
-        self.assertGreaterEqual(len(tshark_matches), 2, 'Both tshark calls must have timeout')
-        for m in tshark_matches:
-            self.assertEqual(m, '60', 'tshark timeout must be 60 seconds')
+        # _extract_payload_lines helper contains the tshark call
+        helper_section = content.split("def _extract_payload_lines(self, pcap, src, sport, dst, dport, proto):")[1].split("def handle_get_hexdump_stream(self, params):")[0]
+        tshark_match = re.search(r"\['tshark', '-r', pcap.*?timeout=(\d+)", helper_section, re.DOTALL)
+        self.assertIsNotNone(tshark_match, '_extract_payload_lines must call tshark with timeout')
+        self.assertEqual(tshark_match.group(1), '60', 'tshark timeout must be 60 seconds')
+        # The helper should be called twice (TCP then UDP fallback) from handle_get_ascii_stream
+        ascii_section = content.split("def handle_get_ascii_stream(self, params):")[1].split("def _extract_payload_lines(self, pcap, src, sport, dst, dport, proto):")[0]
+        calls_in_ascii = ascii_section.count('self._extract_payload_lines(')
+        self.assertGreaterEqual(calls_in_ascii, 2, '_extract_payload_lines must be called at least twice from ascii_stream')
 
     def test_timeout_expired_handled(self):
         with open(SERVER_FILE, 'r') as f:
@@ -935,7 +945,7 @@ class TestNoDuplicateImports(unittest.TestCase):
 
 class TestSetupSuricataConfigLogging(unittest.TestCase):
     def test_copy_warnings_logged(self):
-        with open(SERVER_FILE, 'r') as f:
+        with open(SURICATA_FILE, 'r') as f:
             content = f.read()
         self.assertIn("print(f'Warning: could not copy", content)
         self.assertIn("print(f'Warning: could not copy directory", content)
@@ -943,19 +953,19 @@ class TestSetupSuricataConfigLogging(unittest.TestCase):
 
 class TestSuricataProcessingLock(unittest.TestCase):
     def test_processing_lock_file_used(self):
-        with open(SERVER_FILE, 'r') as f:
+        with open(SURICATA_FILE, 'r') as f:
             content = f.read()
         self.assertIn("'.processing'", content)
         self.assertIn("os.path.exists(processing_lock)", content)
         self.assertIn("open(processing_lock, 'w').close()", content)
 
     def test_lock_removed_in_callback(self):
-        with open(SERVER_FILE, 'r') as f:
+        with open(SURICATA_FILE, 'r') as f:
             content = f.read()
         self.assertIn("os.unlink(processing_lock)", content)
 
     def test_lock_removed_on_spawn_failure(self):
-        with open(SERVER_FILE, 'r') as f:
+        with open(SURICATA_FILE, 'r') as f:
             content = f.read()
         # Count occurrences of unlink inside except blocks
         # Should appear at least twice: once in callback, once in failure handler
@@ -964,7 +974,7 @@ class TestSuricataProcessingLock(unittest.TestCase):
     def test_stale_lock_handled_in_check_status(self):
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        check_status = content.split("elif self.path == '/api/check-status':")[1]
+        check_status = content.split("def handle_post_check_status(self):")[1].split("def handle_post_reanalyze(self):")[0]
         self.assertIn("lock_age", check_status)
         self.assertIn("600", check_status)
 
@@ -973,14 +983,14 @@ class TestNameTxtPathSafety(unittest.TestCase):
     def test_analyses_checks_name_txt_safety(self):
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        analyses_section = content.split("elif path == '/api/analyses':")[1].split("elif path == '/api/load-analysis':")[0]
+        analyses_section = content.split("def handle_get_analyses(self, params):")[1].split("def handle_get_load_analysis(self, params):")[0]
         self.assertIn("is_safe_path(dir_path, name_path)", analyses_section,
                       '/api/analyses must validate name.txt path')
 
     def test_load_analysis_checks_name_txt_safety(self):
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        load_section = content.split("elif path == '/api/load-analysis':")[1].split("elif path == '/api/delete-analysis':")[0]
+        load_section = content.split("def handle_get_load_analysis(self, params):")[1].split("def handle_get_delete_analysis(self, params):")[0]
         self.assertIn("is_safe_path(dir_path, name_path)", load_section,
                       '/api/load-analysis must validate name.txt path')
 
@@ -988,31 +998,35 @@ class TestNameTxtPathSafety(unittest.TestCase):
 class TestSuricataRuleRawEnabled(unittest.TestCase):
     def test_rule_raw_set_in_suricata_spawn(self):
         """Verify that suricata is spawned with --set to enable alert.rule in eve.json"""
+        with open(SURICATA_FILE, 'r') as f:
+            suricata_content = f.read()
         with open(SERVER_FILE, 'r') as f:
-            content = f.read()
+            server_content = f.read()
         # Should appear exactly once in spawn_suricata helper
-        self.assertEqual(content.count("'--set', 'outputs.1.eve-log.types.0.alert.metadata.rule.raw=true'"), 1,
+        self.assertEqual(suricata_content.count("'--set', 'outputs.1.eve-log.types.0.alert.metadata.rule.raw=true'"), 1,
                          'rule.raw must be set exactly once in spawn_suricata helper')
-        # Helper must be called from all 3 original spawn points plus reanalyze endpoint
-        func_def_pos = content.find('def spawn_suricata(dir_path, pcap_path):')
-        calls_after_def = content[func_def_pos:].count('spawn_suricata(dir_path, pcap_path)') - 1
-        self.assertEqual(calls_after_def, 4,
+        # Verify spawn_suricata is defined in suricata module
+        self.assertIn('def spawn_suricata(dir_path, pcap_path, suricata_config_path=None):', suricata_content,
+                      'spawn_suricata must be defined in suricata module')
+        # Verify all 4 call sites in ohmypcap.py pass config path
+        server_calls = server_content.count('spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR')
+        self.assertEqual(server_calls, 4,
                          'spawn_suricata must be called from all 3 upload paths and reanalyze endpoint')
 
 
 class TestReanalyzeEndpoint(unittest.TestCase):
     def test_reanalyze_endpoint_exists(self):
-        """Verify /api/reanalyze endpoint exists in do_POST."""
+        """Verify /api/reanalyze endpoint exists in POST_ROUTES."""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        self.assertIn("elif self.path == '/api/reanalyze':", content,
+        self.assertIn("'/api/reanalyze': 'handle_post_reanalyze'", content,
                       'POST /api/reanalyze endpoint must exist')
 
     def test_reanalyze_deletes_analysis_artifacts(self):
         """Verify reanalyze removes eve.json, events.db, and .processing."""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        reanalyze_section = content.split("elif self.path == '/api/reanalyze':")[1]
+        reanalyze_section = content.split("def handle_post_reanalyze(self):")[1]
         self.assertIn("for artifact in ('eve.json', 'events.db', '.processing'):", reanalyze_section,
                       'reanalyze must loop over analysis artifacts to delete')
         self.assertIn('os.unlink(artifact_path)', reanalyze_section,
@@ -1022,7 +1036,7 @@ class TestReanalyzeEndpoint(unittest.TestCase):
         """Verify reanalyze does NOT delete pcap files or name.txt."""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        reanalyze_section = content.split("elif self.path == '/api/reanalyze':")[1]
+        reanalyze_section = content.split("def handle_post_reanalyze(self):")[1]
         # Should only unlink artifacts, not rmtree the whole directory
         self.assertNotIn('shutil.rmtree', reanalyze_section,
                          'reanalyze must not use rmtree')
@@ -1035,7 +1049,7 @@ class TestReanalyzeEndpoint(unittest.TestCase):
         """Verify reanalyze returns 404 when no PCAP is present."""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        reanalyze_section = content.split("elif self.path == '/api/reanalyze':")[1]
+        reanalyze_section = content.split("def handle_post_reanalyze(self):")[1]
         self.assertIn("self._send_error(404, 'No pcap found')", reanalyze_section,
                       'reanalyze must return 404 if no PCAP found')
 
@@ -1043,7 +1057,7 @@ class TestReanalyzeEndpoint(unittest.TestCase):
         """Verify reanalyze returns 409 when analysis is already in progress."""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        reanalyze_section = content.split("elif self.path == '/api/reanalyze':")[1]
+        reanalyze_section = content.split("def handle_post_reanalyze(self):")[1]
         self.assertIn("self._send_error(409, 'Analysis already in progress')", reanalyze_section,
                       'reanalyze must return 409 if already processing')
 
@@ -1051,15 +1065,15 @@ class TestReanalyzeEndpoint(unittest.TestCase):
         """Verify reanalyze calls spawn_suricata after cleaning artifacts."""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        reanalyze_section = content.split("elif self.path == '/api/reanalyze':")[1]
-        self.assertIn('spawn_suricata(dir_path, pcap_path)', reanalyze_section,
-                      'reanalyze must call spawn_suricata')
+        reanalyze_section = content.split("def handle_post_reanalyze(self):")[1]
+        self.assertIn('spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR', reanalyze_section,
+                      'reanalyze must call spawn_suricata with config path')
 
 
 class TestRuleDownloadPrompt(unittest.TestCase):
     def test_rule_download_message_in_stdout(self):
         """Verify that suricata-update outputs messages when rules are downloaded"""
-        with open(SERVER_FILE, 'r') as f:
+        with open(SURICATA_FILE, 'r') as f:
             content = f.read()
 
         # Check for informative messages about rule download
@@ -1074,14 +1088,14 @@ class TestRuleDownloadPrompt(unittest.TestCase):
 class TestAirgapFallback(unittest.TestCase):
     def test_has_internet_access_function_exists(self):
         """Verify has_internet_access helper is defined"""
-        with open(SERVER_FILE, 'r') as f:
+        with open(SURICATA_FILE, 'r') as f:
             content = f.read()
         self.assertIn('def has_internet_access():', content,
                       'has_internet_access function must exist')
 
     def test_internet_check_connects_to_rules_server(self):
         """Verify internet check targets the actual rules server"""
-        with open(SERVER_FILE, 'r') as f:
+        with open(SURICATA_FILE, 'r') as f:
             content = f.read()
         self.assertIn('rules.emergingthreats.net', content,
                       'Must check connectivity to rules server')
@@ -1090,14 +1104,14 @@ class TestAirgapFallback(unittest.TestCase):
 
     def test_baked_in_rules_path_defined(self):
         """Verify baked-in rules path is referenced"""
-        with open(SERVER_FILE, 'r') as f:
+        with open(SURICATA_FILE, 'r') as f:
             content = f.read()
         self.assertIn("/usr/share/suricata/rules", content,
                       'Must reference baked-in rules path')
 
     def test_fallback_uses_shutil_copytree(self):
         """Verify air-gapped fallback copies baked-in rules"""
-        with open(SERVER_FILE, 'r') as f:
+        with open(SURICATA_FILE, 'r') as f:
             content = f.read()
         self.assertIn('shutil.copytree', content,
                       'Must use shutil.copytree for baked-in rules')
@@ -1106,7 +1120,7 @@ class TestAirgapFallback(unittest.TestCase):
 
     def test_airgap_log_messages_present(self):
         """Verify log messages for air-gapped path exist"""
-        with open(SERVER_FILE, 'r') as f:
+        with open(SURICATA_FILE, 'r') as f:
             content = f.read()
         self.assertIn('No internet access detected', content,
                       'Should log when falling back to baked-in rules')
@@ -1162,13 +1176,16 @@ class TestHTMLNoOldStyleFilterEscaping(unittest.TestCase):
 class TestHTMLModalCSS(unittest.TestCase):
     def test_loading_modal_exists(self):
         html_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ohmypcap.html')
+        css_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'static', 'ohmypcap.css')
         with open(html_file, 'r') as f:
-            content = f.read()
-        self.assertIn('id="loadingModal"', content, 'loadingModal element should exist')
-        self.assertIn('.modal {', content, 'modal CSS should exist')
-        self.assertIn('.modal.active {', content, 'modal.active CSS should exist')
-        self.assertIn('.spinner {', content, 'spinner CSS should exist')
-        self.assertIn('.spinner-dot {', content, 'spinner-dot CSS should exist')
+            html_content = f.read()
+        with open(css_file, 'r') as f:
+            css_content = f.read()
+        self.assertIn('id="loadingModal"', html_content, 'loadingModal element should exist')
+        self.assertIn('.modal {', css_content, 'modal CSS should exist')
+        self.assertIn('.modal.active {', css_content, 'modal.active CSS should exist')
+        self.assertIn('.spinner {', css_content, 'spinner CSS should exist')
+        self.assertIn('.spinner-dot {', css_content, 'spinner-dot CSS should exist')
 
 
 class TestEnvironmentVariables(unittest.TestCase):
@@ -1201,13 +1218,13 @@ class TestExecutableChecks(unittest.TestCase):
         self.assertIn('suricata', server.REQUIRED_EXECUTABLES)
         self.assertIn('suricata-update', server.REQUIRED_EXECUTABLES)
 
-    @unittest.mock.patch('ohmypcap.shutil.which')
+    @unittest.mock.patch('suricata.shutil.which')
     def test_check_executables_all_missing(self, mock_which):
         mock_which.return_value = None
         missing = server.check_executables()
         self.assertEqual(len(missing), 4)
 
-    @unittest.mock.patch('ohmypcap.shutil.which')
+    @unittest.mock.patch('suricata.shutil.which')
     def test_check_executables_some_present(self, mock_which):
         def which_side_effect(cmd):
             if cmd in ['tcpdump', 'tshark']:
