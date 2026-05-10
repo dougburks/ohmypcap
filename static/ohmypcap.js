@@ -454,6 +454,7 @@
             document.getElementById('aggregations').innerHTML = '';
             document.getElementById('sections').innerHTML = '';
             document.getElementById('dataPanel').style.display = 'none';
+            document.getElementById('searchBarContainer').style.display = 'none';
             document.getElementById('inputBoxes').style.display = 'block';
             
             // Load previous analyses
