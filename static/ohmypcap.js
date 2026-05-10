@@ -1697,15 +1697,6 @@
                 }
             }
 
-            const aggContainer = document.getElementById('aggregations');
-            if (aggContainer) {
-                if (advancedMode) {
-                    buildAggregationsSectionAll();
-                } else {
-                    aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
-                }
-            }
-
             updateFilterBarVisibility();
             hideLoading();
         }

@@ -1495,6 +1495,12 @@ class TestSearchUI(unittest.TestCase):
         self.assertNotIn("updateSankeyDiagram(allEvents)", func,
                       'refreshAnalysisData must not override Sankey with allEvents after restore')
 
+    def test_refreshAnalysisData_does_not_override_aggregations_with_all_events(self):
+        """REGRESSION: refreshAnalysisData must not unconditionally call buildAggregationsSectionAll() after restoring the active section, because loadTabData already builds aggregations for the correct type."""
+        func = JS_CONTENT.split('async function refreshAnalysisData')[1].split('async function')[0]
+        self.assertNotIn("buildAggregationsSectionAll()", func,
+                      'refreshAnalysisData must not override aggregations with allEvents after restore')
+
 
 class TestReanalyzeUI(unittest.TestCase):
     def test_reanalyze_button_on_welcome(self):
