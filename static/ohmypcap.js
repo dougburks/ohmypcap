@@ -455,6 +455,8 @@
             document.getElementById('sections').innerHTML = '';
             document.getElementById('dataPanel').style.display = 'none';
             document.getElementById('searchBarContainer').style.display = 'none';
+            document.getElementById('filterBarContainer').innerHTML = '';
+            document.getElementById('filterBarContainer').style.display = 'none';
             document.getElementById('inputBoxes').style.display = 'block';
             
             // Load previous analyses
@@ -1802,7 +1804,7 @@
                     
                     const sankeyPanel = document.getElementById('sankeyPanel');
                     if (sankeyPanel) {
-                        sankeyPanel.style.display = diagramMode ? '' : 'none';
+                        sankeyPanel.style.display = '';
                         updateSankeyDiagram(allEvents);
                     }
                     
