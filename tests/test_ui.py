@@ -599,6 +599,12 @@ class TestUXFeatures(unittest.TestCase):
         self.assertIn("getColumnNameFromSankeyColumn(d.column)", JS_CONTENT,
                       'Sankey node must map column')
 
+    def test_sankey_empty_events_shows_header(self):
+        """REGRESSION: updateSankeyDiagram must render the toggle header even when events are empty."""
+        func = JS_CONTENT.split('function updateSankeyDiagram(')[1].split('function ')[0]
+        self.assertIn("sankeyPanel.innerHTML = '<div class=\"section-toggle-bar\" onclick=\"toggleDiagram()\">▾ Sankey Diagram</div>'", func,
+                      'updateSankeyDiagram must render header bar for empty events')
+
     def test_apply_filters_function_exists(self):
         """JavaScript must define applyFilters to apply multiple filters at once."""
         self.assertIn('function applyFilters(', JS_CONTENT,
