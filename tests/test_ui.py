@@ -985,7 +985,11 @@ class TestFiltering(unittest.TestCase):
         self.assertIn('id="mainHeader"', HTML_CONTENT)
 
     def test_has_instructions_in_analysis(self):
+        """Analysis instructions must mention filtering options and hexdump."""
         self.assertIn('Start by reviewing security alerts', JS_CONTENT)
+        self.assertIn('Filter using the search bar, sankey diagram, or aggregation tables', JS_CONTENT)
+        self.assertIn('ASCII transcript and hexdump and optionally download', JS_CONTENT)
+        self.assertNotIn('ASCII transcript and optionally download', JS_CONTENT)
 
     def test_filter_bar_only_in_aggregations(self):
         self.assertIn('buildAggregationsSection', JS_CONTENT)

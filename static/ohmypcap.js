@@ -1705,7 +1705,7 @@
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📅 ${ts[0]?.slice(0, 19) || ''} to ${ts[ts.length-1]?.slice(0, 19) || ''}</span>
                             </div>
                             <div style="color: #8b949e; font-size: 0.8rem; margin-top: 8px; text-align: center;">
-                                <span style="color: #58a6ff;">💡</span> Start by reviewing security alerts and then you can change to one of the other data types like DNS, HTTP, or TLS. When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript and optionally download the PCAP file for that stream.
+                                <span style="color: #58a6ff;">💡</span> Start by reviewing security alerts and then you can change to one of the other data types like DNS, HTTP, or TLS. Filter using the search bar, sankey diagram, or aggregation tables. When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript and hexdump and optionally download the PCAP file for that stream.
                             </div>
                         </div>
                      `;
