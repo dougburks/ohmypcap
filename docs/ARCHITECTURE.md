@@ -151,14 +151,14 @@ let tabDataCache = {};       // cached event data per type
 
 | Group | Functions | Purpose |
 |---|---|---|
-| Navigation | `showWelcome()`, `loadAnalysis()`, `showTab()` | Screen/tab switching |
+| Navigation | `showWelcome()`, `loadAnalysis()`, `showTab()`, `showWelcomeUI()`, `showAnalysisUI()` | Screen/tab switching |
 | Data Loading | `loadTabData()`, `loadFromUrl()`, `uploadPcap()`, `checkStatus()` | Fetch data from API |
-| Rendering | `buildStats()`, `buildSections()`, `buildSection()`, `buildAllEvents()`, `buildRowForEvent()` | Build HTML |
-| Aggregation | `buildAggregationTables()`, `buildAggregationTablesAll()`, `buildAggregationsSection()`, `buildAggregationsSectionAll()` | Frequency grids |
+| Rendering | `buildStats()`, `buildSections()`, `buildSection()`, `buildAllEvents()`, `buildRowForEvent()`, `updateSankeyDiagram()` | Build HTML |
+| Aggregation | `buildAggregationTablesCore()`, `buildAggregationTables()`, `buildAggregationTablesAll()`, `buildAggregationsSection()`, `buildAggregationsSectionAll()` | Frequency grids |
 | Search | `performSearch()`, `clearSearch()`, `refreshAnalysisData()` | Full-text search via server |
-| Filtering | `applyFilter()`, `clearFilter()`, `clearAllFilters()`, `getFilteredEvents()` | Column filter management |
+| Filtering | `applyFilter()`, `applyFilters()`, `clearFilter()`, `clearAllFilters()`, `getFilteredEvents()`, `getSankeyEvents()`, `refreshCurrentView()` | Column filter management |
 | Streams | `downloadPcap()`, `loadAsciiTranscript()`, `loadHexdumpData()`, `switchStreamView()`, `togglePacket()`, `toggleRow()` | Stream analysis |
-| Utilities | `escapeHtml()`, `formatEvent()`, `extractValue()`, `extractAllValue()`, `getColumnsForType()` | Helpers |
+| Utilities | `escapeHtml()`, `formatEvent()`, `extractValue()`, `extractAllValue()`, `getColumnsForType()`, `clearAnalysisContainers()` | Helpers |
 
 ### Column System
 

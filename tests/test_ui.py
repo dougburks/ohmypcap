@@ -255,6 +255,18 @@ class TestJavaScriptFunctions(unittest.TestCase):
     def test_has_build_all_events(self):
         self.assertIn('function buildAllEvents', JS_CONTENT)
 
+    def test_has_clearAnalysisContainers(self):
+        self.assertIn('function clearAnalysisContainers', JS_CONTENT)
+
+    def test_has_showWelcomeUI(self):
+        self.assertIn('function showWelcomeUI', JS_CONTENT)
+
+    def test_has_showAnalysisUI(self):
+        self.assertIn('function showAnalysisUI', JS_CONTENT)
+
+    def test_has_refreshCurrentView(self):
+        self.assertIn('function refreshCurrentView', JS_CONTENT)
+
     def test_has_init(self):
         self.assertIn('function init', JS_CONTENT)
 
@@ -328,11 +340,14 @@ class TestCardOrder(unittest.TestCase):
         """Verify applyFilter builds both section and aggregation when filtering"""
         self.assertIn("buildSection(eventType, sections[eventType])", JS_CONTENT,
                       "applyFilter should call buildSection")
-        applyFunc = JS_CONTENT.split('function applyFilter')[1].split('function clearFilter')[0]
-        self.assertIn("buildAggregationsSection(eventType, filtered)", applyFunc,
-                      "applyFilter should call buildAggregationsSection with filtered events")
-        self.assertIn("updateSankeyDiagram(filtered)", applyFunc,
-                      "applyFilter should update Sankey diagram with filtered events")
+        applyFunc = JS_CONTENT.split('function applyFilter(')[1].split('function clearFilter')[0]
+        self.assertIn("applyFilters", applyFunc,
+                      "applyFilter should delegate to applyFilters")
+        refreshFunc = JS_CONTENT.split('function refreshCurrentView')[1].split('function ')[0]
+        self.assertIn("buildAggregationsSection(eventType, filtered)", refreshFunc,
+                      "refreshCurrentView should call buildAggregationsSection with filtered events")
+        self.assertIn("updateSankeyDiagram()", refreshFunc,
+                      "refreshCurrentView should update Sankey diagram")
 
 
 class TestJavaScriptDataStructures(unittest.TestCase):
@@ -341,6 +356,18 @@ class TestJavaScriptDataStructures(unittest.TestCase):
 
     def test_has_type_colors(self):
         self.assertIn('typeColors', JS_CONTENT)
+
+    def test_has_event_type_icons_constant(self):
+        self.assertIn('EVENT_TYPE_ICONS', JS_CONTENT)
+
+    def test_has_all_events_columns_constant(self):
+        self.assertIn('ALL_EVENTS_COLUMNS', JS_CONTENT)
+
+    def test_has_empty_filter_state_constant(self):
+        self.assertIn('EMPTY_FILTER_STATE_HTML', JS_CONTENT)
+
+    def test_has_agg_collapsed_constant(self):
+        self.assertIn('AGG_COLLAPSED_HTML', JS_CONTENT)
 
     def test_has_all_event_types(self):
         expected_types = ['alert', 'dns', 'http', 'tls', 'flow', 'ftp', 'stats', 'anomaly', 'fileinfo']
@@ -605,6 +632,17 @@ class TestUXFeatures(unittest.TestCase):
         self.assertIn("sankeyPanel.innerHTML = '<div class=\"section-toggle-bar\" onclick=\"toggleDiagram()\">▾ Sankey Diagram</div>'", func,
                       'updateSankeyDiagram must render header bar for empty events')
 
+    def test_getSankeyEvents_exists(self):
+        """JavaScript must define getSankeyEvents to resolve events for the currently visible tab."""
+        self.assertIn('function getSankeyEvents(', JS_CONTENT,
+                      'getSankeyEvents function must exist')
+
+    def test_updateSankeyDiagram_uses_getSankeyEvents(self):
+        """REGRESSION: updateSankeyDiagram must call getSankeyEvents instead of accepting a parameter."""
+        func = JS_CONTENT.split('function updateSankeyDiagram(')[1].split('function ')[0]
+        self.assertIn('getSankeyEvents()', func,
+                      'updateSankeyDiagram must call getSankeyEvents to resolve events')
+
     def test_apply_filters_function_exists(self):
         """JavaScript must define applyFilters to apply multiple filters at once."""
         self.assertIn('function applyFilters(', JS_CONTENT,
@@ -682,6 +720,22 @@ class TestUXFeatures(unittest.TestCase):
         """loadHexdumpData must detect direction by splitting on ' > ' and checking src."""
         self.assertIn("pkt.header.split(' > ')", JS_CONTENT)
         self.assertIn("dirParts[0].includes(src)", JS_CONTENT)
+
+    def test_loadAnalysis_calls_loadTabData_after_buildSections(self):
+        """loadAnalysis must call loadTabData after buildSections since buildSections no longer loads data."""
+        func = JS_CONTENT.split('async function loadAnalysis')[1].split('async function')[0]
+        self.assertIn("clearAnalysisContainers()", func,
+                      'loadAnalysis must clear containers before rebuilding')
+        self.assertIn("buildSections();", func,
+                      'loadAnalysis must call buildSections')
+        self.assertIn("loadTabData(eventTypes[0])", func,
+                      'loadAnalysis must call loadTabData after buildSections')
+
+    def test_loadAnalysis_uses_showAnalysisUI(self):
+        """loadAnalysis must call showAnalysisUI after rebuilding the analysis view."""
+        func = JS_CONTENT.split('async function loadAnalysis')[1].split('async function')[0]
+        self.assertIn("showAnalysisUI()", func,
+                      'loadAnalysis must call showAnalysisUI after rebuilding')
 
 
 class TestSecurityInUI(unittest.TestCase):
@@ -787,24 +841,42 @@ class TestAggregationTables(unittest.TestCase):
     def test_has_build_aggregation_tables_all_function(self):
         self.assertIn('function buildAggregationTablesAll', JS_CONTENT)
 
+    def test_has_build_aggregation_tables_core_function(self):
+        """buildAggregationTablesCore must exist as the unified aggregation builder."""
+        self.assertIn('function buildAggregationTablesCore', JS_CONTENT)
+
+    def test_buildAggregationTables_delegates_to_core(self):
+        """REGRESSION: buildAggregationTables must delegate to buildAggregationTablesCore
+        instead of duplicating the grid-building logic."""
+        func = JS_CONTENT.split('function buildAggregationTables(')[1].split('function ')[0]
+        self.assertIn('buildAggregationTablesCore', func,
+                      'buildAggregationTables must delegate to buildAggregationTablesCore')
+
+    def test_buildAggregationTablesAll_delegates_to_core(self):
+        """REGRESSION: buildAggregationTablesAll must delegate to buildAggregationTablesCore
+        instead of duplicating the grid-building logic."""
+        func = JS_CONTENT.split('function buildAggregationTablesAll(')[1].split('function ')[0]
+        self.assertIn('buildAggregationTablesCore', func,
+                      'buildAggregationTablesAll must delegate to buildAggregationTablesCore')
+
     def test_has_extract_value_function(self):
         self.assertIn('function extractValue', JS_CONTENT)
 
     def test_has_extract_all_value_function(self):
         self.assertIn('function extractAllValue', JS_CONTENT)
 
-    def test_extractAllValue_handles_per_type_columns(self):
-        """extractAllValue must handle per-type columns (Alert, Query, URL, etc.)
-        so filters set on one tab work correctly in the 'All Events' view."""
-        func_body = JS_CONTENT.split('function extractAllValue')[1].split('function buildAggregationTablesAll')[0]
-        self.assertIn("case 'Alert':", func_body,
-                      'extractAllValue must handle Alert column')
-        self.assertIn("case 'Query':", func_body,
-                      'extractAllValue must handle Query column')
-        self.assertIn("case 'URL':", func_body,
-                      'extractAllValue must handle URL column')
-        self.assertIn("case 'Method':", func_body,
-                      'extractAllValue must handle Method column')
+    def test_extractAllValue_handles_all_events_columns(self):
+        """extractAllValue must handle 'All Events' specific columns (Type, Command, Message)
+        and delegate to extractValue for per-type columns so filters work correctly."""
+        func_body = JS_CONTENT.split('function extractAllValue')[1].split('function buildAggregationTablesCore')[0]
+        self.assertIn("col === 'Type'", func_body,
+                      'extractAllValue must handle Type column')
+        self.assertIn("col === 'Command'", func_body,
+                      'extractAllValue must handle Command column')
+        self.assertIn("col === 'Message'", func_body,
+                      'extractAllValue must handle Message column')
+        self.assertIn('return extractValue(e, col, colIndex)', func_body,
+                      'extractAllValue must delegate to extractValue')
 
     def test_extractValue_handles_detail_column(self):
         """extractValue must handle 'Detail' column for all event types so
@@ -832,7 +904,7 @@ class TestAggregationTables(unittest.TestCase):
         self.assertIn("String(e.dest_port", JS_CONTENT)
 
     def test_agg_tables_have_click_handlers(self):
-        self.assertIn("onclick=\"applyFilter('section-", JS_CONTENT)
+        self.assertIn("onclick=\"applyFilter('${sectionId}', '${col.replace", JS_CONTENT)
 
     def test_agg_tables_no_bar_charts(self):
         self.assertNotIn('.agg-bar', CSS_CONTENT)
@@ -1073,7 +1145,7 @@ class TestAdvancedModeFilterBar(unittest.TestCase):
 
     def test_filters_are_global_not_per_section(self):
         """currentFilters must be a flat object so filters persist across all views"""
-        self.assertIn("currentFilters[columnName] = value", JS_CONTENT)
+        self.assertIn("currentFilters[f.column] = f.value", JS_CONTENT)
         self.assertNotIn("currentFilters[sectionId] = {}", JS_CONTENT)
         self.assertNotIn("currentFilters[sectionId][columnName]", JS_CONTENT)
 
@@ -1128,7 +1200,7 @@ class TestAdvancedModeFilterBar(unittest.TestCase):
         self.assertNotIn("currentFilters[sectionId] = {", JS_CONTENT)
         self.assertNotIn("currentFilters[sectionId][columnName]", JS_CONTENT)
         self.assertNotIn("currentFilters[sectionId] || {}", JS_CONTENT)
-        self.assertIn("currentFilters[columnName] = value", JS_CONTENT)
+        self.assertIn("currentFilters[f.column] = f.value", JS_CONTENT)
 
     def test_all_filtering_functions_use_global_currentFilters(self):
         """REGRESSION: Every function that reads filters must use currentFilters directly,
@@ -1199,6 +1271,18 @@ class TestXSSPrevention(unittest.TestCase):
         self.assertIn("escapeHtml(issuer.slice(0, 30))", func_body, 'TLS issuer must be escaped')
         self.assertIn("escapeHtml(state)", func_body, 'Flow state must be escaped')
         self.assertIn("escapeHtml(filename)", func_body, 'File Info filename must be escaped')
+
+    def test_buildAllEvents_escapes_user_fields(self):
+        """All Events table must escape user-controlled fields."""
+        func_body = self._get_function_body('buildAllEvents')
+        self.assertIn("escapeHtml(ts)", func_body, 'All Events timestamp must be escaped')
+        self.assertIn("escapeHtml(icon)", func_body, 'All Events icon must be escaped')
+        self.assertIn("escapeHtml(etype.toUpperCase())", func_body, 'All Events event type must be escaped')
+        self.assertIn("escapeHtml(proto)", func_body, 'All Events protocol must be escaped')
+        self.assertIn("escapeHtml(srcIp)", func_body, 'All Events source IP must be escaped')
+        self.assertIn("escapeHtml(String(srcPort))", func_body, 'All Events source port must be escaped')
+        self.assertIn("escapeHtml(dstIp)", func_body, 'All Events dest IP must be escaped')
+        self.assertIn("escapeHtml(String(dstPort))", func_body, 'All Events dest port must be escaped')
 
     def test_alert_details_shows_rule(self):
         """Alert detail panel must include a Rule row with monospace styling."""
@@ -1475,11 +1559,17 @@ class TestSearchUI(unittest.TestCase):
         self.assertIn('currentSearch.length > 0 || hasFilters', JS_CONTENT,
                       'updateFilterBarVisibility must check search array length and filters')
 
-    def test_showWelcome_hides_search_bar(self):
-        """REGRESSION: showWelcome must hide searchBarContainer when returning to overview."""
+    def test_showWelcome_uses_clearAnalysisContainers(self):
+        """REGRESSION: showWelcome must call clearAnalysisContainers when returning to overview."""
         func = JS_CONTENT.split('async function showWelcome')[1].split('async function')[0]
-        self.assertIn("document.getElementById('searchBarContainer').style.display = 'none'", func,
-                      'showWelcome must hide search bar when returning to overview')
+        self.assertIn("clearAnalysisContainers()", func,
+                      'showWelcome must call clearAnalysisContainers when returning to overview')
+
+    def test_showWelcome_uses_showWelcomeUI(self):
+        """REGRESSION: showWelcome must call showWelcomeUI when returning to overview."""
+        func = JS_CONTENT.split('async function showWelcome')[1].split('async function')[0]
+        self.assertIn("showWelcomeUI()", func,
+                      'showWelcome must call showWelcomeUI when returning to overview')
 
     def test_refreshAnalysisData_preserves_active_section(self):
         """REGRESSION: refreshAnalysisData must remember and restore the active section type after rebuild."""
@@ -1495,6 +1585,12 @@ class TestSearchUI(unittest.TestCase):
         self.assertIn("loadTabData(activeType, null)", func,
                       'refreshAnalysisData must reload data for restored section')
 
+    def test_refreshAnalysisData_loads_default_tab(self):
+        """REGRESSION: refreshAnalysisData must explicitly load the default tab when no other tab is active."""
+        func = JS_CONTENT.split('async function refreshAnalysisData')[1].split('async function')[0]
+        self.assertIn("loadTabData(eventTypes[0], null)", func,
+                      'refreshAnalysisData must load default tab when activeType is default')
+
     def test_refreshAnalysisData_does_not_override_sankey_with_all_events(self):
         """REGRESSION: refreshAnalysisData must not call updateSankeyDiagram(allEvents) after restoring the active section, because loadTabData already updates the Sankey for the correct type."""
         func = JS_CONTENT.split('async function refreshAnalysisData')[1].split('async function')[0]
@@ -1506,6 +1602,12 @@ class TestSearchUI(unittest.TestCase):
         func = JS_CONTENT.split('async function refreshAnalysisData')[1].split('async function')[0]
         self.assertNotIn("buildAggregationsSectionAll()", func,
                       'refreshAnalysisData must not override aggregations with allEvents after restore')
+
+    def test_buildSections_does_not_call_loadTabData(self):
+        """REGRESSION: buildSections must not call loadTabData to prevent a race with refreshAnalysisData."""
+        func = JS_CONTENT.split('function buildSections(')[1].split('function ')[0]
+        self.assertNotIn("loadTabData", func,
+                      'buildSections must not call loadTabData')
 
 
 class TestReanalyzeUI(unittest.TestCase):

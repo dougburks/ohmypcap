@@ -46,8 +46,7 @@
                 if (sectionEl) buildAllEvents();
                 if (sectionEl && advancedMode) buildAggregationsSectionAll();
                 updateFilterBarVisibility();
-                const filtered = getFilteredEvents('section-all', allEvents, 'all');
-                updateSankeyDiagram(filtered);
+                updateSankeyDiagram();
                 return;
             }
             
@@ -61,7 +60,7 @@
                     buildSection(eventType, tabDataCache[eventType]);
                 }
                 updateFilterBarVisibility();
-                updateSankeyDiagram(filtered);
+                updateSankeyDiagram();
                 return;
             }
             
@@ -79,7 +78,7 @@
                 }
                 if (sectionEl) buildSection(eventType, events);
                 updateFilterBarVisibility();
-                updateSankeyDiagram(filtered);
+                updateSankeyDiagram();
             } catch(e) {
                 console.error('Failed to load tab data:', e);
                 if (sectionEl) {
@@ -441,23 +440,38 @@
         function hideLoading() {
             document.getElementById('loadingModal').classList.remove('active');
         }
+
+        function clearAnalysisContainers() {
+            document.getElementById('statsGrid').innerHTML = '';
+            document.getElementById('sankeyPanel').style.display = 'none';
+            document.getElementById('sankeyPanel').innerHTML = '';
+            document.getElementById('aggregations').innerHTML = '';
+            document.getElementById('sections').innerHTML = '';
+            document.getElementById('filterBarContainer').innerHTML = '';
+            document.getElementById('filterBarContainer').style.display = 'none';
+        }
+
+        function showWelcomeUI() {
+            document.getElementById('mainHeader').style.display = 'none';
+            document.getElementById('dataPanel').style.display = 'none';
+            document.getElementById('searchBarContainer').style.display = 'none';
+            document.getElementById('inputBoxes').style.display = 'block';
+        }
+
+        function showAnalysisUI() {
+            document.getElementById('inputBoxes').style.display = 'none';
+            document.getElementById('mainHeader').style.display = 'block';
+            document.getElementById('dataPanel').style.display = '';
+            document.getElementById('searchBarContainer').style.display = 'block';
+        }
         
         async function showWelcome() {
             document.title = 'OhMyPCAP - Welcome';
             if (window.location.search.includes('pcap=')) {
                 history.replaceState({}, '', window.location.pathname);
             }
-            document.getElementById('mainHeader').style.display = 'none';
-            document.getElementById('statsGrid').innerHTML = '';
-            document.getElementById('sankeyPanel').style.display = 'none';
-            document.getElementById('sankeyPanel').innerHTML = '';
-            document.getElementById('aggregations').innerHTML = '';
-            document.getElementById('sections').innerHTML = '';
-            document.getElementById('dataPanel').style.display = 'none';
-            document.getElementById('searchBarContainer').style.display = 'none';
-            document.getElementById('filterBarContainer').innerHTML = '';
-            document.getElementById('filterBarContainer').style.display = 'none';
-            document.getElementById('inputBoxes').style.display = 'block';
+            clearAnalysisContainers();
+            showWelcomeUI();
             
             // Load previous analyses
             let previousHtml = '';
@@ -692,18 +706,7 @@
         // Single delegated listener for advanced toggle (prevents memory leak from repeated loadAnalysis calls)
         function toggleDiagram() {
             diagramMode = !diagramMode;
-            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
-            if (visibleSection) {
-                const eventType = visibleSection.id.replace('section-', '');
-                if (eventType === 'all') {
-                    const filtered = getFilteredEvents('section-all', allEvents, 'all');
-                    updateSankeyDiagram(filtered);
-                } else {
-                    const events = tabDataCache[eventType] || sections[eventType] || [];
-                    const filtered = getFilteredEvents(visibleSection.id, events, eventType);
-                    updateSankeyDiagram(filtered);
-                }
-            }
+            updateSankeyDiagram();
         }
         
         function toggleAggregations() {
@@ -723,7 +726,7 @@
             } else {
                 const aggContainer = document.getElementById('aggregations');
                 if (aggContainer) {
-                    aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                    aggContainer.innerHTML = AGG_COLLAPSED_HTML;
                 }
             }
         }
@@ -945,7 +948,18 @@
                 .text(d => d);
         }
 
-        function updateSankeyDiagram(events) {
+        function getSankeyEvents() {
+            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            if (!visibleSection) return [];
+            const eventType = visibleSection.id.replace('section-', '');
+            if (eventType === 'all') {
+                return getFilteredEvents(visibleSection.id, allEvents, 'all');
+            }
+            const events = tabDataCache[eventType] || sections[eventType] || [];
+            return getFilteredEvents(visibleSection.id, events, eventType);
+        }
+
+        function updateSankeyDiagram() {
             const sankeyPanel = document.getElementById('sankeyPanel');
             if (!sankeyPanel) return;
             sankeyPanel.innerHTML = '';
@@ -953,6 +967,7 @@
                 sankeyPanel.innerHTML = '<div class="section-toggle-bar" onclick="toggleDiagram()">▸ Sankey Diagram</div>';
                 return;
             }
+            const events = getSankeyEvents();
             if (!events || events.length === 0) {
                 sankeyPanel.innerHTML = '<div class="section-toggle-bar" onclick="toggleDiagram()">▾ Sankey Diagram</div>';
                 return;
@@ -1080,7 +1095,7 @@
             
             let html = '<div class="section-content">';
             if (rows.length === 0 && Object.keys(currentFilters).length > 0) {
-                html += '<div style="padding: 40px; text-align: center; color: #8b949e; font-size: 0.95rem;">🔍 No events match the current filters</div>';
+                html += EMPTY_FILTER_STATE_HTML;
             } else {
                 html += '<table><thead><tr>';
                 columns.forEach(h => html += `<th>${h}</th>`);
@@ -1103,7 +1118,7 @@
             if (!aggContainer) return;
             
             if (!advancedMode) {
-                aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                aggContainer.innerHTML = AGG_COLLAPSED_HTML;
                 return;
             }
             
@@ -1149,10 +1164,10 @@
             for (const [col, val] of Object.entries(currentFilters)) {
                 let extracted;
                 if (col === 'Type' || col === 'Detail') {
-                    const types = { alert: '🔴', dns: '🟢', http: '🟠', tls: '🔵', flow: '🟣', ftp: '📁', anomaly: '⚠️', fileinfo: '📄' };
-                    const allColumns = ['Time', 'Type', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Detail'];
+                    const types = EVENT_TYPE_ICONS;
+                    const allColumns = ALL_EVENTS_COLUMNS;
                     const allColIndex = allColumns.indexOf(col);
-                    extracted = extractAllValue(event, col, allColIndex, types);
+                    extracted = extractAllValue(event, col, allColIndex);
                 } else {
                     extracted = extractValue(event, col, -1);
                 }
@@ -1229,15 +1244,11 @@
             html += '<div class="section section-hidden" id="section-all"><div class="section-header">All Events</div><div class="loading">Loading...</div></div>';
             sectionsEl.innerHTML = html;
             
-            const firstType = eventTypes[0];
-            if (firstType) {
-                loadTabData(firstType);
-            }
         }
         
         function buildAllEvents() {
-            const types = { alert: '🔴', dns: '🟢', http: '🟠', tls: '🔵', flow: '🟣', ftp: '📁', anomaly: '⚠️', fileinfo: '📄' };
-            const allColumns = ['Time', 'Type', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Detail'];
+            const types = EVENT_TYPE_ICONS;
+            const allColumns = ALL_EVENTS_COLUMNS;
             const sectionId = 'section-all';
             const sortedAll = [...allEvents].filter(e => e.event_type !== 'stats').sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
             
@@ -1248,7 +1259,7 @@
                 filteredEvents = sortedAll.filter(e => {
                     for (const [col, val] of Object.entries(currentFilters)) {
                         const colIndex = allColumns.indexOf(col);
-                        const extracted = extractAllValue(e, col, colIndex, types);
+                        const extracted = extractAllValue(e, col, colIndex);
                         if (extracted !== val) return false;
                     }
                     return true;
@@ -1274,13 +1285,13 @@
                 else if (etype === 'anomaly') detail = e.anomaly?.message || '';
                 else if (etype === 'fileinfo') detail = e.fileinfo?.filename || '';
                 const formatted = formatEvent(e);
-                return `<tr onclick="toggleRow(this)"><td class="timestamp">${ts}</td><td>${icon} ${etype.toUpperCase()}</td><td><span class="badge badge-info">${proto}</span></td><td class="mono">${srcIp}</td><td class="mono">${srcPort}</td><td class="mono">${dstIp}</td><td class="mono">${dstPort}</td><td class="mono">${escapeHtml(detail)}</td></tr><tr class="detail-row"><td colspan="8"><div class="detail-content">${formatted}</div></td></tr>`;
+                return `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td>${escapeHtml(icon)} ${escapeHtml(etype.toUpperCase())}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td class="mono">${escapeHtml(detail)}</td></tr><tr class="detail-row"><td colspan="8"><div class="detail-content">${formatted}</div></td></tr>`;
             });
             
             const container = document.getElementById(sectionId);
             let html = '<div class="section-content">';
             if (rows.length === 0 && Object.keys(currentFilters).length > 0) {
-                html += '<div style="padding: 40px; text-align: center; color: #8b949e; font-size: 0.95rem;">🔍 No events match the current filters</div>';
+                html += EMPTY_FILTER_STATE_HTML;
             } else {
                 html += '<table><thead><tr>';
                 allColumns.forEach(h => html += `<th>${h}</th>`);
@@ -1297,8 +1308,8 @@
             const aggContainer = document.getElementById('aggregations');
             if (!aggContainer) return;
             
-            const types = { alert: '🔴', dns: '🟢', http: '🟠', tls: '🔵', flow: '🟣', ftp: '📁', anomaly: '⚠️', fileinfo: '📄' };
-            const allColumns = ['Time', 'Type', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Detail'];
+            const types = EVENT_TYPE_ICONS;
+            const allColumns = ALL_EVENTS_COLUMNS;
             const sectionId = 'section-all';
             const sortedAll = [...allEvents].filter(e => e.event_type !== 'stats').sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
             
@@ -1307,71 +1318,31 @@
                 filteredEvents = sortedAll.filter(e => {
                     for (const [col, val] of Object.entries(currentFilters)) {
                         const colIndex = allColumns.indexOf(col);
-                        if (extractAllValue(e, col, colIndex, types) !== val) return false;
+                        if (extractAllValue(e, col, colIndex) !== val) return false;
                     }
                     return true;
                 });
             }
             
             if (!advancedMode) {
-                aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                aggContainer.innerHTML = AGG_COLLAPSED_HTML;
                 return;
             }
             
             aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + buildAggregationTablesAll(filteredEvents, allColumns, types) + '</div></div>';
         }
         
-        function extractAllValue(e, col, colIndex, types) {
-            switch(col) {
-                case 'Type': return (e.event_type || '').toUpperCase();
-                case 'Protocol': return e.proto || '';
-                case 'Source IP': return e.src_ip || '';
-                case 'Source Port': return String(e.src_port || '');
-                case 'Dest IP': return e.dest_ip || '';
-                case 'Dest Port': return String(e.dest_port || '');
-                case 'Alert': return e.alert?.signature || '';
-                case 'Category': return e.alert?.category || '';
-                case 'Severity': return 'Sev ' + (e.alert?.severity || 0);
-                case 'Query': return e.dns?.rrname || '';
-                case 'Method': return e.http?.http_method || '';
-                case 'Host': return e.http?.hostname || '';
-                case 'URL': return e.http?.url || '';
-                case 'Status': return String(e.http?.status || '');
-                case 'User-Agent': return (e.http?.http_user_agent || '').slice(0, 50);
-                case 'SNI / Host': return e.tls?.sni || '-';
-                case 'Version': return e.tls?.version || '-';
-                case 'Subject': return (e.tls?.subject || '-').slice(0, 40);
-                case 'Issuer': return (e.tls?.issuerdn || '-').slice(0, 40);
-                case 'Pkts →': return String(e.flow?.pkts_toserver || 0);
-                case 'Pkts ←': return String(e.flow?.pkts_toclient || 0);
-                case 'Bytes →': return String(e.flow?.bytes_toserver || 0);
-                case 'Bytes ←': return String(e.flow?.bytes_toclient || 0);
-                case 'State': return e.flow?.state || '';
-                case 'Alerted': return e.flow?.alerted ? 'Yes' : 'No';
-                case 'Filename': return e.fileinfo?.filename || '';
-                case 'Command': return e.ftp?.command || '';
-                case 'Message': return e.anomaly?.message || '';
-                case 'Detail': {
-                    const etype = e.event_type || '';
-                    if (etype === 'alert') return e.alert?.signature || '';
-                    if (etype === 'dns') return e.dns?.rrname || '';
-                    if (etype === 'http') return (e.http?.http_method || '') + ' ' + (e.http?.url || '');
-                    if (etype === 'tls') return e.tls?.sni || '';
-                    if (etype === 'flow') return `${e.src_ip || ''}:${e.src_port || ''} → ${e.dest_ip || ''}:${e.dest_port || ''}`;
-                    if (etype === 'ftp') return e.ftp?.command || '';
-                    if (etype === 'anomaly') return e.anomaly?.message || '';
-                    if (etype === 'fileinfo') return e.fileinfo?.filename || '';
-                    return '';
-                }
-                default: return '';
-            }
+        function extractAllValue(e, col, colIndex) {
+            if (col === 'Type') return (e.event_type || '').toUpperCase();
+            if (col === 'Command') return e.ftp?.command || '';
+            if (col === 'Message') return e.anomaly?.message || '';
+            return extractValue(e, col, colIndex);
         }
         
-        function buildAggregationTablesAll(events, columns, types) {
+        function buildAggregationTablesCore(events, columns, sectionId, extractFn) {
             if (!events || events.length === 0) return '';
             
             const excludeCols = ['Time'];
-            const sectionId = 'section-all';
             const aggCols = columns.filter(c => !excludeCols.includes(c) && !hiddenAggregations.has(sectionId + ':' + c));
             
             let html = '<div class="agg-grid">';
@@ -1381,7 +1352,7 @@
                 const counts = {};
                 
                 for (const e of events) {
-                    const val = extractAllValue(e, col, colIndex, types);
+                    const val = extractFn(e, col, colIndex);
                     const key = val || '(empty)';
                     counts[key] = (counts[key] || 0) + 1;
                 }
@@ -1398,7 +1369,7 @@
                     const displayVal = val === '(empty)' ? '' : val;
                     const escapedVal = escapeHtml(val);
                     const filterVal = val === '(empty)' ? '' : val;
-                    html += `<tr class="agg-row" onclick="applyFilter('section-all', '${col.replace(/'/g, "\\'")}', '${String(filterVal).replace(/'/g, "\\'")}')">
+                    html += `<tr class="agg-row" onclick="applyFilter('${sectionId}', '${col.replace(/'/g, "\\'")}', '${String(filterVal).replace(/'/g, "\\'")}')">
                         <td style="text-align:right;color:#8b949e;">${count}</td>
                         <td class="agg-cell" title="${escapedVal}">${escapedVal}</td>
                     </tr>`;
@@ -1409,6 +1380,10 @@
             
             html += '</div>';
             return html;
+        }
+        
+        function buildAggregationTablesAll(events, columns, types) {
+            return buildAggregationTablesCore(events, columns, 'section-all', extractAllValue);
         }
         
         function extractValue(e, col, colIndex) {
@@ -1456,48 +1431,7 @@
         }
         
         function buildAggregationTables(events, eventType) {
-            if (!events || events.length === 0) return '';
-            
-            const columns = getColumnsForType(eventType);
-            const excludeCols = ['Time'];
-            const sectionId = 'section-' + eventType;
-            const aggCols = columns.filter(c => !excludeCols.includes(c) && !hiddenAggregations.has(sectionId + ':' + c));
-            
-            let html = '<div class="agg-grid">';
-            
-            for (const col of aggCols) {
-                const colIndex = columns.indexOf(col);
-                const counts = {};
-                
-                for (const e of events) {
-                    const val = extractValue(e, col, colIndex);
-                    const key = val || '(empty)';
-                    counts[key] = (counts[key] || 0) + 1;
-                }
-                
-                const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
-                
-                html += `<div class="section agg-section" data-col="${col}"><div class="section-content"><div class="agg-table">
-                    <div class="agg-header"><span>${col}</span><button class="agg-close" onclick="hideAggregationTable('${sectionId}', '${col.replace(/'/g, "\\'")}')" title="Hide">&times;</button></div>
-                    <table>
-                        <thead><tr><th style="width:60px;text-align:right;">Count</th><th>Value</th></tr></thead>
-                        <tbody>`;
-                
-                for (const [val, count] of sorted) {
-                    const displayVal = val === '(empty)' ? '' : val;
-                    const escapedVal = escapeHtml(val);
-                    const filterVal = val === '(empty)' ? '' : val;
-                    html += `<tr class="agg-row" onclick="applyFilter('section-${eventType}', '${col.replace(/'/g, "\\'")}', '${String(filterVal).replace(/'/g, "\\'")}')">
-                        <td style="text-align:right;color:#8b949e;">${count}</td>
-                        <td class="agg-cell" title="${escapedVal}">${escapedVal}</td>
-                    </tr>`;
-                }
-                
-                html += `</tbody></table></div></div></div>`;
-            }
-            
-            html += '</div>';
-            return html;
+            return buildAggregationTablesCore(events, getColumnsForType(eventType), 'section-' + eventType, extractValue);
         }
         
         let allEvents = [];
@@ -1512,6 +1446,11 @@
           let hiddenAggregations = new Set();
           let baseEventStats = {};
 
+        const EVENT_TYPE_ICONS = { alert: '🔴', dns: '🟢', http: '🟠', tls: '🔵', flow: '🟣', ftp: '📁', anomaly: '⚠️', fileinfo: '📄' };
+        const ALL_EVENTS_COLUMNS = ['Time', 'Type', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Detail'];
+        const EMPTY_FILTER_STATE_HTML = '<div style="padding: 40px; text-align: center; color: #8b949e; font-size: 0.95rem;">🔍 No events match the current filters</div>';
+        const AGG_COLLAPSED_HTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+
         function hideAggregationTable(sectionId, col) {
             hiddenAggregations.add(sectionId + ':' + col);
             document.querySelectorAll(`.agg-section[data-col="${col}"]`).forEach(el => {
@@ -1522,7 +1461,7 @@
                 advancedMode = false;
                 const aggContainer = document.getElementById('aggregations');
                 if (aggContainer) {
-                    aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                    aggContainer.innerHTML = AGG_COLLAPSED_HTML;
                 }
             }
         }
@@ -1531,62 +1470,38 @@
             return ['Source IP', 'Dest IP', 'Dest Port'][col] || '';
         }
 
+        function refreshCurrentView(sectionId, eventType) {
+            updateFilterBarVisibility();
+            buildStats(computeFilteredStats());
+            if (eventType === 'all') {
+                buildAllEvents();
+                buildAggregationsSectionAll();
+            } else {
+                buildSection(eventType, sections[eventType]);
+                const filtered = getFilteredEvents(sectionId, sections[eventType], eventType);
+                buildAggregationsSection(eventType, filtered);
+            }
+            updateSankeyDiagram();
+        }
+
         function applyFilters(sectionId, filters) {
             for (const f of filters) {
                 currentFilters[f.column] = f.value;
             }
-            updateFilterBarVisibility();
-            buildStats(computeFilteredStats());
             const eventType = sectionId.replace('section-', '');
-            if (eventType === 'all') {
-                const filtered = getFilteredEvents(sectionId, allEvents, eventType);
-                buildAllEvents();
-                buildAggregationsSectionAll();
-                updateSankeyDiagram(filtered);
-            } else {
-                buildSection(eventType, sections[eventType]);
-                const filtered = getFilteredEvents(sectionId, sections[eventType], eventType);
-                buildAggregationsSection(eventType, filtered);
-                updateSankeyDiagram(filtered);
-            }
+            refreshCurrentView(sectionId, eventType);
         }
 
         function applyFilter(sectionId, columnName, value) {
-            currentFilters[columnName] = value;
-            updateFilterBarVisibility();
-            buildStats(computeFilteredStats());
-            const eventType = sectionId.replace('section-', '');
-            if (eventType === 'all') {
-                const filtered = getFilteredEvents(sectionId, allEvents, eventType);
-                buildAllEvents();
-                buildAggregationsSectionAll();
-                updateSankeyDiagram(filtered);
-            } else {
-                buildSection(eventType, sections[eventType]);
-                const filtered = getFilteredEvents(sectionId, sections[eventType], eventType);
-                buildAggregationsSection(eventType, filtered);
-                updateSankeyDiagram(filtered);
-            }
+            applyFilters(sectionId, [{column: columnName, value: value}]);
         }
 
         function clearFilter(columnName) {
             delete currentFilters[columnName];
-            updateFilterBarVisibility();
-            buildStats(computeFilteredStats());
             const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
             if (!visibleSection) return;
             const eventType = visibleSection.id.replace('section-', '');
-            if (eventType === 'all') {
-                const filtered = getFilteredEvents(visibleSection.id, allEvents, eventType);
-                buildAllEvents();
-                buildAggregationsSectionAll();
-                updateSankeyDiagram(filtered);
-            } else {
-                buildSection(eventType, sections[eventType]);
-                const filtered = getFilteredEvents(visibleSection.id, sections[eventType], eventType);
-                buildAggregationsSection(eventType, filtered);
-                updateSankeyDiagram(filtered);
-            }
+            refreshCurrentView(visibleSection.id, eventType);
         }
 
         async function clearAllFilters() {
@@ -1602,12 +1517,12 @@
             if (Object.keys(currentFilters).length === 0) return events;
             
             if (eventType === 'all') {
-                const types = { alert: '🔴', dns: '🟢', http: '🟠', tls: '🔵', flow: '🟣', ftp: '📁', anomaly: '⚠️', fileinfo: '📄' };
-                const allColumns = ['Time', 'Type', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Detail'];
+                const types = EVENT_TYPE_ICONS;
+                const allColumns = ALL_EVENTS_COLUMNS;
                 return events.filter(e => {
                     for (const [col, val] of Object.entries(currentFilters)) {
                         const colIndex = allColumns.indexOf(col);
-                        if (extractAllValue(e, col, colIndex, types) !== val) return false;
+                        if (extractAllValue(e, col, colIndex) !== val) return false;
                     }
                     return true;
                 });
@@ -1698,6 +1613,8 @@
                     sectionEl.classList.remove('section-hidden');
                     loadTabData(activeType, null);
                 }
+            } else if (eventTypes[0]) {
+                loadTabData(eventTypes[0], null);
             }
 
             updateFilterBarVisibility();
@@ -1730,16 +1647,11 @@
                     sections = {};
                     eventTypes = [];
                     currentFilters = {};
-            currentSearch = [];
+                    currentSearch = [];
                     hiddenAggregations = new Set();
                     tabDataCache = {};
-                    document.getElementById('sections').innerHTML = '';
-                    document.getElementById('statsGrid').innerHTML = '';
-                    document.getElementById('sankeyPanel').innerHTML = '';
-                    document.getElementById('sankeyPanel').style.display = 'none';
-                    document.getElementById('inputBoxes').style.display = 'none';
+                    clearAnalysisContainers();
                     document.getElementById('searchInput').value = '';
-                    document.getElementById('searchBarContainer').style.display = 'block';
                     
                     showLoading('Loading events...');
                     
@@ -1797,16 +1709,16 @@
                             </div>
                         </div>
                      `;
-                    document.getElementById('mainHeader').style.display = 'block';
-                    document.getElementById('dataPanel').style.display = '';
+                    showAnalysisUI();
                     updateFilterBarVisibility();
                     
                     buildSections();
+                    if (eventTypes[0]) loadTabData(eventTypes[0]);
                     
                     const sankeyPanel = document.getElementById('sankeyPanel');
                     if (sankeyPanel) {
                         sankeyPanel.style.display = '';
-                        updateSankeyDiagram(allEvents);
+                        updateSankeyDiagram();
                     }
                     
                     const aggContainer = document.getElementById('aggregations');
@@ -1814,7 +1726,7 @@
                         if (advancedMode) {
                             buildAggregationsSectionAll();
                         } else {
-                            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
+                            aggContainer.innerHTML = AGG_COLLAPSED_HTML;
                         }
                     }
                     
@@ -2055,13 +1967,7 @@
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(() => {
                 if (diagramMode && currentMd5) {
-                    const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
-                    if (visibleSection) {
-                        const eventType = visibleSection.id.replace('section-', '');
-                        const events = eventType === 'all' ? allEvents : sections[eventType];
-                        const filtered = getFilteredEvents(visibleSection.id, events, eventType);
-                        updateSankeyDiagram(filtered);
-                    }
+                    updateSankeyDiagram();
                 }
             }, 300);
         });

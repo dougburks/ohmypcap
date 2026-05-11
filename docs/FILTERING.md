@@ -31,6 +31,9 @@ Search (`currentSearch`) is a separate server-side full-text filter using SQLite
 | `updateFilterBarVisibility()` | Shows/hides the filter bar when search or filters exist |
 | `buildStats(filteredStats)` | Rebuilds stats cards with filtered/total counts when constraints are active |
 | `computeFilteredStats()` | Counts events by type from the filtered subset |
+| `getSankeyEvents()` | Returns filtered events for the currently visible tab for the Sankey diagram |
+| `refreshCurrentView()` | Rebuilds the current tab's table, aggregations, stats, filter bar, and Sankey diagram |
+| `updateSankeyDiagram()` | Rebuilds the Sankey diagram using events from `getSankeyEvents()` |
 
 ## Data Flow
 
