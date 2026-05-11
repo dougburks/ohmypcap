@@ -16,7 +16,7 @@ ENV PORT=8000
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY ohmypcap.py ohmypcap.html ./
+COPY db.py models.py validators.py suricata.py ohmypcap.py ohmypcap.html ./
 COPY static/ static/
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
