@@ -51,6 +51,8 @@ A stdlib-only Python HTTP server (`http.server.SimpleHTTPRequestHandler`). Handl
     eve.json               # Suricata JSON output (newline-delimited)
     events.db              # SQLite index (auto-created after analysis)
     name.txt               # Human-readable display name
+    filestore/             # Extracted files from Suricata file-store
+    yara_matches.json      # YARA scan results (auto-created after analysis)
 ```
 
 ### SQLite Schema
@@ -71,6 +73,18 @@ CREATE TABLE events (
 CREATE INDEX idx_event_type ON events(event_type);
 CREATE INDEX idx_timestamp ON events(timestamp);
 CREATE INDEX idx_event_type_timestamp ON events(event_type, timestamp);
+
+CREATE TABLE yara_matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_name TEXT NOT NULL,
+    sha256 TEXT,
+    file_path TEXT,
+    tags TEXT,
+    meta TEXT,
+    timestamp TEXT
+);
+CREATE INDEX idx_yara_sha256 ON yara_matches(sha256);
+CREATE INDEX idx_yara_rule ON yara_matches(rule_name);
 
 -- FTS5 virtual table for full-text search (created when FTS5 is available)
 CREATE VIRTUAL TABLE events_fts USING fts5(
@@ -100,6 +114,7 @@ The `json_data` column stores the complete original event, allowing the server t
 | `ftp` | FTP commands | `ftp.command` |
 | `anomaly` | Protocol anomalies | `anomaly.message` |
 | `fileinfo` | File transfers | `fileinfo.filename`, `fileinfo.filetype` |
+| `filealerts` | YARA matches on extracted files | `rule_name`, `sha256`, `tags` |
 | `stats` | Suricata internal stats | (excluded from display) |
 
 ## UI

@@ -1,6 +1,6 @@
 # OhMyPCAP
 
-A standalone web application for analyzing PCAP files using Suricata. View security alerts, browse network metadata (DNS, HTTP, TLS, flows), extract ASCII transcripts, view per-packet hexdumps, and carve individual streams — all from a single-page UI.
+A standalone web application for analyzing PCAP files using Suricata. View network alerts and file alerts, browse network metadata (DNS, HTTP, TLS, flows), extract ASCII transcripts, view per-packet hexdumps, and carve individual streams — all from a single-page UI.
 
 ## Screenshots
 
@@ -8,7 +8,7 @@ The welcome screen allows you to upload a PCAP file or load a previous analysis:
 
 ![Welcome screen](docs/images/ohmypcap-welcome.png)
 
-After analysis, you can view security alerts, network metadata, and extract streams:
+After analysis, you can view network alerts, file alerts, network metadata, and extract streams:
 
 ![Analysis screen](docs/images/ohmypcap-analysis.png)
 
@@ -220,6 +220,7 @@ If you prefer to run without Docker or Podman, then you will need these prerequi
 - **suricata-update** — for downloading/updating Suricata rules (internet access required; the app will warn and continue without rules if offline)
 - **tcpdump** — for stream carving (`/api/download-stream`) and hexdump extraction (`/api/hexdump-stream`)
 - **tshark** — for ASCII transcript extraction (`/api/ascii-stream`)
+- **yara** (optional) — for scanning extracted files. If installed, OhMyPCAP automatically downloads YARA rules on first run (or uses baked-in rules in Docker). If missing, file extraction and File Alerts are skipped.
 
 Once you have the prerequisites, then you can clone this github repo and run the server:
 ```bash
@@ -283,6 +284,8 @@ All analyzed PCAPs are stored in `~/ohmypcap-data/`. Each analysis gets a subdir
     eve.json                   # Suricata's JSON output
     events.db                  # SQLite index (auto-created after analysis)
     name.txt                   # Human-readable display name
+    filestore/                 # Extracted files from Suricata file-store
+    yara_matches.json          # YARA scan results (auto-created after analysis)
 ```
 
 ## Configuration

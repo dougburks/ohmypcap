@@ -15,17 +15,21 @@ import shutil
 import sys
 import threading
 
-from db import get_event_count_sqlite, get_event_types_sqlite, query_events_sqlite
+from db import (
+    get_event_count_sqlite, get_event_types_sqlite, query_events_sqlite,
+    create_file_analysis_db,
+)
 from validators import (
     validate_ip, validate_port, sanitize_filename, is_safe_path,
     validate_url_safety, validate_zip_extraction, validate_pcap_content
 )
 from suricata import (
     REQUIRED_EXECUTABLES, check_executables, has_internet_access,
-    setup_suricata_config, spawn_suricata
+    setup_suricata_config, spawn_suricata, _set_error
 )
+from yara_scanner import check_yara_executable, setup_yara_rules, scan_single_file
 
-VERSION = '2.1.0'
+VERSION = '2.2.0'
 PORT = int(os.environ.get('PORT', 8000))
 BIND_ADDRESS = os.environ.get('BIND_ADDRESS', '127.0.0.1')
 DATA_DIR = os.environ.get('DATA_DIR', os.path.expanduser('~/ohmypcap-data'))
@@ -36,6 +40,21 @@ SURICATA_DIR = os.path.join(DATA_DIR, 'suricata')
 SURICATA_RULES_DIR = os.path.join(SURICATA_DIR, 'rules')
 
 PCAP_EXTENSIONS = ('.pcap', '.pcapng', '.cap', '.trace')
+
+
+def is_pcap_file(data):
+    """Detect if file data is a PCAP or PCAPNG by magic bytes."""
+    if len(data) < 4:
+        return False
+    magic = data[:4]
+    # Classic PCAP (microsecond or nanosecond timestamps), either endianness
+    if magic in (b'\xd4\xc3\xb2\xa1', b'\xa1\xb2\xc3\xd4',
+                 b'\x4d\x3c\xb2\xa1', b'\xa1\xb2\x3c\x4d'):
+        return True
+    # PCAPNG
+    if magic == b'\x0a\x0d\x0d\x0a':
+        return True
+    return False
 
 
 def extract_pcap_from_zip(zip_data, extract_dir, passwords=None):
@@ -81,6 +100,52 @@ def extract_pcap_from_zip(zip_data, extract_dir, passwords=None):
     finally:
         if os.path.exists(tmp_zip):
             os.unlink(tmp_zip)
+
+
+def _extract_zip_contents(zip_data, extract_dir, passwords=None):
+    """Extract all contents from zip_data into extract_dir.
+
+    Returns list of extracted file paths (excluding the temporary zip itself).
+    Raises ValueError if extraction fails.
+    """
+    tmp_zip = os.path.join(extract_dir, 'archive.zip')
+    with open(tmp_zip, 'wb') as f:
+        f.write(zip_data)
+
+    try:
+        with zipfile.ZipFile(tmp_zip, 'r') as zip_ref:
+            validate_zip_extraction(zip_ref, extract_dir)
+            extracted = False
+            try:
+                zip_ref.extractall(extract_dir)
+                extracted = True
+            except RuntimeError:
+                pass
+
+            if not extracted and passwords:
+                for pwd in passwords:
+                    try:
+                        zip_ref.extractall(extract_dir, pwd=pwd)
+                        extracted = True
+                        break
+                    except RuntimeError:
+                        continue
+
+            if not extracted:
+                raise ValueError('Password-protected ZIP could not be opened.')
+    finally:
+        if os.path.exists(tmp_zip):
+            os.unlink(tmp_zip)
+
+    # Return all extracted files, excluding hidden/metadata files
+    files = []
+    for f in os.listdir(extract_dir):
+        if f.startswith('.') or f.startswith('__'):
+            continue
+        full_path = os.path.join(extract_dir, f)
+        if os.path.isfile(full_path):
+            files.append(full_path)
+    return files
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -419,12 +484,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if not os.path.isdir(dir_path):
                     continue
                 eve_path = os.path.join(dir_path, 'eve.json')
+                db_path = os.path.join(dir_path, 'events.db')
                 if os.path.exists(eve_path):
                     eve_size = os.path.getsize(eve_path)
                     if eve_size > MAX_EVE_SIZE:
                         continue
                 name_path = os.path.join(dir_path, 'name.txt')
                 pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)]
+                non_pcap_files = [f for f in os.listdir(dir_path)
+                                  if not f.endswith(PCAP_EXTENSIONS + ('.zip',))
+                                  and f not in ('eve.json', 'events.db', '.phase', 'yara_matches.json', 'name.txt')]
 
                 display_name = md5_dir
                 if os.path.exists(name_path) and is_safe_path(dir_path, name_path):
@@ -432,8 +501,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         display_name = f.read().strip()
                 elif pcap_files:
                     display_name = pcap_files[0]
+                elif non_pcap_files:
+                    display_name = non_pcap_files[0]
 
-                if os.path.exists(eve_path):
+                if os.path.exists(eve_path) or os.path.exists(db_path):
                     analyses.append({'md5': md5_dir, 'pcap': display_name})
 
             analyses.sort(key=lambda x: x['pcap'].lower())
@@ -452,8 +523,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
 
         eve_path = os.path.join(dir_path, 'eve.json')
+        db_path = os.path.join(dir_path, 'events.db')
         name_path = os.path.join(dir_path, 'name.txt')
         pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)] if os.path.exists(dir_path) else []
+        non_pcap_files = [f for f in os.listdir(dir_path)
+                          if not f.endswith(PCAP_EXTENSIONS + ('.zip',))
+                          and f not in ('eve.json', 'events.db', '.phase', 'yara_matches.json', 'name.txt')] if os.path.exists(dir_path) else []
 
         if os.path.exists(eve_path):
             eve_size = os.path.getsize(eve_path)
@@ -461,14 +536,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self._send_error(400, f'Eve.json too large ({eve_size // (1024*1024)}MB, max 1000MB)')
                 return
 
-            pcap_name = md5
+        if os.path.exists(eve_path) or os.path.exists(db_path):
+            display_name = md5
             if os.path.exists(name_path) and is_safe_path(dir_path, name_path):
                 with open(name_path, 'r') as f:
-                    pcap_name = f.read().strip()
+                    display_name = f.read().strip()
             elif pcap_files:
-                pcap_name = pcap_files[0]
+                display_name = pcap_files[0]
+            elif non_pcap_files:
+                display_name = non_pcap_files[0]
 
-            self._send_json({'success': True, 'md5': md5, 'pcap_name': pcap_name})
+            self._send_json({'success': True, 'md5': md5, 'pcap_name': display_name})
         else:
             self._send_error(404, 'Analysis not found')
 
@@ -515,6 +593,55 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     # POST handlers
     # ------------------------------------------------------------------
 
+    def _process_file_upload(self, file_data, safe_filename, dir_path, name_path):
+        """Save uploaded file and determine if PCAP or standalone file."""
+        os.makedirs(dir_path, exist_ok=True)
+        file_path = os.path.join(dir_path, safe_filename)
+        with open(file_path, 'wb') as f:
+            f.write(file_data)
+        with open(name_path, 'w') as f:
+            f.write(safe_filename)
+        return file_path
+
+    def _analyze_standalone_file(self, dir_path, file_path, safe_filename):
+        """Run YARA on a non-PCAP file and create events.db asynchronously."""
+        def run_analysis():
+            phase_file = os.path.join(dir_path, '.phase')
+            try:
+                with open(phase_file, 'w') as f:
+                    f.write('files')
+            except Exception:
+                pass
+
+            try:
+                data_dir = os.environ.get('DATA_DIR', os.path.expanduser('~/ohmypcap-data'))
+                rules_dir = setup_yara_rules(data_dir)
+                db_file = os.path.join(dir_path, 'events.db')
+                name_path = os.path.join(dir_path, 'name.txt')
+
+                if rules_dir and check_yara_executable():
+                    try:
+                        matches, sha256, md5, sha1 = scan_single_file(file_path, rules_dir)
+                        create_file_analysis_db(db_file, file_path, matches, md5, sha1, sha256)
+                    except Exception as e:
+                        _set_error(dir_path, f'YARA scan failed: {e}')
+                        create_file_analysis_db(db_file, file_path, [], '', '', '')
+                else:
+                    create_file_analysis_db(db_file, file_path, [], '', '', '')
+
+                with open(name_path, 'w') as f:
+                    f.write(safe_filename)
+            except Exception as e:
+                _set_error(dir_path, f'Analysis failed: {e}')
+            finally:
+                try:
+                    if os.path.exists(phase_file):
+                        os.unlink(phase_file)
+                except Exception:
+                    pass
+
+        threading.Thread(target=run_analysis, daemon=True).start()
+
     def handle_post_upload(self):
         content_length = int(self.headers.get('Content-Length', 0))
         if content_length > MAX_UPLOAD_SIZE:
@@ -532,7 +659,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         parts = body.split(b'--' + boundary)
         file_data = None
-        original_filename = 'unknown.pcap'
+        original_filename = 'unknown'
 
         for part in parts:
             if b'filename=' in part:
@@ -542,24 +669,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     filename_match = re.search(r'filename="([^"]+)"', headers)
                     if filename_match:
                         original_filename = sanitize_filename(filename_match.group(1))
-                        if original_filename.endswith(PCAP_EXTENSIONS + ('.zip',)):
-                            file_data = part[header_end + 4:]
-                            if file_data.endswith(b'\r\n'):
-                                file_data = file_data[:-2]
-                            break
+                        file_data = part[header_end + 4:]
+                        if file_data.endswith(b'\r\n'):
+                            file_data = file_data[:-2]
+                        break
 
         if not file_data:
-            self._send_error(400, 'Invalid file')
-            return
-
-        if not validate_pcap_content(file_data):
-            self._send_error(400, 'Invalid file content')
+            self._send_error(400, 'No file uploaded')
             return
 
         safe_filename = sanitize_filename(original_filename)
 
         try:
-            if safe_filename.endswith('.zip'):
+            # Check if it's a zip archive
+            if safe_filename.endswith('.zip') or file_data[:2] == b'PK':
                 tmp_dir = tempfile.mkdtemp()
                 try:
                     passwords = [b'infected']
@@ -568,60 +691,101 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         year, month, day = date_match.groups()
                         passwords.append(f'infected_{year}{month}{day}'.encode())
 
-                    pcap_data, pcap_filename = extract_pcap_from_zip(file_data, tmp_dir, passwords)
-                    md5_hash = hashlib.md5(pcap_data).hexdigest()
+                    extracted_files = _extract_zip_contents(file_data, tmp_dir, passwords)
+                    if not extracted_files:
+                        self._send_error(400, 'ZIP archive is empty')
+                        return
 
-                    dir_path = os.path.join(DATA_DIR, md5_hash)
-                    eve_path = os.path.join(dir_path, 'eve.json')
-                    name_path = os.path.join(dir_path, 'name.txt')
-                    pcap_path = os.path.join(dir_path, pcap_filename)
+                    # Look for PCAP files first
+                    pcap_files = [f for f in extracted_files if f.endswith(PCAP_EXTENSIONS)]
 
-                    is_new = not os.path.exists(eve_path)
+                    if pcap_files:
+                        pcap_data_path = pcap_files[0]
+                        with open(pcap_data_path, 'rb') as f:
+                            pcap_data = f.read()
+                        md5_hash = hashlib.md5(pcap_data).hexdigest()
+                        pcap_filename = os.path.basename(pcap_data_path)
 
-                    if is_new:
-                        if not is_safe_path(dir_path, pcap_path):
-                            self._send_error(400, 'Invalid filename')
-                            return
-                        os.makedirs(dir_path, exist_ok=True)
-                        extracted_pcap = os.path.join(tmp_dir, pcap_filename)
-                        shutil.move(extracted_pcap, pcap_path)
-                        with open(name_path, 'w') as f:
-                            f.write(pcap_filename)
+                        dir_path = os.path.join(DATA_DIR, md5_hash)
+                        eve_path = os.path.join(dir_path, 'eve.json')
+                        name_path = os.path.join(dir_path, 'name.txt')
+                        pcap_path = os.path.join(dir_path, pcap_filename)
 
-                        spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'))
-                        self._send_json({'status': 'processing', 'md5': md5_hash})
+                        is_new = not os.path.exists(eve_path)
+
+                        if is_new:
+                            if not is_safe_path(dir_path, pcap_path):
+                                self._send_error(400, 'Invalid filename')
+                                return
+                            os.makedirs(dir_path, exist_ok=True)
+                            shutil.move(pcap_data_path, pcap_path)
+                            with open(name_path, 'w') as f:
+                                f.write(pcap_filename)
+
+                            spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'))
+                            self._send_json({'status': 'processing', 'md5': md5_hash, 'phase': 'network'})
+                        else:
+                            self._send_json({'status': 'ready', 'md5': md5_hash})
                     else:
-                        self._send_json({'status': 'ready', 'md5': md5_hash})
+                        # No PCAP — use first extracted file for standalone YARA analysis
+                        first_file = extracted_files[0]
+                        with open(first_file, 'rb') as f:
+                            file_data = f.read()
+                        md5_hash = hashlib.md5(file_data).hexdigest()
+                        inner_filename = os.path.basename(first_file)
+
+                        dir_path = os.path.join(DATA_DIR, md5_hash)
+                        db_file = os.path.join(dir_path, 'events.db')
+                        name_path = os.path.join(dir_path, 'name.txt')
+                        dest_path = os.path.join(dir_path, inner_filename)
+
+                        is_new = not os.path.exists(db_file)
+
+                        if is_new:
+                            if not is_safe_path(dir_path, dest_path):
+                                self._send_error(400, 'Invalid filename')
+                                return
+                            os.makedirs(dir_path, exist_ok=True)
+                            shutil.move(first_file, dest_path)
+                            self._analyze_standalone_file(dir_path, dest_path, inner_filename)
+                            self._send_json({'status': 'processing', 'md5': md5_hash, 'phase': 'files'})
+                        else:
+                            self._send_json({'status': 'ready', 'md5': md5_hash})
                 except ValueError as exc:
                     self._send_error(400, str(exc))
                     return
                 finally:
                     shutil.rmtree(tmp_dir, ignore_errors=True)
-            else:
-                md5_hash = hashlib.md5(file_data).hexdigest()
-                dir_path = os.path.join(DATA_DIR, md5_hash)
-                pcap_path = os.path.join(dir_path, safe_filename)
+                return
 
-                if not is_safe_path(dir_path, pcap_path):
-                    self._send_error(400, 'Invalid filename')
-                    return
+            md5_hash = hashlib.md5(file_data).hexdigest()
+            dir_path = os.path.join(DATA_DIR, md5_hash)
+            eve_path = os.path.join(dir_path, 'eve.json')
+            db_file = os.path.join(dir_path, 'events.db')
+            name_path = os.path.join(dir_path, 'name.txt')
+            file_path = os.path.join(dir_path, safe_filename)
 
-                eve_path = os.path.join(dir_path, 'eve.json')
-                name_path = os.path.join(dir_path, 'name.txt')
+            if not is_safe_path(dir_path, file_path):
+                self._send_error(400, 'Invalid filename')
+                return
 
-                is_new = not os.path.exists(eve_path)
+            is_new = not os.path.exists(eve_path) and not os.path.exists(db_file)
 
-                if is_new:
-                    os.makedirs(dir_path, exist_ok=True)
-                    with open(pcap_path, 'wb') as f:
-                        f.write(file_data)
-                    with open(name_path, 'w') as f:
-                        f.write(safe_filename)
+            if is_new:
+                os.makedirs(dir_path, exist_ok=True)
+                with open(file_path, 'wb') as f:
+                    f.write(file_data)
+                with open(name_path, 'w') as f:
+                    f.write(safe_filename)
 
-                    spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'))
-                    self._send_json({'status': 'processing', 'md5': md5_hash})
+                if is_pcap_file(file_data):
+                    spawn_suricata(dir_path, file_path, os.path.join(SURICATA_DIR, 'suricata.yaml'))
+                    self._send_json({'status': 'processing', 'md5': md5_hash, 'phase': 'network'})
                 else:
-                    self._send_json({'status': 'ready', 'md5': md5_hash})
+                    self._analyze_standalone_file(dir_path, file_path, safe_filename)
+                    self._send_json({'status': 'processing', 'md5': md5_hash, 'phase': 'files'})
+            else:
+                self._send_json({'status': 'ready', 'md5': md5_hash})
         except Exception:
             self._send_error(500, 'Internal server error')
 
@@ -651,16 +815,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self._send_error(413, 'File too large')
                 return
 
-            if not validate_pcap_content(file_data):
-                self._send_error(400, 'Invalid file content')
-                return
-
             parsed_url = urlparse(url)
             original_filename = sanitize_filename(os.path.basename(parsed_url.path))
             if not original_filename:
-                original_filename = 'downloaded.pcap'
+                original_filename = 'downloaded'
 
-            if original_filename.endswith('.zip'):
+            if original_filename.endswith('.zip') or file_data[:2] == b'PK':
                 tmp_extract_dir = tempfile.mkdtemp()
                 try:
                     passwords = []
@@ -670,54 +830,92 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             year, month, day = date_match.groups()
                             passwords.append(f'infected_{year}{month}{day}'.encode())
 
-                    pcap_data, pcap_filename = extract_pcap_from_zip(file_data, tmp_extract_dir, passwords)
-                    md5_hash = hashlib.md5(pcap_data).hexdigest()
-
-                    dir_path = os.path.join(DATA_DIR, md5_hash)
-                    eve_path = os.path.join(dir_path, 'eve.json')
-                    name_path = os.path.join(dir_path, 'name.txt')
-                    pcap_path = os.path.join(dir_path, pcap_filename)
-
-                    if os.path.exists(eve_path):
-                        self._send_json({'status': 'ready', 'md5': md5_hash})
+                    extracted_files = _extract_zip_contents(file_data, tmp_extract_dir, passwords)
+                    if not extracted_files:
+                        self._send_error(400, 'ZIP archive is empty')
                         return
 
-                    if not is_safe_path(dir_path, pcap_path):
-                        raise Exception('Invalid filename')
-                    os.makedirs(dir_path, exist_ok=True)
-                    extracted_pcap = os.path.join(tmp_extract_dir, pcap_filename)
-                    shutil.move(extracted_pcap, pcap_path)
-                    with open(name_path, 'w') as f:
-                        f.write(sanitize_filename(pcap_filename))
+                    pcap_files = [f for f in extracted_files if f.endswith(PCAP_EXTENSIONS)]
+
+                    if pcap_files:
+                        pcap_data_path = pcap_files[0]
+                        with open(pcap_data_path, 'rb') as f:
+                            pcap_data = f.read()
+                        md5_hash = hashlib.md5(pcap_data).hexdigest()
+                        pcap_filename = os.path.basename(pcap_data_path)
+
+                        dir_path = os.path.join(DATA_DIR, md5_hash)
+                        eve_path = os.path.join(dir_path, 'eve.json')
+                        name_path = os.path.join(dir_path, 'name.txt')
+                        pcap_path = os.path.join(dir_path, pcap_filename)
+
+                        if os.path.exists(eve_path):
+                            self._send_json({'status': 'ready', 'md5': md5_hash})
+                            return
+
+                        if not is_safe_path(dir_path, pcap_path):
+                            raise Exception('Invalid filename')
+                        os.makedirs(dir_path, exist_ok=True)
+                        shutil.move(pcap_data_path, pcap_path)
+                        with open(name_path, 'w') as f:
+                            f.write(sanitize_filename(pcap_filename))
+
+                        spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'))
+                        self._send_json({'status': 'processing', 'md5': md5_hash, 'phase': 'network'})
+                    else:
+                        # No PCAP — use first extracted file for standalone YARA
+                        first_file = extracted_files[0]
+                        with open(first_file, 'rb') as f:
+                            inner_data = f.read()
+                        md5_hash = hashlib.md5(inner_data).hexdigest()
+                        inner_filename = os.path.basename(first_file)
+
+                        dir_path = os.path.join(DATA_DIR, md5_hash)
+                        db_file = os.path.join(dir_path, 'events.db')
+                        name_path = os.path.join(dir_path, 'name.txt')
+                        dest_path = os.path.join(dir_path, inner_filename)
+
+                        if os.path.exists(db_file):
+                            self._send_json({'status': 'ready', 'md5': md5_hash})
+                            return
+
+                        if not is_safe_path(dir_path, dest_path):
+                            raise Exception('Invalid filename')
+                        os.makedirs(dir_path, exist_ok=True)
+                        shutil.move(first_file, dest_path)
+                        self._analyze_standalone_file(dir_path, dest_path, inner_filename)
+                        self._send_json({'status': 'processing', 'md5': md5_hash, 'phase': 'files'})
+                except ValueError as exc:
+                    self._send_error(400, str(exc))
+                    return
                 finally:
                     shutil.rmtree(tmp_extract_dir, ignore_errors=True)
+                return
+
+            md5_hash = hashlib.md5(file_data).hexdigest()
+            dir_path = os.path.join(DATA_DIR, md5_hash)
+            eve_path = os.path.join(dir_path, 'eve.json')
+            db_file = os.path.join(dir_path, 'events.db')
+            name_path = os.path.join(dir_path, 'name.txt')
+
+            if os.path.exists(eve_path) or os.path.exists(db_file):
+                self._send_json({'status': 'ready', 'md5': md5_hash})
+                return
+
+            os.makedirs(dir_path, exist_ok=True)
+            safe_filename = sanitize_filename(original_filename)
+            file_path = os.path.join(dir_path, safe_filename)
+            if not is_safe_path(dir_path, file_path):
+                raise Exception('Invalid filename')
+            with open(file_path, 'wb') as f:
+                f.write(file_data)
+
+            if is_pcap_file(file_data):
+                spawn_suricata(dir_path, file_path, os.path.join(SURICATA_DIR, 'suricata.yaml'))
+                self._send_json({'status': 'processing', 'md5': md5_hash, 'phase': 'network'})
             else:
-                md5_hash = hashlib.md5(file_data).hexdigest()
-                dir_path = os.path.join(DATA_DIR, md5_hash)
-                eve_path = os.path.join(dir_path, 'eve.json')
-                name_path = os.path.join(dir_path, 'name.txt')
-
-                if os.path.exists(eve_path):
-                    self._send_json({'status': 'ready', 'md5': md5_hash})
-                    return
-
-                os.makedirs(dir_path, exist_ok=True)
-                safe_filename = sanitize_filename(original_filename)
-                pcap_path = os.path.join(dir_path, safe_filename)
-                if not is_safe_path(dir_path, pcap_path):
-                    raise Exception('Invalid filename')
-                with open(pcap_path, 'wb') as f:
-                    f.write(file_data)
-                with open(name_path, 'w') as f:
-                    f.write(sanitize_filename(original_filename))
-
-                pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)]
-                if not pcap_files:
-                    raise Exception('No pcap file found')
-                pcap_path = os.path.join(dir_path, pcap_files[0])
-
-            spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'))
-            self._send_json({'status': 'processing', 'md5': md5_hash})
+                self._analyze_standalone_file(dir_path, file_path, safe_filename)
+                self._send_json({'status': 'processing', 'md5': md5_hash, 'phase': 'files'})
 
         except ValueError:
             self._send_error(400, 'Invalid URL')
@@ -740,19 +938,45 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         db_file = os.path.join(dir_path, 'events.db')
 
-        processing_lock = os.path.join(dir_path, '.processing')
-        if os.path.exists(processing_lock):
-            lock_age = time.time() - os.path.getmtime(processing_lock)
-            if lock_age > 600:
+        # Check for error files first (highest priority)
+        error_file = os.path.join(dir_path, '.error')
+        if os.path.exists(error_file):
+            error_age = time.time() - os.path.getmtime(error_file)
+            if error_age > 600:
                 try:
-                    os.unlink(processing_lock)
+                    os.unlink(error_file)
                 except Exception:
                     pass
+            else:
+                try:
+                    with open(error_file, 'r') as f:
+                        error_msg = f.read().strip()
+                except Exception:
+                    error_msg = 'Analysis failed'
+                self._send_json({'status': 'error', 'message': error_msg})
+                return
+
+        phase_file = os.path.join(dir_path, '.phase')
+        if os.path.exists(phase_file):
+            lock_age = time.time() - os.path.getmtime(phase_file)
+            if lock_age > 600:
+                try:
+                    os.unlink(phase_file)
+                except Exception:
+                    pass
+
+        phase = ''
+        if os.path.exists(phase_file):
+            try:
+                with open(phase_file, 'r') as f:
+                    phase = f.read().strip()
+            except Exception:
+                pass
 
         if os.path.exists(db_file):
             self._send_json({'status': 'ready'})
         else:
-            self._send_json({'status': 'processing'})
+            self._send_json({'status': 'processing', 'phase': phase})
 
     def handle_post_reanalyze(self):
         content_length = int(self.headers.get('Content-Length', 0))
@@ -774,24 +998,48 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
 
         pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)]
-        if not pcap_files:
-            self._send_error(404, 'No pcap found')
-            return
+        non_pcap_files = [f for f in os.listdir(dir_path)
+                          if not f.endswith(PCAP_EXTENSIONS + ('.zip',))
+                          and f not in ('eve.json', 'events.db', '.phase', 'yara_matches.json', 'name.txt')]
 
-        pcap_path = os.path.join(dir_path, pcap_files[0])
+        # Determine if this is a PCAP or standalone file analysis
+        if pcap_files:
+            pcap_path = os.path.join(dir_path, pcap_files[0])
 
-        for artifact in ('eve.json', 'events.db', '.processing'):
-            artifact_path = os.path.join(dir_path, artifact)
-            if os.path.exists(artifact_path):
+            for artifact in ('eve.json', 'events.db', '.phase', '.error', 'yara_matches.json'):
+                artifact_path = os.path.join(dir_path, artifact)
+                if os.path.exists(artifact_path):
+                    try:
+                        os.unlink(artifact_path)
+                    except Exception:
+                        pass
+
+            # Clean up extracted files from previous analysis
+            filestore_dir = os.path.join(dir_path, 'filestore')
+            if os.path.isdir(filestore_dir):
                 try:
-                    os.unlink(artifact_path)
+                    shutil.rmtree(filestore_dir)
                 except Exception:
                     pass
 
-        if spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml')):
-            self._send_json({'status': 'processing', 'md5': md5})
+            if spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml')):
+                self._send_json({'status': 'processing', 'md5': md5, 'phase': 'network'})
+            else:
+                self._send_error(409, 'Analysis already in progress')
+        elif non_pcap_files:
+            # Standalone file re-analysis: re-run YARA with updated rules
+            file_path = os.path.join(dir_path, non_pcap_files[0])
+            for artifact in ('events.db', '.error', 'yara_matches.json'):
+                artifact_path = os.path.join(dir_path, artifact)
+                if os.path.exists(artifact_path):
+                    try:
+                        os.unlink(artifact_path)
+                    except Exception:
+                        pass
+            self._analyze_standalone_file(dir_path, file_path, non_pcap_files[0])
+            self._send_json({'status': 'processing', 'md5': md5, 'phase': 'files'})
         else:
-            self._send_error(409, 'Analysis already in progress')
+            self._send_error(404, 'No analysis file found')
 
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -818,7 +1066,7 @@ if __name__ == '__main__':
     ================================================================
     | {title}{padding}|
     |                                                              |
-    | Analyze pcap files from the web or your local collection.    |
+    | Analyze files from the web or your local collection.    |
     |                                                              |
     | View alerts and then slice and dice your network metadata!   |
     ================================================================
@@ -826,6 +1074,10 @@ if __name__ == '__main__':
 
     # Run setup - handles rules download first
     setup_suricata_config(DATA_DIR)
+    setup_yara_rules(DATA_DIR)
+
+    if not check_yara_executable():
+        print("Warning: YARA not installed — File Alerts (YARA scanning) will be skipped")
 
     msg = f'OhMyPCAP running at http://{BIND_ADDRESS}:{PORT}/ohmypcap.html'
     padding = ' ' * (61 - len(msg))

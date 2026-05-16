@@ -146,6 +146,157 @@ class TestSQLite(unittest.TestCase):
         events = db.query_events_sqlite(self.db_file, q='alert')
         self.assertEqual(len(events), 1)
 
+    def test_synthetic_filealerts_from_yara_matches(self):
+        """YARA matches correlated with fileinfo create synthetic filealerts events."""
+        import json as json_mod
+        # Write a fileinfo event with a known SHA256
+        with open(self.eve_file, 'a') as f:
+            f.write(json_mod.dumps({
+                'event_type': 'fileinfo',
+                'timestamp': '2026-01-01T00:00:04',
+                'src_ip': '192.168.1.1',
+                'src_port': 12345,
+                'dest_ip': '10.0.0.1',
+                'dest_port': 80,
+                'proto': 'TCP',
+                'app_proto': 'http',
+                'fileinfo': {
+                    'sha256': 'a' * 64,
+                    'filename': 'malware.exe',
+                    'size': 1024,
+                }
+            }) + '\n')
+        # Write a matching yara_matches.json
+        yara_file = self.db_file.replace('events.db', 'yara_matches.json')
+        with open(yara_file, 'w') as f:
+            json_mod.dump([
+                {
+                    'rule_name': 'MALWARE_Test',
+                    'sha256': 'a' * 64,
+                    'confidence': 'threat',
+                    'tags': ['malware'],
+                    'meta': {'author': 'test'},
+                    'strings': [],
+                    'file_id': 'file.1',
+                }
+            ], f)
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        # Query filealerts events
+        events = db.query_events_sqlite(self.db_file, event_type='filealerts')
+        self.assertEqual(len(events), 1)
+        fa = events[0]
+        self.assertEqual(fa['event_type'], 'filealerts')
+        self.assertEqual(fa['src_ip'], '192.168.1.1')
+        self.assertEqual(fa['dest_ip'], '10.0.0.1')
+        self.assertEqual(fa['src_port'], 12345)
+        self.assertEqual(fa['dest_port'], 80)
+        self.assertEqual(fa['proto'], 'TCP')
+        self.assertEqual(fa['app_proto'], 'http')
+        self.assertEqual(fa['filealerts']['rule_name'], 'MALWARE_Test')
+        self.assertEqual(fa['filealerts']['confidence'], 'threat')
+        self.assertEqual(fa['filealerts']['sha256'], 'a' * 64)
+        # Stats should include filealerts
+        stats = db.get_event_types_sqlite(self.db_file)
+        self.assertEqual(stats.get('filealerts'), 1)
+
+    def test_yara_match_without_corresponding_fileinfo_is_ignored(self):
+        """YARA matches with no matching fileinfo SHA256 are not inserted."""
+        import json as json_mod
+        yara_file = self.db_file.replace('events.db', 'yara_matches.json')
+        with open(yara_file, 'w') as f:
+            json_mod.dump([
+                {
+                    'rule_name': 'ORPHAN_Rule',
+                    'sha256': 'z' * 64,
+                    'confidence': 'technique',
+                    'tags': [],
+                    'meta': {},
+                    'strings': [],
+                }
+            ], f)
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        events = db.query_events_sqlite(self.db_file, event_type='filealerts')
+        self.assertEqual(len(events), 0)
+        stats = db.get_event_types_sqlite(self.db_file)
+        self.assertNotIn('filealerts', stats)
+
+    def test_filealerts_searchable_via_fts5(self):
+        """Synthetic filealerts events are indexed in FTS5 and searchable."""
+        import json as json_mod
+        with open(self.eve_file, 'a') as f:
+            f.write(json_mod.dumps({
+                'event_type': 'fileinfo',
+                'timestamp': '2026-01-01T00:00:04',
+                'src_ip': '192.168.1.1',
+                'src_port': 12345,
+                'dest_ip': '10.0.0.1',
+                'dest_port': 80,
+                'proto': 'TCP',
+                'fileinfo': {'sha256': 'b' * 64}
+            }) + '\n')
+        yara_file = self.db_file.replace('events.db', 'yara_matches.json')
+        with open(yara_file, 'w') as f:
+            json_mod.dump([
+                {
+                    'rule_name': 'COBALTSTRIKE_Beacon',
+                    'sha256': 'b' * 64,
+                    'confidence': 'threat',
+                    'tags': ['apt', 'cobaltstrike'],
+                    'meta': {},
+                    'strings': [],
+                }
+            ], f)
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        # Search by rule name
+        events = db.query_events_sqlite(self.db_file, q='COBALTSTRIKE')
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['event_type'], 'filealerts')
+        # Search by tag
+        events = db.query_events_sqlite(self.db_file, q='cobaltstrike')
+        self.assertEqual(len(events), 1)
+
+
+    def test_create_file_analysis_db(self):
+        """Standalone file analysis creates fileinfo + filealerts events."""
+        import json as json_mod
+        tmp_file = os.path.join(self.tmpdir, 'evil.exe')
+        with open(tmp_file, 'wb') as f:
+            f.write(b'MZ' + b'\x00' * 62)
+        db_file = os.path.join(self.tmpdir, 'file_events.db')
+        yara_matches = [
+            {
+                'rule_name': 'MALWARE_Test',
+                'confidence': 'threat',
+                'tags': ['malware'],
+                'meta': {'author': 'test'},
+                'strings': [],
+                'file_id': '',
+            }
+        ]
+        db.create_file_analysis_db(
+            db_file, tmp_file, yara_matches,
+            file_md5='a' * 32, file_sha1='b' * 40, file_sha256='c' * 64,
+            magic_desc='PE32 executable'
+        )
+        # Verify fileinfo event
+        fileinfo_events = db.query_events_sqlite(db_file, event_type='fileinfo')
+        self.assertEqual(len(fileinfo_events), 1)
+        fi = fileinfo_events[0]
+        self.assertEqual(fi['event_type'], 'fileinfo')
+        self.assertEqual(fi['proto'], '')
+        self.assertEqual(fi['fileinfo']['filename'], 'evil.exe')
+        self.assertEqual(fi['fileinfo']['sha256'], 'c' * 64)
+        self.assertEqual(fi['fileinfo']['magic'], 'PE32 executable')
+        # Verify filealerts event
+        alert_events = db.query_events_sqlite(db_file, event_type='filealerts')
+        self.assertEqual(len(alert_events), 1)
+        fa = alert_events[0]
+        self.assertEqual(fa['event_type'], 'filealerts')
+        self.assertEqual(fa['proto'], '')
+        self.assertEqual(fa['filealerts']['rule_name'], 'MALWARE_Test')
+        self.assertEqual(fa['filealerts']['confidence'], 'threat')
+        self.assertEqual(fa['filealerts']['sha256'], 'c' * 64)
+
 
 class TestSQLiteAPI(unittest.TestCase):
     def setUp(self):

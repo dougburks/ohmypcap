@@ -2,7 +2,34 @@
             if (str == null) return '';
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
-        
+
+        function sortEventTypes(types) {
+            const order = { alert: 0, filealerts: 1 };
+            return [...types].sort((a, b) => {
+                const ai = order[a] ?? 99;
+                const bi = order[b] ?? 99;
+                if (ai !== bi) return ai - bi;
+                return a.localeCompare(b);
+            });
+        }
+
+        const CLASSIFICATION_STYLES = {
+            threat: { bg: '#ff6b6b33', text: '#ff6b6b' },
+            technique: { bg: '#ffa72633', text: '#ffa726' },
+            informational: { bg: '#9e9e9e33', text: '#9e9e9e' }
+        };
+        function getClassificationStyle(c) {
+            return CLASSIFICATION_STYLES[c] || CLASSIFICATION_STYLES.informational;
+        }
+        function getClassificationLabel(c) {
+            return c.charAt(0).toUpperCase() + c.slice(1);
+        }
+        function classificationBadgeHtml(c) {
+            const s = getClassificationStyle(c);
+            const l = getClassificationLabel(c);
+            return `<span class="badge" style="background:${s.bg};color:${s.text}">${escapeHtml(l)}</span>`;
+        }
+
         function showTab(sectionId, el) {
             document.querySelectorAll('.section').forEach(s => s.classList.add('section-hidden'));
             document.getElementById(sectionId).classList.remove('section-hidden');
@@ -324,6 +351,19 @@
                 html += `<span style="color: #8b949e;">Message</span><span>${escapeHtml(e.anomaly?.message || '')}</span>`;
             }
             
+            if (e.event_type === 'filealerts') {
+                const fa = e.filealerts || {};
+                const classification = fa.confidence || 'informational';
+                html += `<span style="color: #8b949e;">Classification</span><span>${classificationBadgeHtml(classification)}</span>`;
+                html += `<span style="color: #8b949e;">Rule</span><span><span class="badge" style="background:#e91e6322;color:#ff8a8a">${escapeHtml(fa.rule_name || '')}</span></span>`;
+                html += `<span style="color: #8b949e;">SHA256</span><span class="mono">${escapeHtml(fa.sha256 || '')}</span>`;
+                html += `<span style="color: #8b949e;">Tags</span><span>${escapeHtml((fa.tags || []).join(', '))}</span>`;
+                if (fa.meta && Object.keys(fa.meta).length > 0) {
+                    const metaEntries = Object.entries(fa.meta).map(([k, v]) => `${k}: ${v}`).join(', ');
+                    html += `<span style="color: #8b949e;">Metadata</span><span>${escapeHtml(metaEntries)}</span>`;
+                }
+            }
+            
             if (e.event_type === 'fileinfo') {
                 html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #9c27b0;">File Info</span>`;
                 html += `<span style="color: #8b949e;">Filename</span><span class="mono">${escapeHtml(e.fileinfo?.filename || '')}</span>`;
@@ -332,6 +372,20 @@
                 html += `<span style="color: #8b949e;">SHA1</span><span class="mono">${escapeHtml(e.fileinfo?.sha1 || '')}</span>`;
                 html += `<span style="color: #8b949e;">SHA256</span><span class="mono">${escapeHtml(e.fileinfo?.sha256 || '')}</span>`;
                 html += `<span style="color: #8b949e;">Size</span><span>${escapeHtml(String((e.fileinfo?.size || 0).toLocaleString()))} bytes</span>`;
+                
+                const fileSha = e.fileinfo?.sha256 || '';
+                const matches = allEvents.filter(ev => ev.event_type === 'filealerts' && ev.filealerts?.sha256 === fileSha);
+                html += `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: #e91e63;">File Alerts</span>`;
+                if (matches.length > 0) {
+                    matches.forEach(m => {
+                        html += `<span style="color: #8b949e;">Rule</span><span><span class="badge" style="background:#e91e6322;color:#ff8a8a">${escapeHtml(m.filealerts?.rule_name || '')}</span></span>`;
+                        if (m.filealerts?.tags && m.filealerts.tags.length) {
+                            html += `<span style="color: #8b949e;">Tags</span><span>${escapeHtml(m.filealerts.tags.join(', '))}</span>`;
+                        }
+                    });
+                } else {
+                    html += `<span style="color: #484f58; grid-column: 1 / -1;">No YARA matches</span>`;
+                }
             }
             
             if (e.event_type === 'stats') {
@@ -449,6 +503,8 @@
             document.getElementById('sections').innerHTML = '';
             document.getElementById('filterBarContainer').innerHTML = '';
             document.getElementById('filterBarContainer').style.display = 'none';
+            document.querySelectorAll('.file-info-card').forEach(c => c.remove());
+            document.querySelectorAll('.file-alerts-grid').forEach(g => g.remove());
         }
 
         function showWelcomeUI() {
@@ -501,7 +557,7 @@
                             <div style="font-size: 3rem; margin-bottom: 15px;">🔍</div>
                             <h2 style="color: #f0f6fc; font-size: 1.5rem; margin-bottom: 10px;">Welcome to OhMyPCAP</h2>
                             <p style="color: #8b949e; font-size: 0.95rem;">
-                                Analyze pcap files from the web or your local collection. View alerts and then slice and dice your network metadata!
+                                Analyze files from the web or your local collection. View alerts and then slice and dice your network metadata!
                             </p>
                         </div>
                     </div>
@@ -511,22 +567,22 @@
                                 💡 Maximum file size is 1000MB. Processing may take a minute or two depending on the size of the file.
                             </p>
                             <p style="color: #8b949e; font-size: 0.95rem; margin-top: 15px;">
-                                💡 The following pcap formats are supported: .pcap, .pcapng, .cap, or .trace. These formats are also supported inside of .zip files and password-protected .zip files using common passwords.
+                                💡 Upload PCAP files (.pcap, .pcapng, .cap, .trace) for full network traffic analysis, or any file for YARA-only scanning. ZIP files are also supported.
                             </p>
                             <p style="color: #8b949e; font-size: 0.95rem; margin-top: 15px;">
-                                💡 If you don't already have a pcap in mind, just click the Go button below and it will automatically download a pcap from <a href="https://www.malware-traffic-analysis.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">malware-traffic-analysis.net</a>. There are lots of other fun pcap files to be found at that site!
+                                💡 If you don't already have a file in mind, just click the Go button below and it will automatically download a pcap from <a href="https://www.malware-traffic-analysis.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none;">malware-traffic-analysis.net</a>. There are lots of other fun pcap files to be found at that site!
                             </p>
                         </div>
                     </div>
                     <div style="display: flex; flex-direction: column; gap: 20px; margin-bottom: 20px;">
                         <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; width: 100%; box-sizing: border-box;">
-                            <div style="color: #8b949e; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 15px; font-weight: 600;">⬇️ Import pcap from URL or local filesystem</div>
+                            <div style="color: #8b949e; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 15px; font-weight: 600;">⬇️ Import file from URL or local filesystem</div>
                             <div style="display: flex; gap: 8px; margin-bottom: 15px;">
                                 <input type="text" id="pcapUrl" value="https://www.malware-traffic-analysis.net/2026/02/03/2026-02-03-GuLoader-for-AgentTesla-style-infection-with-FTP-data-exfil.pcap.zip" onfocus="this.value=''" onkeydown="if(event.key==='Enter')loadFromUrl()" style="background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 8px 12px; border-radius: 4px; font-size: 0.95rem; flex: 1;">
                                 <button onclick="loadFromUrl()" style="background: #58a6ff; color: #0d1117; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.95rem; border: none;">Go</button>
                             </div>
                             <div style="text-align: center; color: #8b949e; font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 15px;">— OR —</div>
-                            <input type="file" id="pcapUpload" accept=".pcap,.pcapng,.cap,.trace,.zip" onchange="uploadPcap()" style="display: none;">
+                            <input type="file" id="pcapUpload" onchange="uploadPcap()" style="display: none;">
                             <div id="dropZone" style="background: #0d1117; color: #58a6ff; padding: 20px; border-radius: 4px; cursor: pointer; font-size: 0.95rem; border: 2px dashed #30363d; text-align: center; transition: border-color 0.2s, background 0.2s;"
                                  ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)"
                                  onclick="document.getElementById('pcapUpload').click()">
@@ -536,11 +592,11 @@
                         </div>
                     </div>
                     <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d;">
-                        <div style="color: #8b949e; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 15px; font-weight: 600;">📂 Previous PCAPs</div>
+                        <div style="color: #8b949e; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 15px; font-weight: 600;">📂 Previous Analyses</div>
                         <div id="previousAnalysesList">${previousHtml}</div>
                     </div>
                     <div style="background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; margin-top: 20px;">
-                        <div style="color: #8b949e; font-size: 0.9rem; margin-bottom: 10px; text-align: center;">OhMyPCAP provides basic pcap analysis. Need more advanced functionality?<br>Take a look at the <a href="https://securityonion.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion</a> platform available in a free Community Edition!<br>If you need enterprise features, consider upgrading to <a href="https://securityonion.com/pro" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion Pro</a>!</div>
+                        <div style="color: #8b949e; font-size: 0.9rem; margin-bottom: 10px; text-align: center;">OhMyPCAP provides basic analysis. Need more advanced functionality?<br>Take a look at the <a href="https://securityonion.net" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion</a> platform available in a free Community Edition!<br>If you need enterprise features, consider upgrading to <a href="https://securityonion.com/pro" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none; font-weight: 600;">Security Onion Pro</a>!</div>
                         <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
                             <thead>
                                 <tr style="border-bottom: 1px solid #30363d;">
@@ -732,21 +788,23 @@
         }
         
         const typeLabels = {
-            alert: 'Security Alerts',
+            alert: 'Network Alerts',
             anomaly: 'Anomalies',
             dns: 'DNS Queries',
+            filealerts: 'File Alerts',
             fileinfo: 'File Info',
             flow: 'Flows',
             ftp: 'FTP',
-            http: 'HTTP Connections',
+            http: 'HTTP',
             stats: 'Stats',
-            tls: 'TLS Connections'
+            tls: 'TLS'
         };
         
         const typeColors = {
             alert: '#ff6b6b',
             anomaly: '#ff9800',
             dns: '#66bb6a',
+            filealerts: '#e91e63',
             fileinfo: '#9c27b0',
             flow: '#bc8cff',
             ftp: '#00bcd4',
@@ -963,6 +1021,7 @@
             const sankeyPanel = document.getElementById('sankeyPanel');
             if (!sankeyPanel) return;
             sankeyPanel.innerHTML = '';
+
             if (!diagramMode) {
                 sankeyPanel.innerHTML = '<div class="section-toggle-bar" onclick="toggleDiagram()">▸ Sankey Diagram</div>';
                 return;
@@ -992,6 +1051,8 @@
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Pkts →', 'Pkts ←', 'Bytes →', 'Bytes ←', 'State', 'Alerted'];
                 case 'fileinfo':
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Filename'];
+                case 'filealerts':
+                    return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Rule Name', 'Classification', 'Tags'];
                 default:
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port'];
             }
@@ -1063,12 +1124,127 @@
                     colSpan = 7;
                     row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td class="mono">${escapeHtml(filename)}</td></tr>`;
                     break;
+                case 'filealerts':
+                    const fa = e.filealerts || {};
+                    const ruleName = fa.rule_name || 'N/A';
+                    const tags = (fa.tags || []).join(', ');
+                    const classification = fa.confidence || 'informational';
+                    colSpan = 9;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><span class="badge" style="background:#e91e6322;color:#ff8a8a">${escapeHtml(ruleName)}</span></td><td>${classificationBadgeHtml(classification)}</td><td>${escapeHtml(tags)}</td></tr>`;
+                    break;
                 default:
                     colSpan = 6;
                     row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td></tr>`;
             }
             
             return row + `<tr class="detail-row"><td colspan="${colSpan}"><div class="detail-content">${formatted}</div></td></tr>`;
+        }
+        
+        function buildFileInfoCard() {
+            document.querySelectorAll('.file-info-card').forEach(c => c.remove());
+            const fileinfoEvent = allEvents.find(e => e.event_type === 'fileinfo');
+            if (!fileinfoEvent || !fileinfoEvent.fileinfo) return;
+            
+            const fi = fileinfoEvent.fileinfo;
+            const card = document.createElement('div');
+            card.className = 'file-info-card';
+            card.innerHTML = `
+                <h3>📄 File Info</h3>
+                <div class="file-info-grid">
+                    <span class="label">Filename</span><span class="value">${escapeHtml(fi.filename || '')}</span>
+                    <span class="label">Size</span><span class="value">${escapeHtml(String((fi.size || 0).toLocaleString()))} bytes</span>
+                    <span class="label">Magic</span><span class="value">${escapeHtml(fi.magic || '')}</span>
+                    <span class="label">MD5</span><span class="value">${escapeHtml(fi.md5 || '')}</span>
+                    <span class="label">SHA1</span><span class="value">${escapeHtml(fi.sha1 || '')}</span>
+                    <span class="label">SHA256</span><span class="value">${escapeHtml(fi.sha256 || '')}</span>
+                </div>
+            `;
+            
+            const sections = document.getElementById('sections');
+            if (sections) {
+                sections.parentNode.insertBefore(card, sections);
+            }
+        }
+        
+        function buildFileAlertCards(events) {
+            const container = document.getElementById('sections');
+            if (!container) return;
+            
+            // Filter: show threat + technique by default
+            const showInformational = false;
+            const filteredEvents = events.filter(e => {
+                const classification = (e.filealerts || {}).confidence || 'informational';
+                return showInformational || classification !== 'informational';
+            });
+            
+            let html = '<div class="file-alerts-grid">';
+            filteredEvents.forEach(e => {
+                const fa = e.filealerts || {};
+                const classification = fa.confidence || 'informational';
+                const tags = (fa.tags || []).join(', ');
+                
+                html += `
+                    <div class="file-alert-card" onclick="showFileAlertDetail('${escapeHtml(fa.sha256 || '')}', '${escapeHtml(fa.rule_name || '')}')">
+                        <div class="rule-name">${escapeHtml(fa.rule_name || 'Unknown')}</div>
+                        <div class="card-footer">
+                            ${classificationBadgeHtml(classification)}
+                            <span class="tags">${escapeHtml(tags)}</span>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        function formatFileAlertDetail(e) {
+            const fa = e.filealerts || {};
+            const classification = fa.confidence || 'informational';
+            
+            let html = '<div style="display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; font-size: 0.9rem;">';
+            html += `<span style="color: #8b949e;">Classification</span><span>${classificationBadgeHtml(classification)}</span>`;
+            html += `<span style="color: #8b949e;">Rule</span><span><span class="badge" style="background:#e91e6322;color:#ff8a8a">${escapeHtml(fa.rule_name || '')}</span></span>`;
+            html += `<span style="color: #8b949e;">SHA256</span><span class="mono">${escapeHtml(fa.sha256 || '')}</span>`;
+            html += `<span style="color: #8b949e;">Tags</span><span>${escapeHtml((fa.tags || []).join(', '))}</span>`;
+            if (fa.meta && Object.keys(fa.meta).length > 0) {
+                const metaEntries = Object.entries(fa.meta).map(([k, v]) => `${k}: ${v}`).join(', ');
+                html += `<span style="color: #8b949e;">Metadata</span><span>${escapeHtml(metaEntries)}</span>`;
+            }
+            html += '</div>';
+            return html;
+        }
+        
+        function showFileAlertDetail(sha256, ruleName) {
+            // Find the matching event and show its detail panel
+            const event = allEvents.find(e => 
+                e.event_type === 'filealerts' && 
+                (e.filealerts?.sha256 === sha256 || e.filealerts?.rule_name === ruleName)
+            );
+            if (!event) return;
+            
+            // Create a modal-like display for the detail
+            const detailHtml = formatFileAlertDetail(event);
+            const modal = document.createElement('div');
+            modal.className = 'modal active';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <h3>YARA Match Detail</h3>
+                        <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
+                    </div>
+                    <div style="padding: 20px;">
+                        ${detailHtml}
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Close modal when clicking outside the content
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
         }
         
         function buildSection(eventType, events) {
@@ -1195,7 +1371,12 @@
             
             eventTypes.forEach(type => {
                 const total = baseEventStats[type] || 0;
-                const filtered = filteredStats ? (filteredStats[type] || 0) : (eventStats[type] || 0);
+                let filtered;
+                if (type === 'filealerts') {
+                    filtered = eventStats[type] || 0;
+                } else {
+                    filtered = filteredStats ? (filteredStats[type] || 0) : (eventStats[type] || 0);
+                }
                 stats.push({
                     id: type,
                     label: typeLabels[type] || type.toUpperCase(),
@@ -1414,6 +1595,11 @@
                 case 'State': return e.flow?.state || '';
                 case 'Alerted': return e.flow?.alerted ? 'Yes' : 'No';
                 case 'Filename': return e.fileinfo?.filename || '';
+                case 'Rule Name': return e.filealerts?.rule_name || '';
+                case 'Classification': {
+                    return getClassificationLabel(e.filealerts?.confidence || 'informational');
+                }
+                case 'Tags': return (e.filealerts?.tags || []).join(', ');
                 case 'Detail': {
                     const etype = e.event_type || '';
                     if (etype === 'alert') return e.alert?.signature || '';
@@ -1446,7 +1632,7 @@
           let hiddenAggregations = new Set();
           let baseEventStats = {};
 
-        const EVENT_TYPE_ICONS = { alert: '🔴', dns: '🟢', http: '🟠', tls: '🔵', flow: '🟣', ftp: '📁', anomaly: '⚠️', fileinfo: '📄' };
+        const EVENT_TYPE_ICONS = { alert: '🔴', dns: '🟢', http: '🟠', tls: '🔵', flow: '🟣', ftp: '📁', anomaly: '⚠️', fileinfo: '📄', filealerts: '🚨' };
         const ALL_EVENTS_COLUMNS = ['Time', 'Type', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Detail'];
         const EMPTY_FILTER_STATE_HTML = '<div style="padding: 40px; text-align: center; color: #8b949e; font-size: 0.95rem;">🔍 No events match the current filters</div>';
         const AGG_COLLAPSED_HTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▸ Aggregation Tables</div></div>';
@@ -1583,38 +1769,50 @@
             eventStats = await statsResp.json();
             baseEventStats = await baseStatsResp.json();
 
-            const types = Object.keys(baseEventStats)
-                .filter(t => t !== 'stats' && t !== 'all')
-                .sort((a, b) => {
-                    if (a === 'alert') return -1;
-                    if (b === 'alert') return 1;
-                    return a.localeCompare(b);
-                });
+            const types = sortEventTypes(Object.keys(baseEventStats).filter(t => t !== 'stats' && t !== 'all'));
             eventTypes = types;
 
             const eventsResp = await fetch('/api/events?md5=' + currentMd5 + '&limit=10000' + qParam + '&t=' + Date.now());
             allEvents = await eventsResp.json();
 
-            buildStats(computeFilteredStats());
-
-            // Remember active section before rebuild
-            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
-            const activeType = visibleSection ? visibleSection.id.replace('section-', '') : '';
-
-            document.getElementById('sections').innerHTML = '';
-            tabDataCache = {};
-            buildSections();
-
-            // Restore active section after rebuild
-            if (activeType && activeType !== eventTypes[0]) {
-                document.querySelectorAll('.section').forEach(s => s.classList.add('section-hidden'));
-                const sectionEl = document.getElementById('section-' + activeType);
-                if (sectionEl) {
-                    sectionEl.classList.remove('section-hidden');
-                    loadTabData(activeType, null);
+            const isFileOnly = !eventTypes.includes('alert');
+            
+            if (isFileOnly) {
+                document.body.classList.add('file-analysis');
+                document.querySelectorAll('.file-info-card').forEach(c => c.remove());
+                document.getElementById('sections').innerHTML = '';
+                tabDataCache = {};
+                buildFileInfoCard();
+                
+                const fileAlertsEvents = allEvents.filter(e => e.event_type === 'filealerts');
+                if (fileAlertsEvents.length > 0) {
+                    buildFileAlertCards(fileAlertsEvents);
+                } else {
+                    document.getElementById('sections').innerHTML = '<div class="no-matches">No YARA matches</div>';
                 }
-            } else if (eventTypes[0]) {
-                loadTabData(eventTypes[0], null);
+            } else {
+                document.body.classList.remove('file-analysis');
+                buildStats(computeFilteredStats());
+                
+                // Remember active section before rebuild
+                const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+                const activeType = visibleSection ? visibleSection.id.replace('section-', '') : '';
+
+                document.getElementById('sections').innerHTML = '';
+                tabDataCache = {};
+                buildSections();
+
+                // Restore active section after rebuild
+                if (activeType && activeType !== eventTypes[0]) {
+                    document.querySelectorAll('.section').forEach(s => s.classList.add('section-hidden'));
+                    const sectionEl = document.getElementById('section-' + activeType);
+                    if (sectionEl) {
+                        sectionEl.classList.remove('section-hidden');
+                        loadTabData(activeType, null);
+                    }
+                } else if (eventTypes[0]) {
+                    loadTabData(eventTypes[0], null);
+                }
             }
 
             updateFilterBarVisibility();
@@ -1659,20 +1857,14 @@
                     eventStats = await statsResp.json();
                     baseEventStats = {...eventStats};
                     
-                    const types = Object.keys(baseEventStats)
-                        .filter(t => t !== 'stats' && t !== 'all')
-                        .sort((a, b) => {
-                            // First: alert
-                            if (a === 'alert') return -1;
-                            if (b === 'alert') return 1;
-                            // Then: alphabetical (excluding 'all' which is added last)
-                            return a.localeCompare(b);
-                        });
+                    const types = sortEventTypes(Object.keys(baseEventStats).filter(t => t !== 'stats' && t !== 'all'));
                     // eventTypes should not include 'all' - it's added separately by buildStats()
                     eventTypes = types;
                     
                     const eventsResp = await fetch('/api/events?md5=' + md5 + '&limit=10000&t=' + Date.now());
                     allEvents = await eventsResp.json();
+                    
+                    eventTypes = types;
                     
                     buildStats(computeFilteredStats());
                     
@@ -1684,11 +1876,21 @@
                     // Get date range from non-stats events
                     const mainEvents = allEvents.filter(e => e.event_type !== 'stats');
                     const ts = mainEvents.map(e => e.timestamp).filter(Boolean).sort();
-                    let pcapPath = 'unknown';
-                    try {
-                        const pathResp = await fetch('/api/pcap-path?md5=' + currentMd5);
-                        if (pathResp.ok) pcapPath = await pathResp.text();
-                    } catch(e) {}
+                    const dateDisplay = ts.length > 0 && ts[0] === ts[ts.length - 1]
+                        ? ts[0].slice(0, 19)
+                        : `${ts[0]?.slice(0, 19) || ''} to ${ts[ts.length-1]?.slice(0, 19) || ''}`;
+                    
+                    const isFileOnly = !eventTypes.includes('alert');
+                    
+                    if (isFileOnly) {
+                        document.body.classList.add('file-analysis');
+                    } else {
+                        document.body.classList.remove('file-analysis');
+                    }
+                    
+                    const helpText = isFileOnly
+                        ? '<span style="color: #58a6ff;">💡</span> YARA scan results for the uploaded file. Review the File Info card for metadata and the File Alerts table for any matches found by the YARA rules.'
+                        : '<span style="color: #58a6ff;">💡</span> Start by reviewing all alerts and then you can change to one of the other data types like DNS, HTTP, or TLS. Filter using the search bar, sankey diagram, or aggregation tables. When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript and hexdump and optionally download the PCAP file for that stream.';
                     
                     document.getElementById('headerContent').innerHTML = `
                         <div style="background: #161b22; padding: 12px 20px; border-radius: 8px; border: 1px solid #30363d; flex: 1;">
@@ -1701,32 +1903,48 @@
                                     Back to Overview
                                 </a>
                                 <span style="color: #f0f6fc; font-weight: 600; white-space: nowrap;">📄 ${currentPcapName}</span>
-                                <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📁 ${pcapPath.split('/').filter(Boolean).slice(-2, -1)[0] || ''}</span>
-                                <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📅 ${ts[0]?.slice(0, 19) || ''} to ${ts[ts.length-1]?.slice(0, 19) || ''}</span>
+                                <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📁 ${currentMd5}</span>
+                                <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📅 ${dateDisplay}</span>
                             </div>
                             <div style="color: #8b949e; font-size: 0.8rem; margin-top: 8px; text-align: center;">
-                                <span style="color: #58a6ff;">💡</span> Start by reviewing security alerts and then you can change to one of the other data types like DNS, HTTP, or TLS. Filter using the search bar, sankey diagram, or aggregation tables. When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript and hexdump and optionally download the PCAP file for that stream.
+                                ${helpText}
                             </div>
                         </div>
                      `;
                     showAnalysisUI();
                     updateFilterBarVisibility();
                     
-                    buildSections();
-                    if (eventTypes[0]) loadTabData(eventTypes[0]);
-                    
-                    const sankeyPanel = document.getElementById('sankeyPanel');
-                    if (sankeyPanel) {
-                        sankeyPanel.style.display = '';
-                        updateSankeyDiagram();
-                    }
-                    
-                    const aggContainer = document.getElementById('aggregations');
-                    if (aggContainer) {
-                        if (advancedMode) {
-                            buildAggregationsSectionAll();
+                    if (isFileOnly) {
+                        // File-only analysis: render simplified UI
+                        buildFileInfoCard();
+                        document.getElementById('sections').innerHTML = '';
+                        tabDataCache = {};
+                        
+                        // Build filealerts section directly
+                        const fileAlertsEvents = allEvents.filter(e => e.event_type === 'filealerts');
+                        if (fileAlertsEvents.length > 0) {
+                            buildFileAlertCards(fileAlertsEvents);
                         } else {
-                            aggContainer.innerHTML = AGG_COLLAPSED_HTML;
+                            document.getElementById('sections').innerHTML = '<div class="no-matches">No YARA matches</div>';
+                        }
+                    } else {
+                        // PCAP analysis: full layout
+                        buildSections();
+                        if (eventTypes[0]) loadTabData(eventTypes[0]);
+                        
+                        const sankeyPanel = document.getElementById('sankeyPanel');
+                        if (sankeyPanel) {
+                            sankeyPanel.style.display = '';
+                            updateSankeyDiagram();
+                        }
+                        
+                        const aggContainer = document.getElementById('aggregations');
+                        if (aggContainer) {
+                            if (advancedMode) {
+                                buildAggregationsSectionAll();
+                            } else {
+                                aggContainer.innerHTML = AGG_COLLAPSED_HTML;
+                            }
                         }
                     }
                     
@@ -1766,7 +1984,7 @@
                 const result = await resp.json();
                 
                 if (result.status === 'processing') {
-                    showLoading('Analyzing PCAP...');
+                    showLoading('Analyzing network traffic...');
                     await checkStatus(result.md5);
                     urlInput.value = exampleUrl;
                 } else if (result.status === 'ready') {
@@ -1788,7 +2006,7 @@
             const file = droppedFile || fileInput.files[0];
             if (!file) return;
 
-            showLoading('Uploading and extracting PCAP...');
+            showLoading('Uploading file...');
 
             const formData = new FormData();
             formData.append('pcap', file);
@@ -1811,8 +2029,7 @@
                     hideLoading();
                     await loadAnalysis(result.md5);
                 } else if (result.status === 'processing') {
-                    showLoading('Analyzing PCAP...');
-                    await checkStatus(result.md5);
+                    await checkStatus(result.md5, result.phase || 'network');
                 }
             } catch(err) {
                 hideLoading();
@@ -1841,18 +2058,31 @@
             
             const files = e.dataTransfer.files;
             if (files.length > 0) {
-                const file = files[0];
-                const validExts = ['.pcap', '.pcapng', '.cap', '.trace', '.zip'];
-                const hasValidExt = validExts.some(ext => file.name.toLowerCase().endsWith(ext));
-                if (!hasValidExt) {
-                    showError('Please drop a .pcap, .pcapng, .cap, .trace, or .zip file');
-                    return;
-                }
-                uploadPcap(file);
+                uploadPcap(files[0]);
             }
         }
         
-        async function checkStatus(md5) {
+        async function checkStatus(md5, initialPhase = 'network') {
+            const phaseMessages = {
+                'network': 'Analyzing network traffic...',
+                'files': 'Analyzing files...',
+                'importing': 'Importing data...'
+            };
+            
+            const startTime = Date.now();
+            let currentPhase = initialPhase;
+            let elapsedInterval = null;
+            
+            // Show initial message immediately
+            showLoading(`${phaseMessages[currentPhase]} (0s)`);
+            
+            // Local timer updates elapsed time every 1s without hitting the server
+            elapsedInterval = setInterval(() => {
+                const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+                const msg = phaseMessages[currentPhase] || 'Analyzing file...';
+                showLoading(`${msg} (${elapsedSec}s)`);
+            }, 1000);
+            
             for (let i = 0; i < 60; i++) {
                 await new Promise(r => setTimeout(r, 2000));
                 
@@ -1864,18 +2094,31 @@
                     });
                     const result = await resp.json();
                     
+                    if (result.status === 'error') {
+                        clearInterval(elapsedInterval);
+                        hideLoading();
+                        showError(result.message || 'Analysis failed');
+                        return;
+                    }
+
                     if (result.status === 'ready') {
+                        clearInterval(elapsedInterval);
                         hideLoading();
                         await loadAnalysis(md5);
                         return;
+                    }
+                    
+                    if (result.status === 'processing') {
+                        currentPhase = result.phase || 'network';
                     }
                 } catch(err) {
                     console.error('Status check error:', err);
                 }
             }
             
+            clearInterval(elapsedInterval);
             hideLoading();
-            showError('Analysis timed out. The PCAP may be very large or Suricata may have encountered an error.');
+            showError('Analysis timed out. The file may be very large or analysis may have encountered an error.');
         }
         
         let pendingDelete = null;
