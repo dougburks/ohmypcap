@@ -1311,7 +1311,7 @@ class TestSuricataRuleRawEnabled(unittest.TestCase):
         self.assertEqual(suricata_content.count("'--set', 'outputs.1.eve-log.types.0.alert.metadata.rule.raw=true'"), 1,
                          'rule.raw must be set exactly once in spawn_suricata helper')
         # Verify spawn_suricata is defined in suricata module
-        self.assertIn('def spawn_suricata(dir_path, pcap_path, suricata_config_path=None):', suricata_content,
+        self.assertIn('def spawn_suricata(dir_path, pcap_path, suricata_config_path=None, data_dir=None):', suricata_content,
                       'spawn_suricata must be defined in suricata module')
         # Verify spawn_suricata is called from _process_uploaded_file and reanalyze
         self.assertIn('spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR', server_content,

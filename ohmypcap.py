@@ -621,7 +621,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     with open(name_path, 'w') as f:
                         f.write(pcap_filename)
 
-                    spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'))
+                    spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'), data_dir=DATA_DIR)
                     return {'status': 'processing', 'md5': md5_hash, 'phase': 'network'}
                 else:
                     # ZIP contained no PCAP — treat as standalone file archive
@@ -665,7 +665,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 f.write(dest_filename)
 
             if is_pcap_file(file_data):
-                spawn_suricata(dir_path, dest_path, os.path.join(SURICATA_DIR, 'suricata.yaml'))
+                spawn_suricata(dir_path, dest_path, os.path.join(SURICATA_DIR, 'suricata.yaml'), data_dir=DATA_DIR)
                 phase = 'network'
             else:
                 self._analyze_standalone_file(dir_path, dest_path, dest_filename)
@@ -910,7 +910,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 except OSError:
                     pass
 
-            if spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml')):
+            if spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'), data_dir=DATA_DIR):
                 self._send_json({'status': 'processing', 'md5': md5, 'phase': 'network'})
             else:
                 self._send_error(409, 'Analysis already in progress')

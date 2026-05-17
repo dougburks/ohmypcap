@@ -115,14 +115,15 @@ def setup_suricata_config(data_dir=None):
         print("Warning: no baked-in rules found and no internet access — Suricata may not have rules to use")
 
 
-def spawn_suricata(dir_path, pcap_path, suricata_config_path=None):
+def spawn_suricata(dir_path, pcap_path, suricata_config_path=None, data_dir=None):
     """Spawn Suricata in the background to analyze a PCAP.
 
     Returns True if a new Suricata process was started.
     Returns False if analysis is already in progress (lock exists).
     """
-    if suricata_config_path is None:
+    if data_dir is None:
         data_dir = os.path.expanduser('~/ohmypcap-data')
+    if suricata_config_path is None:
         suricata_config_path = os.path.join(data_dir, 'suricata', 'suricata.yaml')
 
     phase_file = os.path.join(dir_path, '.phase')
@@ -135,7 +136,7 @@ def spawn_suricata(dir_path, pcap_path, suricata_config_path=None):
         # Phase 2: Run YARA scan on extracted files
         _set_phase(dir_path, 'files')
         try:
-            run_yara_pipeline(dir_path)
+            run_yara_pipeline(dir_path, data_dir=data_dir)
         except Exception as e:
             _set_error(dir_path, f'YARA scan failed: {e}')
         # Phase 3: Build SQLite database

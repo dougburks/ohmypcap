@@ -150,19 +150,23 @@ def setup_yara_rules(data_dir=None):
 
     # Already downloaded/cached with at least one index present
     if os.path.isfile(neo_index) or os.path.isfile(yara_index):
+        print('YARA rules already present — using cached rules')
         return rules_dir
 
     # Baked-in rules (Docker image)
     if os.path.isdir(BAKED_IN_YARA_DIR):
+        print('Copying baked-in YARA rules...')
         try:
             shutil.copytree(BAKED_IN_YARA_DIR, rules_dir, dirs_exist_ok=True)
             neo_index = os.path.join(rules_dir, NEO23X0_INDEX)
             yara_index = os.path.join(rules_dir, YARA_RULES_SUBDIR, 'index.yar')
             if os.path.isfile(neo_index) or os.path.isfile(yara_index):
+                print('Baked-in YARA rules ready')
                 return rules_dir
             # Generate neo23x0 index if missing (e.g., older baked image)
             _generate_neo23x0_index(rules_dir)
             if os.path.isfile(neo_index) or os.path.isfile(yara_index):
+                print('Baked-in YARA rules ready')
                 return rules_dir
         except OSError as e:
             print(f'Warning: could not copy baked-in YARA rules: {e}')
@@ -174,6 +178,7 @@ def setup_yara_rules(data_dir=None):
             _download_neo23x0_rules(rules_dir)
             _clone_yara_rules(rules_dir)
             _generate_neo23x0_index(rules_dir)
+            print('YARA rules downloaded successfully')
             return rules_dir
         except (OSError, urllib.error.URLError) as e:
             print(f'Warning: could not download YARA rules: {e}')
@@ -453,16 +458,19 @@ def run_yara_pipeline(dir_path, data_dir=None):
     Returns False if YARA is unavailable or rules could not be obtained.
     """
     if not check_yara_executable():
+        print('YARA not available — skipping file scan')
         return False
 
     if data_dir is None:
         data_dir = os.path.expanduser('~/ohmypcap-data')
     rules_dir = os.path.join(data_dir, 'yara-rules')
     if not os.path.isdir(rules_dir):
+        print(f'YARA rules directory not found: {rules_dir}')
         return False
 
     filestore_dir = os.path.join(dir_path, 'filestore')
     if not os.path.isdir(filestore_dir):
+        print('No extracted files to scan (filestore empty)')
         return False
 
     matches = run_yara_scan(filestore_dir, rules_dir)
