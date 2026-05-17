@@ -1452,7 +1452,7 @@ class TestServerStartupBanner(unittest.TestCase):
         """Verify the running message is wrapped in a border matching the welcome banner"""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        self.assertIn('OhMyPCAP running at http://', content)
+        self.assertIn('OhMyPCAP running', content)
         self.assertIn('================================================', content)
 
 

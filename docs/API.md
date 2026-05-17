@@ -16,7 +16,7 @@ Redirects to `/ohmypcap.html`.
 
 Returns the running OhMyPCAP version.
 
-**Response:** `{"version": "2.1.0"}`
+**Response:** `{"version": "3.0.0"}`
 
 ---
 
@@ -29,7 +29,7 @@ Returns event data from Suricata's eve.json (via SQLite index or direct JSON par
 | Parameter | Required | Default | Description |
 |---|---|---|---|
 | `md5` | No | current session | MD5 hash of a historical analysis |
-| `type` | No | all | Filter by event type (`alert`, `dns`, `http`, `tls`, `flow`, `ftp`, `anomaly`, `fileinfo`) |
+| `type` | No | all | Filter by event type (`alert`, `dns`, `http`, `tls`, `flow`, `ftp`, `anomaly`, `fileinfo`, `filealerts`) |
 | `q` | No | none | Full-text search query (searches all event JSON). Multiple `q` params AND together. |
 | `offset` | No | `0` | Pagination offset |
 | `limit` | No | `1000` | Max events to return (capped at 5000) |
@@ -144,7 +144,7 @@ Extracts per-packet hex dumps from a TCP/UDP stream using `tcpdump -X`. Truncate
 
 Lists all previously-analyzed files.
 
-**Response:** Array of `{"md5": "<hash>", "pcap": "<display name>"}` sorted alphabetically by name.
+**Response:** Array of `{"md5": "<hash>", "name": "<display name>"}` sorted alphabetically by name.
 
 ---
 
@@ -160,7 +160,7 @@ Loads a historical analysis by MD5, setting it as the current session.
 
 **Response:**
 ```json
-{"success": true, "md5": "<hash>", "pcap_name": "<filename>"}
+{"success": true, "md5": "<hash>", "file_name": "<filename>"}
 ```
 
 **Errors:** `400` if MD5 is invalid or path is unsafe. `404` if analysis not found. `400` if eve.json exceeds size limit.

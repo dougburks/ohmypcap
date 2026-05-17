@@ -80,7 +80,7 @@ Never use `JSON.stringify()` inside `onclick` attributes — it produces double-
 python3 -m unittest discover tests -v
 ```
 
-All 431 tests must pass. The filtering-related tests are in:
+All tests must pass. The filtering-related tests are in:
 - `TestFilterOnclickQuoting` (6 tests)
 - `TestAdvancedModeFilterBar` (14 tests)
 - `TestSearchUI` (22 tests)

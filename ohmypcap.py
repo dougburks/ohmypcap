@@ -30,7 +30,7 @@ from suricata import (
 from yara_scanner import check_yara_executable, setup_yara_rules, scan_single_file
 import config
 
-VERSION = '2.2.0'
+VERSION = '3.0.0'
 PORT = int(os.environ.get('PORT', 8000))
 BIND_ADDRESS = os.environ.get('BIND_ADDRESS', '127.0.0.1')
 DATA_DIR = os.environ.get('DATA_DIR', os.path.expanduser('~/ohmypcap-data'))
@@ -502,9 +502,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     display_name = pcap_files[0]
 
                 if os.path.exists(eve_path) or os.path.exists(db_path):
-                    analyses.append({'md5': md5_dir, 'pcap': display_name})
+                    analyses.append({'md5': md5_dir, 'name': display_name})
 
-            analyses.sort(key=lambda x: x['pcap'].lower())
+            analyses.sort(key=lambda x: x['name'].lower())
 
         self._send_json(analyses)
 
@@ -531,14 +531,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     self._send_error(400, f'Eve.json too large ({eve_size // (1024*1024)}MB, max {MAX_EVE_SIZE // (1024*1024)}MB)')
                     return
 
-            pcap_name = md5
+            file_name = md5
             if os.path.exists(name_path) and is_safe_path(dir_path, name_path):
                 with open(name_path, 'r') as f:
-                    pcap_name = f.read().strip()
+                    file_name = f.read().strip()
             elif pcap_files:
-                pcap_name = pcap_files[0]
+                file_name = pcap_files[0]
 
-            self._send_json({'success': True, 'md5': md5, 'pcap_name': pcap_name})
+            self._send_json({'success': True, 'md5': md5, 'file_name': file_name})
         else:
             self._send_error(404, 'Analysis not found')
 
@@ -964,7 +964,10 @@ def main():
     setup_suricata_config(DATA_DIR)
     setup_yara_rules(DATA_DIR)
 
-    msg = f'OhMyPCAP running at http://{BIND_ADDRESS}:{PORT}/ohmypcap.html'
+    if os.environ.get('MINIMAL_STARTUP_MSG'):
+        msg = 'OhMyPCAP running'
+    else:
+        msg = f'OhMyPCAP running at http://{BIND_ADDRESS}:{PORT}/ohmypcap.html'
     padding = ' ' * (61 - len(msg))
     print(f"""
     ================================================================

@@ -589,9 +589,9 @@
                 if (analyses.length > 0) {
                     previousHtml = analyses.map(a => 
                         `<div style="display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid #30363d;">
-                            <a href="?file=${a.md5}" onclick="event.preventDefault(); loadAnalysis('${a.md5}');" style="color: #58a6ff; text-decoration: none; flex: 1;">📁 ${a.pcap}</a>
-                            <button onclick="openReanalyzeModal('${a.md5}', '${a.pcap}')" style="background: #30363d; border: none; color: #58a6ff; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px; margin-right: 4px;" title="Re-analyze">🔄</button>
-                            <button onclick="openDeleteAnalysis('${a.md5}', '${a.pcap}')" style="background: #30363d; border: none; color: #ff6b6b; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px;" title="Delete">🗑️</button>
+                            <a href="?file=${a.md5}" onclick="event.preventDefault(); loadAnalysis('${a.md5}');" style="color: #58a6ff; text-decoration: none; flex: 1;">📁 ${a.name}</a>
+                            <button onclick="openReanalyzeModal('${a.md5}', '${a.name}')" style="background: #30363d; border: none; color: #58a6ff; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px; margin-right: 4px;" title="Re-analyze">🔄</button>
+                            <button onclick="openDeleteAnalysis('${a.md5}', '${a.name}')" style="background: #30363d; border: none; color: #ff6b6b; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px;" title="Delete">🗑️</button>
                         </div>`
                     ).join('');
                 } else {
@@ -1870,7 +1870,7 @@
                 
                 if (result.success) {
                     currentMd5 = md5;
-                    currentFileName = result.pcap_name || md5;
+                    currentFileName = result.file_name || md5;
                     document.title = 'OhMyPCAP - ' + currentFileName;
                     const urlParams = new URLSearchParams(window.location.search);
                     urlParams.set('file', md5);

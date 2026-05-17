@@ -233,7 +233,7 @@ Then open http://localhost:8000/ohmypcap.html in your browser.
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATA_DIR` | `~/ohmypcap-data` | Directory for analyzed PCAPs and Suricata config |
+| `DATA_DIR` | `~/ohmypcap-data` | Directory for analyzed files and Suricata config |
 | `BIND_ADDRESS` | `127.0.0.1` | Address to bind the HTTP server to |
 | `PORT` | `8000` | HTTP server port |
 

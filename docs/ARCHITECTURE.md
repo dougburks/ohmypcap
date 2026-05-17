@@ -145,7 +145,7 @@ let allEvents = [];          // Loaded for "All Events" tab
 let sections = {};           // events per event type
 let eventTypes = [];         // available types for current analysis
 let currentMd5 = '';         // current analysis MD5
-let currentPcapName = '';    // display name
+let currentFileName = '';    // display name
 let currentFilters = {};     // {columnName: value} — global, flat
 let currentSearch = [];      // server-side full-text search terms (array)
 let baseEventStats = {};     // unfiltered totals for stats card denominator
@@ -194,9 +194,10 @@ See [FILTERING.md](FILTERING.md) for full details.
 
 ## Testing
 
-Two test files serve as executable specifications:
+Three test files serve as executable specifications:
 
 - **test_server.py** — Server-side: validation, security, API endpoints, SQLite, Suricata config
 - **test_ui.py** — UI-side: HTML structure, CSS, JS functions, syntax, filtering, accessibility, performance
+- **test_db.py** — Database: SQLite schema, bulk loading, query functions
 
 Tests are static analysis (string matching in source files) plus live server integration tests. No headless browser tests.
