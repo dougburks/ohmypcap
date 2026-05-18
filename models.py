@@ -32,3 +32,7 @@ def get_protocol(event):
 
 def get_app_proto(event):
     return event.get('app_proto', '')
+
+
+def get_fileinfo_sha256(event):
+    return event.get('fileinfo', {}).get('sha256', '')

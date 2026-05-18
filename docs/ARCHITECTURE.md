@@ -7,7 +7,8 @@ OhMyPCAP is a two-component application:
 ```
 Browser ──HTTP──▶ ohmypcap.py (Python HTTP server, port 8000)
                       │
-                      ├──▶ Suricata (subprocess, analyzes PCAP → eve.json)
+                      ├──▶ Suricata (subprocess, analyzes PCAPs → eve.json)
+                      ├──▶ YARA (scans non-PCAP files → yara_matches.json)
                       ├──▶ SQLite (indexes eve.json → events.db)
                        ├──▶ tcpdump (carves individual streams & hexdumps)
                        └──▶ tshark (extracts ASCII transcripts)
@@ -23,17 +24,19 @@ A stdlib-only Python HTTP server (`http.server.SimpleHTTPRequestHandler`). Handl
 
 | File | Responsibility |
 |---|---|
-| `ohmypcap.py` | HTTP request dispatch, stream carving, ZIP extraction helper |
+| `ohmypcap.py` | HTTP request dispatch, stream carving, ZIP extraction, upload/load-url orchestration |
 | `db.py` | SQLite schema, bulk loading, FTS5 full-text search, query functions |
 | `models.py` | Suricata event field extraction helpers (IP, port, protocol) |
 | `validators.py` | Input validation: IP, port, filename, path safety, URL safety, ZIP slip, PCAP magic bytes |
 | `suricata.py` | Suricata orchestration: executable checks, rules download/config, background spawn |
+| `yara_scanner.py` | YARA scanning: executable checks, rules download/setup, scanning extracted files, parsing output |
+| `config.py` | Centralized application constants: size limits, timeouts, thresholds |
 
 ### Request Flow
 
-1. **Upload/URL load** → validates input → saves PCAP → spawns Suricata subprocess → returns `processing`
-2. **Client polls** `/api/check-status` until Suricata finishes
-3. **Suricata callback** (background thread) → indexes eve.json into SQLite
+1. **Upload/URL load** → validates input → saves file → spawns Suricata (PCAPs) or YARA (non-PCAPs) → returns `processing`
+2. **Client polls** `/api/check-status` until analysis finishes
+3. **Analysis callback** (background thread) → indexes results into SQLite
 4. **Client loads analysis** → UI fetches events via `/api/events`
 5. **User interacts** → stream carving (`tcpdump`), ASCII extraction (`tshark`), hexdump (`tcpdump -X`), filtering (client-side)
 
@@ -47,10 +50,12 @@ A stdlib-only Python HTTP server (`http.server.SimpleHTTPRequestHandler`). Handl
       suricata.rules       # Downloaded by suricata-update (online) or copied from baked-in image (offline/air-gapped)
     disable.conf
   <md5>/
-    <filename>.pcap        # Original PCAP
+    <filename>             # Original uploaded file
     eve.json               # Suricata JSON output (newline-delimited)
     events.db              # SQLite index (auto-created after analysis)
     name.txt               # Human-readable display name
+    filestore/             # Extracted files from Suricata file-store
+    yara_matches.json      # YARA scan results (auto-created after analysis)
 ```
 
 ### SQLite Schema
@@ -100,6 +105,7 @@ The `json_data` column stores the complete original event, allowing the server t
 | `ftp` | FTP commands | `ftp.command` |
 | `anomaly` | Protocol anomalies | `anomaly.message` |
 | `fileinfo` | File transfers | `fileinfo.filename`, `fileinfo.filetype` |
+| `filealerts` | YARA matches on extracted files | `rule_name`, `sha256`, `tags` |
 | `stats` | Suricata internal stats | (excluded from display) |
 
 ## UI
@@ -117,11 +123,11 @@ Three files under `static/`:
 ### UI States
 
 ```
-Welcome Screen (no PCAP loaded)
+Welcome Screen (no analysis loaded)
   ├── URL input + file upload
   └── Previous analyses list
 
-Analysis View (PCAP loaded)
+Analysis View (analysis loaded)
   ├── Header (back button, name, path, date range)
   ├── Visualizations bar (Diagram toggle, Aggregation toggle)
   ├── Filter Bar (active search and filters as removable chips)
@@ -137,9 +143,9 @@ Analysis View (PCAP loaded)
 ```js
 let allEvents = [];          // Loaded for "All Events" tab
 let sections = {};           // events per event type
-let eventTypes = [];         // available types for current PCAP
+let eventTypes = [];         // available types for current analysis
 let currentMd5 = '';         // current analysis MD5
-let currentPcapName = '';    // display name
+let currentFileName = '';    // display name
 let currentFilters = {};     // {columnName: value} — global, flat
 let currentSearch = [];      // server-side full-text search terms (array)
 let baseEventStats = {};     // unfiltered totals for stats card denominator
@@ -181,16 +187,17 @@ See [FILTERING.md](FILTERING.md) for full details.
 - **Network:** Binds to `127.0.0.1` only
 - **Input validation:** All user inputs (IP, port, MD5, URL, filename) validated before use in subprocess calls or filesystem operations
 - **Path safety:** `is_safe_path()` prevents directory traversal via `os.path.realpath()` comparison
-- **Content validation:** PCAP magic bytes checked on upload
+- **Content validation:** File type detected by magic bytes (PCAPs get Suricata; non-PCAPs get YARA)
 - **URL safety:** Blocks localhost, private IPs, link-local; resolves hostname to verify resolved IP
 - **Zip-slip:** Validates every extracted path stays within target directory
 - **Error handling:** Generic "Internal server error" — no stack traces or internal paths leaked
 
 ## Testing
 
-Two test files serve as executable specifications:
+Three test files serve as executable specifications:
 
 - **test_server.py** — Server-side: validation, security, API endpoints, SQLite, Suricata config
 - **test_ui.py** — UI-side: HTML structure, CSS, JS functions, syntax, filtering, accessibility, performance
+- **test_db.py** — Database: SQLite schema, bulk loading, query functions
 
 Tests are static analysis (string matching in source files) plus live server integration tests. No headless browser tests.

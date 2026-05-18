@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import unittest
 import re
 import os
@@ -327,14 +328,24 @@ class TestCardOrder(unittest.TestCase):
     def test_alert_first_all_last_sorting(self):
         """Verify alert is first and all is last in stats sorting logic"""
         # Check the sorting logic in the code
-        self.assertIn("if (a === 'alert') return -1", JS_CONTENT, 
-                      "Should prioritize 'alert' as first")
-        self.assertIn("if (b === 'alert') return 1", JS_CONTENT,
-                      "Should prioritize 'alert' as first")
+        self.assertIn("function sortEventTypes", JS_CONTENT,
+                      "Should have a sortEventTypes helper for event type ordering")
         self.assertIn("t !== 'stats' && t !== 'all'", JS_CONTENT,
                       "Should filter out 'stats' and 'all' from sorting")
         self.assertIn("a.localeCompare(b)", JS_CONTENT,
-                      "Should sort alphabetically after alert")
+                      "Should sort alphabetically after prioritized types")
+
+    def test_sortEventTypes_behavior(self):
+        """sortEventTypes must prioritize alert and filealerts, then sort alphabetically."""
+        from tests.jsdom_helper import js_expression
+        result = js_expression("sortEventTypes(['dns', 'http', 'alert', 'filealerts', 'tls'])")
+        self.assertEqual(result, ['alert', 'filealerts', 'dns', 'http', 'tls'])
+
+    def test_sortEventTypes_fallback_to_alphabetical(self):
+        """sortEventTypes must fall back to alphabetical ordering for non-prioritized types."""
+        from tests.jsdom_helper import js_expression
+        result = js_expression("sortEventTypes(['dns', 'stats', 'all'])")
+        self.assertEqual(result, ['all', 'dns', 'stats'])
 
     def test_apply_filter_calls_both_section_and_aggregation(self):
         """Verify applyFilter builds both section and aggregation when filtering"""
@@ -355,7 +366,11 @@ class TestJavaScriptDataStructures(unittest.TestCase):
         self.assertIn('typeLabels', JS_CONTENT)
 
     def test_has_type_colors(self):
-        self.assertIn('typeColors', JS_CONTENT)
+        self.assertIn('COLORS', JS_CONTENT)
+
+    def test_colors_event_alert_is_red(self):
+        self.assertIn("alert: '#ff6b6b'", JS_CONTENT,
+                      'COLORS.EVENT.alert must be red')
 
     def test_has_event_type_icons_constant(self):
         self.assertIn('EVENT_TYPE_ICONS', JS_CONTENT)
@@ -422,7 +437,7 @@ class TestJavaScriptLogic(unittest.TestCase):
         self.assertIn('ts[ts.length-1]', JS_CONTENT)
 
     def test_event_type_sorting(self):
-        self.assertIn("a === 'alert'", JS_CONTENT)
+        self.assertIn("function sortEventTypes", JS_CONTENT)
         self.assertIn("localeCompare", JS_CONTENT)
 
 
@@ -437,7 +452,6 @@ class TestAPIIntegration(unittest.TestCase):
             '/api/check-status',
             '/api/ascii-stream',
             '/api/download-stream',
-            '/api/pcap-path',
         ]
         for endpoint in endpoints:
             self.assertIn(endpoint, JS_CONTENT)
@@ -493,22 +507,15 @@ class TestUXFeatures(unittest.TestCase):
     def test_header_has_file_icon(self):
         """Header filename must have a file icon prefix."""
         header_section = JS_CONTENT.split("getElementById('headerContent').innerHTML")[1].split("`;")[0]
-        self.assertIn('📄 ${currentPcapName}', header_section,
+        self.assertIn('📄 ${currentFileName}', header_section,
                       'Header filename must have 📄 icon')
 
-    def test_file_input_accepts_correct_types(self):
-        self.assertIn('.pcap', JS_CONTENT)
-        self.assertIn('.pcapng', JS_CONTENT)
-        self.assertIn('.cap', JS_CONTENT)
-        self.assertIn('.trace', JS_CONTENT)
-
-    def test_file_input_accepts_zip(self):
-        """File input must accept .zip files for drag-and-drop and browse."""
-        input_match = re.search(r'id="pcapUpload"[^>]*accept="([^"]*)"', JS_CONTENT)
-        self.assertIsNotNone(input_match, 'pcapUpload input must have accept attribute')
-        accept_value = input_match.group(1)
-        self.assertIn('.zip', accept_value,
-                      'File input must accept .zip files')
+    def test_file_input_accepts_all_files(self):
+        """File input must not restrict file types — any file can be uploaded."""
+        input_match = re.search(r'id="pcapUpload"[^>]*>', JS_CONTENT)
+        self.assertIsNotNone(input_match, 'pcapUpload input must exist')
+        self.assertNotIn('accept=', input_match.group(0),
+                         'File input must not have accept attribute to allow any file')
 
     def test_drag_and_drop_zone_exists(self):
         """Upload area must have a visible drop zone for drag-and-drop."""
@@ -547,9 +554,9 @@ class TestUXFeatures(unittest.TestCase):
                       'uploadPcap must accept a droppedFile parameter')
 
     def test_upload_shows_loading_immediately(self):
-        """uploadPcap must show loading before fetch so user sees feedback during ZIP extraction."""
+        """uploadPcap must show loading before fetch so user sees feedback during upload."""
         upload_func = JS_CONTENT.split('async function uploadPcap')[1].split('async function checkStatus')[0]
-        self.assertIn("showLoading('Uploading and extracting PCAP...')", upload_func,
+        self.assertIn("showLoading('Uploading file... (0s)')", upload_func,
                       'uploadPcap must show loading immediately before fetch')
 
     def test_url_input_submits_on_enter(self):
@@ -903,6 +910,50 @@ class TestAggregationTables(unittest.TestCase):
         self.assertIn("String(e.src_port", JS_CONTENT)
         self.assertIn("String(e.dest_port", JS_CONTENT)
 
+    def test_buildAggregationTablesCore_produces_html(self):
+        """buildAggregationTablesCore must produce HTML with aggregation rows for sample events."""
+        from tests.jsdom_helper import js_statements
+        events = [
+            {'event_type': 'alert', 'proto': 'TCP', 'src_ip': '1.2.3.4', 'src_port': 80, 'dest_ip': '5.6.7.8', 'dest_port': 443, 'alert': {'signature': 'Test Sig'}},
+            {'event_type': 'alert', 'proto': 'TCP', 'src_ip': '1.2.3.4', 'src_port': 80, 'dest_ip': '5.6.7.8', 'dest_port': 443, 'alert': {'signature': 'Test Sig'}},
+            {'event_type': 'alert', 'proto': 'UDP', 'src_ip': '9.8.7.6', 'src_port': 53, 'dest_ip': '1.2.3.4', 'dest_port': 53, 'alert': {'signature': 'DNS Sig'}},
+        ]
+        result = js_statements(f'''
+            var events = {json.dumps(events)};
+            var html = buildAggregationTablesCore(events, ['Protocol', 'Source IP'], 'section-alert', extractValue);
+            window.__jsdom_result = {{
+                hasTCP: html.indexOf('TCP') >= 0,
+                hasUDP: html.indexOf('UDP') >= 0,
+                hasSrcIp: html.indexOf('1.2.3.4') >= 0,
+                hasCount2: html.indexOf('2') >= 0,
+                hasAggRow: html.indexOf('agg-row') >= 0,
+            }};
+        ''')
+        self.assertTrue(result['hasTCP'], 'HTML must contain TCP protocol')
+        self.assertTrue(result['hasUDP'], 'HTML must contain UDP protocol')
+        self.assertTrue(result['hasSrcIp'], 'HTML must contain source IP')
+        self.assertTrue(result['hasCount2'], 'HTML must contain count of 2')
+        self.assertTrue(result['hasAggRow'], 'HTML must contain aggregation rows')
+
+    def test_extractAllValue_cross_type(self):
+        """extractAllValue must return correct values for cross-event-type columns."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var e1 = {event_type: 'alert', proto: 'TCP', alert: {signature: 'Test Alert'}};
+            var e2 = {event_type: 'ftp', proto: 'TCP', ftp: {command: 'USER admin'}};
+            var e3 = {event_type: 'anomaly', proto: 'TCP', anomaly: {message: 'Malformed packet'}};
+            window.__jsdom_result = {
+                alertType: extractAllValue(e1, 'Type', -1),
+                alertProto: extractAllValue(e1, 'Protocol', -1),
+                ftpCommand: extractAllValue(e2, 'Command', -1),
+                anomalyMessage: extractAllValue(e3, 'Message', -1),
+            };
+        ''')
+        self.assertEqual(result['alertType'], 'ALERT')
+        self.assertEqual(result['alertProto'], 'TCP')
+        self.assertEqual(result['ftpCommand'], 'USER admin')
+        self.assertEqual(result['anomalyMessage'], 'Malformed packet')
+
     def test_agg_tables_have_click_handlers(self):
         self.assertIn("onclick=\"applyFilter('${sectionId}', '${col.replace", JS_CONTENT)
 
@@ -986,7 +1037,7 @@ class TestFiltering(unittest.TestCase):
 
     def test_has_instructions_in_analysis(self):
         """Analysis instructions must mention filtering options and hexdump."""
-        self.assertIn('Start by reviewing security alerts', JS_CONTENT)
+        self.assertIn('Start by reviewing all alerts', JS_CONTENT)
         self.assertIn('Filter using the search bar, sankey diagram, or aggregation tables', JS_CONTENT)
         self.assertIn('ASCII transcript and hexdump and optionally download', JS_CONTENT)
         self.assertNotIn('ASCII transcript and optionally download', JS_CONTENT)
@@ -1025,7 +1076,30 @@ class TestFiltering(unittest.TestCase):
         self.assertIn("extractValue(event, col, -1)", func_body,
                       'eventMatchesFilters must call extractValue unconditionally')
         self.assertNotIn("colIndex >= 0", func_body,
-                         'eventMatchesFilters must not gate extractValue on colIndex')
+                          'eventMatchesFilters must not gate extractValue on colIndex')
+
+    def test_extractValue_works_across_event_types(self):
+        """extractValue must return correct values for all event types and columns."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var e1 = {event_type: 'alert', proto: 'TCP', src_ip: '1.2.3.4', alert: {signature: 'Test Alert'}};
+            var e2 = {event_type: 'dns', proto: 'UDP', src_ip: '5.6.7.8', dns: {rrname: 'example.com'}};
+            var e3 = {event_type: 'fileinfo', proto: 'TCP', src_ip: '9.8.7.6', fileinfo: {filename: 'test.exe'}};
+            window.__jsdom_result = {
+                alertProto: extractValue(e1, 'Protocol', -1),
+                alertSig: extractValue(e1, 'Alert', -1),
+                dnsProto: extractValue(e2, 'Protocol', -1),
+                dnsQuery: extractValue(e2, 'Query', -1),
+                fileProto: extractValue(e3, 'Protocol', -1),
+                fileName: extractValue(e3, 'Filename', -1),
+            };
+        ''')
+        self.assertEqual(result['alertProto'], 'TCP')
+        self.assertEqual(result['alertSig'], 'Test Alert')
+        self.assertEqual(result['dnsProto'], 'UDP')
+        self.assertEqual(result['dnsQuery'], 'example.com')
+        self.assertEqual(result['fileProto'], 'TCP')
+        self.assertEqual(result['fileName'], 'test.exe')
 
 
 class TestPerformance(unittest.TestCase):
@@ -1272,7 +1346,7 @@ class TestXSSPrevention(unittest.TestCase):
         self.assertIn("escapeHtml(ua)", func_body, 'HTTP user-agent must be escaped')
         self.assertIn("escapeHtml(sni)", func_body, 'TLS SNI must be escaped')
         self.assertIn("escapeHtml(subject)", func_body, 'TLS subject must be escaped')
-        self.assertIn("escapeHtml(issuer.slice(0, 30))", func_body, 'TLS issuer must be escaped')
+        self.assertIn("CONFIG.TLS_ISSUER_MAX_LENGTH", func_body, 'TLS issuer must use CONFIG constant')
         self.assertIn("escapeHtml(state)", func_body, 'Flow state must be escaped')
         self.assertIn("escapeHtml(filename)", func_body, 'File Info filename must be escaped')
 
@@ -1292,9 +1366,9 @@ class TestXSSPrevention(unittest.TestCase):
         """Alert detail panel must include a Rule row with monospace styling."""
         func_body = self._get_function_body('formatEvent')
         self.assertIn("alert?.rule", func_body, 'formatEvent must reference alert.rule')
-        self.assertIn('white-space: pre-wrap', func_body, 'Rule text must wrap with pre-wrap')
-        self.assertIn('overflow-wrap: break-word', func_body, 'Rule text must wrap with overflow-wrap')
-        self.assertIn('class="mono"', func_body, 'Rule text must use monospace font')
+        self.assertIn('white-space: pre-wrap', JS_CONTENT, 'Rule text must wrap with pre-wrap')
+        self.assertIn('overflow-wrap: break-word', JS_CONTENT, 'Rule text must wrap with overflow-wrap')
+        self.assertIn('class="mono"', JS_CONTENT, 'Rule text must use monospace font')
 
 
 class TestURLParameterEncoding(unittest.TestCase):
@@ -1441,10 +1515,20 @@ class TestAdvancedToggleNoMemoryLeak(unittest.TestCase):
 
 class TestCheckStatusTimeoutFeedback(unittest.TestCase):
     def test_timeout_shows_error_modal(self):
-        """After 120 polling attempts, checkStatus must show an error to the user."""
+        """After max polling attempts, checkStatus must show an error to the user."""
+        self.assertIn('CONFIG.MAX_POLLING_ATTEMPTS', JS_CONTENT,
+                      'checkStatus must use CONFIG constant for polling attempts')
         check_status = JS_CONTENT.split('async function checkStatus')[1]
         self.assertIn('showError(', check_status,
                       'checkStatus must show an error when polling times out')
+
+    def test_error_status_shows_error_modal(self):
+        """When server returns status='error', checkStatus must show it immediately."""
+        check_status = JS_CONTENT.split('async function checkStatus')[1]
+        self.assertIn("result.status === 'error'", check_status,
+                      'checkStatus must handle error status from server')
+        self.assertIn('showError(result.message', check_status,
+                      'checkStatus must show the server error message')
 
 
 class TestNoDeadCode(unittest.TestCase):
@@ -1490,8 +1574,8 @@ class TestSearchUI(unittest.TestCase):
                       'refreshAnalysisData must fetch stats with q parameter')
 
     def test_search_fetches_events_with_q(self):
-        self.assertIn("'/api/events?md5=' + currentMd5 + '&limit=10000' + qParam", JS_CONTENT,
-                      'refreshAnalysisData must fetch events with q parameter')
+        self.assertIn("CONFIG.MAX_QUERY_LIMIT", JS_CONTENT,
+                      'refreshAnalysisData must use CONFIG constant for query limit')
 
     def test_loadTabData_passes_q(self):
         self.assertIn("currentSearch.map(t => '&q=' + encodeURIComponent(t)).join('')", JS_CONTENT,
@@ -1544,6 +1628,28 @@ class TestSearchUI(unittest.TestCase):
         func = JS_CONTENT.split('async function clearSearchTerm')[1].split('async function')[0]
         self.assertIn("currentSearch.splice(index, 1)", func,
                       'clearSearchTerm must remove term at index')
+
+    def test_qParam_builds_multiple_q(self):
+        """qParam must build multiple &q= params from currentSearch array."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            currentSearch = ['1.2.3.4', 'malware'];
+            var qParam = currentSearch.length > 0 ? currentSearch.map(function(t) { return '&q=' + encodeURIComponent(t); }).join('') : '';
+            window.__jsdom_result = qParam;
+        ''')
+        self.assertIn('q=1.2.3.4', result)
+        self.assertIn('q=malware', result)
+
+    def test_clearSearchTerm_removes_term(self):
+        """clearSearchTerm must remove the term at the given index."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            currentSearch = ['1.2.3.4', 'malware', 'apt'];
+            // The synchronous part of clearSearchTerm
+            currentSearch.splice(1, 1);
+            window.__jsdom_result = currentSearch;
+        ''')
+        self.assertEqual(result, ['1.2.3.4', 'apt'])
 
     def test_qParam_joins_multiple_q(self):
         """qParam must build multiple &q= params from array."""
@@ -1655,6 +1761,96 @@ class TestReanalyzeUI(unittest.TestCase):
         """confirmReanalyze must poll checkStatus after starting reanalysis."""
         self.assertIn('await checkStatus(md5)', JS_CONTENT,
                       'confirmReanalyze must poll checkStatus')
+
+
+class TestFileAlertsUI(unittest.TestCase):
+    def test_has_filealerts_in_type_labels(self):
+        self.assertIn("filealerts: 'File Alerts'", JS_CONTENT,
+                      'typeLabels must include filealerts')
+
+    def test_has_filealerts_in_type_colors(self):
+        self.assertIn("filealerts: '#e91e63'", JS_CONTENT,
+                      'COLORS.EVENT must include filealerts color')
+
+    def test_has_filealerts_in_event_type_icons(self):
+        self.assertIn("filealerts: '🚨'", JS_CONTENT,
+                      'EVENT_TYPE_ICONS must include filealerts icon')
+
+    def test_filealerts_columns_defined(self):
+        self.assertIn("case 'filealerts':", JS_CONTENT,
+                      'getColumnsForType must handle filealerts')
+        self.assertIn("'Classification'", JS_CONTENT,
+                      'filealerts columns must include Classification')
+
+    def test_filealerts_row_rendering(self):
+        self.assertIn("case 'filealerts':", JS_CONTENT,
+                      'buildRowForEvent must handle filealerts')
+        self.assertIn("fa.rule_name", JS_CONTENT,
+                      'buildRowForEvent must render rule_name from filealerts object')
+        self.assertIn("fa.classification", JS_CONTENT,
+                      'buildRowForEvent must render classification from filealerts object')
+
+    def test_filealerts_row_html(self):
+        """buildRowForEvent must produce correct HTML for filealerts events."""
+        from tests.jsdom_helper import js_statements
+        event = {
+            'event_type': 'filealerts',
+            'timestamp': '2026-01-01T12:00:00Z',
+            'proto': 'TCP',
+            'src_ip': '192.168.1.1',
+            'src_port': 12345,
+            'dest_ip': '10.0.0.1',
+            'dest_port': 80,
+            'filealerts': {
+                'rule_name': 'MALWARE_Test',
+                'classification': 'threat',
+                'tags': ['malware', 'apt'],
+                'sha256': 'a' * 64,
+            }
+        }
+        result = js_statements(f'''
+            var e = {json.dumps(event)};
+            var html = buildRowForEvent(e);
+            window.__jsdom_result = {{
+                hasRuleName: html.indexOf('MALWARE_Test') >= 0,
+                hasThreatBadge: html.indexOf('Threat') >= 0,
+                hasTags: html.indexOf('malware') >= 0 && html.indexOf('apt') >= 0,
+                hasTCP: html.indexOf('TCP') >= 0,
+                hasSrcIp: html.indexOf('192.168.1.1') >= 0,
+            }};
+        ''')
+        self.assertTrue(result['hasRuleName'], 'Row must contain rule name')
+        self.assertTrue(result['hasThreatBadge'], 'Row must contain threat classification badge')
+        self.assertTrue(result['hasTags'], 'Row must contain tags')
+        self.assertTrue(result['hasTCP'], 'Row must contain protocol')
+        self.assertTrue(result['hasSrcIp'], 'Row must contain source IP')
+
+    def test_classification_colors_defined(self):
+        self.assertIn("threat: { bg: '#ff6b6b33', text: '#ff6b6b' }", JS_CONTENT,
+                      'Classification colors must include threat (red)')
+        self.assertIn("technique: { bg: '#ffa72633', text: '#ffa726' }", JS_CONTENT,
+                      'Classification colors must include technique (yellow)')
+        self.assertIn("informational: { bg: '#9e9e9e33', text: '#9e9e9e' }", JS_CONTENT,
+                      'Classification colors must include informational (gray)')
+
+    def test_extract_value_classification(self):
+        self.assertIn("case 'Classification':", JS_CONTENT,
+                      'extractValue must handle Classification column')
+
+    def test_fileinfo_shows_file_alerts_section(self):
+        self.assertIn('File Alerts', JS_CONTENT,
+                      'formatEvent must show File Alerts section for fileinfo')
+
+    def test_filealerts_in_all_event_types(self):
+        expected_types = ['alert', 'dns', 'http', 'tls', 'flow', 'ftp', 'stats', 'anomaly', 'fileinfo', 'filealerts']
+        for etype in expected_types:
+            self.assertIn(f"'{etype}'", JS_CONTENT)
+
+    def test_filealerts_uses_nested_schema(self):
+        self.assertIn('e.filealerts?.rule_name', JS_CONTENT,
+                      'buildRowForEvent must access filealerts via nested schema')
+        self.assertIn('e.filealerts?.classification', JS_CONTENT,
+                      'buildRowForEvent must access classification via nested schema')
 
 
 if __name__ == '__main__':

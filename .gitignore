@@ -41,5 +41,9 @@ venv/
 env/
 .venv/
 
+# Node.js
+node_modules/
+package-lock.json
+
 # Project specific
 # (data directories are typically gitignored but the folder structure is created at runtime)
