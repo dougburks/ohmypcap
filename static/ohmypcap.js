@@ -13,11 +13,6 @@
             });
         }
 
-        const CLASSIFICATION_STYLES = {
-            threat: { bg: '#ff6b6b33', text: '#ff6b6b' },
-            technique: { bg: '#ffa72633', text: '#ffa726' },
-            informational: { bg: '#9e9e9e33', text: '#9e9e9e' }
-        };
         const COLORS = {
             EVENT: {
                 alert: '#ff6b6b',
@@ -54,16 +49,28 @@
             SEARCH_DEBOUNCE_MS: 300,
             SANKEY_BOTTOM_MARGIN: 60,
         };
-        function getClassificationStyle(c) {
-            return CLASSIFICATION_STYLES[c] || CLASSIFICATION_STYLES.informational;
+        function yaraTagBadgeHtml(tag) {
+            const t = (tag || '').toUpperCase();
+            let bg, text;
+            if (['RANSOMWARE','TROJAN','BACKDOOR','MALWARE','BOTNET'].includes(t)) {
+                bg = '#ff6b6b22'; text = '#ff6b6b';
+            } else if (['STORMBAMBOO','CHARMINGKITTEN','TURLA','LAZARUS','PLATINUM','HATMAN','CHARMINGCYPRESS','INKYPINE','INKYSQUID','EVILBAMBOO','TRANSPARENTJASMINE','UTA0040','WHEELEDASH'].includes(t)) {
+                bg = '#ba68c822'; text = '#ba68c8';
+            } else if (t.startsWith('CVE_')) {
+                bg = '#ffa72622'; text = '#ffa726';
+            } else if (['FILE','MEMORY','SCRIPT','LOG'].includes(t)) {
+                bg = '#42a5f522'; text = '#42a5f5';
+            } else if (['INFO','UTILITY','HIGHVOL'].includes(t)) {
+                bg = '#9e9e9e22'; text = '#9e9e9e';
+            } else {
+                bg = '#66bb6a22'; text = '#66bb6a';
+            }
+            return `<span class="badge" style="background:${bg};color:${text};margin-right:4px;">${escapeHtml(tag)}</span>`;
         }
-        function getClassificationLabel(c) {
-            return c.charAt(0).toUpperCase() + c.slice(1);
-        }
-        function classificationBadgeHtml(c) {
-            const s = getClassificationStyle(c);
-            const l = getClassificationLabel(c);
-            return `<span class="badge" style="background:${s.bg};color:${s.text}">${escapeHtml(l)}</span>`;
+
+        function buildStreamUrl(endpoint, src, sport, dst, dport) {
+            const md5Param = currentMd5 ? `&md5=${encodeURIComponent(currentMd5)}` : '';
+            return `/api/${endpoint}?src=${encodeURIComponent(src)}&sport=${encodeURIComponent(sport)}&dst=${encodeURIComponent(dst)}&dport=${encodeURIComponent(dport)}${md5Param}`;
         }
 
         function showTab(sectionId, el) {
@@ -179,8 +186,7 @@
         }
         
         async function loadAsciiTranscript(src, sport, dst, dport, pre) {
-            const md5Param = currentMd5 ? '&md5=' + encodeURIComponent(currentMd5) : '';
-            const url = `/api/ascii-stream?src=${encodeURIComponent(src)}&sport=${encodeURIComponent(sport)}&dst=${encodeURIComponent(dst)}&dport=${encodeURIComponent(dport)}${md5Param}`;
+            const url = buildStreamUrl('ascii-stream', src, sport, dst, dport);
             try {
                 const resp = await fetch(url);
                 const text = await resp.text();
@@ -247,8 +253,7 @@
         }
         
         async function loadHexdumpData(src, sport, dst, dport, container) {
-            const md5Param = currentMd5 ? '&md5=' + encodeURIComponent(currentMd5) : '';
-            const url = `/api/hexdump-stream?src=${encodeURIComponent(src)}&sport=${encodeURIComponent(sport)}&dst=${encodeURIComponent(dst)}&dport=${encodeURIComponent(dport)}${md5Param}`;
+            const url = buildStreamUrl('hexdump-stream', src, sport, dst, dport);
             
             try {
                 const resp = await fetch(url);
@@ -317,12 +322,30 @@
         function htmlRowText(label, text, className, style) {
             return htmlRow(label, escapeHtml(String(text || '')), className, style);
         }
-        
+
+        function maybeLinkifyValue(value) {
+            const s = String(value || '').trim();
+            const lower = s.toLowerCase();
+            if (lower.startsWith('http://') || lower.startsWith('https://')) {
+                return `${escapeHtml(s)} <a href="${escapeHtml(s)}" target="_blank" rel="noopener noreferrer" style="color: #58a6ff; text-decoration: none; margin-left: 4px; font-size: 0.8em;">↗</a>`;
+            }
+            return escapeHtml(s);
+        }
+
         function htmlSection(title, color) {
             return `<span style="color: #8b949e; margin-top: 10px; grid-column: 1 / -1; border-bottom: 1px solid #30363d; padding-bottom: 5px; color: ${color};">${escapeHtml(title)}</span>`;
         }
+
+        function renderMetadataRows(meta) {
+            if (!meta || Object.keys(meta).length === 0) return '';
+            let html = '';
+            Object.entries(meta).forEach(([k, v]) => {
+                html += htmlRow(k.charAt(0).toUpperCase() + k.slice(1), maybeLinkifyValue(v));
+            });
+            return html;
+        }
         
-        function formatEvent(e) {
+        function _formatEventCommon(e) {
             const ts = (e.timestamp || '').slice(0, 19);
             let html = `<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; font-size: 0.85rem; min-width: 0;">`;
             html += htmlRowText('Timestamp', ts);
@@ -330,139 +353,184 @@
             html += htmlRowText('Protocol', e.proto || '');
             html += htmlRowText('Flow ID', e.flow_id || '');
             html += htmlRowText('PCAP Count', e.pcap_cnt || '');
-            
             html += htmlSection('Connection', COLORS.EVENT.connection);
             html += htmlRowText('Source IP', e.src_ip || '', 'mono');
             html += htmlRowText('Source Port', e.src_port || '', 'mono');
             html += htmlRowText('Dest IP', e.dest_ip || '', 'mono');
             html += htmlRowText('Dest Port', e.dest_port || '', 'mono');
-            
-            if (e.event_type === 'alert') {
-                html += htmlSection('Alert Details', COLORS.EVENT.alert);
-                html += htmlRowText('Signature', e.alert?.signature);
-                html += htmlRow('Category', `<span class="badge badge-danger">${escapeHtml(e.alert?.category || '')}</span>`);
-                html += htmlRowText('Severity', e.alert?.severity);
-                html += htmlRowText('Action', e.alert?.action);
-                html += htmlRowText('GID', e.alert?.gid);
-                html += htmlRowText('SID', e.alert?.signature_id);
-                html += htmlRow('Rule', escapeHtml(e.alert?.rule || ''), 'mono', 'white-space: pre-wrap; overflow-wrap: break-word; min-width: 0;');
+            return html;
+        }
+
+        function _formatEventPayload(e) {
+            if (!e.src_ip || !e.src_port || !e.dest_ip || !e.dest_port) return '';
+            return `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="color: #8b949e; font-size: 0.85rem; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 5px;">Payload</div><div style="display: flex; justify-content: flex-start; align-items: center; margin-bottom: 10px;"><div class="view-tabs"><button class="view-tab active" onclick="switchStreamView('ascii','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">ASCII Transcript</button><button class="view-tab" onclick="switchStreamView('hexdump','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">Hexdump</button></div><button class="stream-btn" onclick="downloadPcap('${e.src_ip}','${e.src_port}','${e.dest_ip}','${e.dest_port}')" style="margin-left: 12px;">Download PCAP</button></div><div class="stream-view-container" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0;"><div class="ascii-transcript" style="white-space: pre-wrap; overflow-wrap: break-word;"></div><div class="hexdump-content" style="display: none;"></div></div></div>`;
+        }
+
+        function renderAlertDetails(e) {
+            let html = htmlSection('Alert Details', COLORS.EVENT.alert);
+            html += htmlRowText('Signature', e.alert?.signature);
+            html += htmlRow('Category', `<span class="badge badge-danger">${escapeHtml(e.alert?.category || '')}</span>`);
+            html += htmlRowText('Severity', e.alert?.severity);
+            html += htmlRowText('Action', e.alert?.action);
+            html += htmlRowText('GID', e.alert?.gid);
+            html += htmlRowText('SID', e.alert?.signature_id);
+            html += htmlRow('Rule', escapeHtml(e.alert?.rule || ''), 'mono', 'white-space: pre-wrap; overflow-wrap: break-word; min-width: 0;');
+            return html;
+        }
+
+        function renderDnsDetails(e) {
+            let html = htmlSection('DNS Details', COLORS.EVENT.dns);
+            html += htmlRowText('Type', e.dns?.type);
+            html += htmlRowText('Query Name', e.dns?.rrname, 'mono');
+            html += htmlRowText('Query Type', e.dns?.rrtype);
+            if (e.dns?.answers) {
+                html += htmlRowText('Answers', e.dns.answers.map(a => a.rdata).join(', '), 'mono');
             }
-            
-            if (e.event_type === 'dns') {
-                html += htmlSection('DNS Details', COLORS.EVENT.dns);
-                html += htmlRowText('Type', e.dns?.type);
-                html += htmlRowText('Query Name', e.dns?.rrname, 'mono');
-                html += htmlRowText('Query Type', e.dns?.rrtype);
-                if (e.dns?.answers) {
-                    html += htmlRowText('Answers', e.dns.answers.map(a => a.rdata).join(', '), 'mono');
-                }
+            return html;
+        }
+
+        function renderHttpDetails(e) {
+            let html = htmlSection('HTTP Details', COLORS.EVENT.http);
+            html += htmlRow('Method', `<span class="badge badge-info">${escapeHtml(e.http?.http_method || '')}</span>`);
+            html += htmlRowText('Host', e.http?.hostname, 'mono');
+            html += htmlRowText('URL', e.http?.url, 'mono');
+            html += htmlRowText('User Agent', e.http?.http_user_agent, '', 'word-break: break-all;');
+            html += htmlRowText('Status', e.http?.status);
+            html += htmlRowText('Content Type', e.http?.http_content_type);
+            return html;
+        }
+
+        function renderTlsDetails(e) {
+            let html = htmlSection('TLS Details', COLORS.EVENT.tls);
+            html += htmlRowText('SNI', e.tls?.sni, 'mono');
+            html += htmlRow('Version', `<span class="badge badge-info">${escapeHtml(e.tls?.version || '')}</span>`);
+            html += htmlRowText('Subject', e.tls?.subject, 'mono');
+            html += htmlRowText('Issuer', e.tls?.issuerdn, 'mono');
+            html += htmlRowText('Not Before', e.tls?.notbefore);
+            html += htmlRowText('Not After', e.tls?.notafter);
+            html += htmlRowText('Fingerprint', e.tls?.fingerprint, 'mono');
+            return html;
+        }
+
+        function renderFlowDetails(e) {
+            let html = htmlSection('Flow Details', COLORS.EVENT.flow);
+            html += htmlRowText('State', e.flow?.state);
+            html += htmlRowText('Age', `${e.flow?.age || ''} seconds`);
+            html += htmlRowText('Pkts to Server', (e.flow?.pkts_toserver || 0).toLocaleString());
+            html += htmlRowText('Pkts to Client', (e.flow?.pkts_toclient || 0).toLocaleString());
+            html += htmlRowText('Bytes to Server', (e.flow?.bytes_toserver || 0).toLocaleString());
+            html += htmlRowText('Bytes to Client', (e.flow?.bytes_toclient || 0).toLocaleString());
+            html += htmlRowText('Alerted', e.flow?.alerted ? 'Yes' : 'No');
+            return html;
+        }
+
+        function renderFtpDetails(e) {
+            let html = htmlSection('FTP Details', COLORS.EVENT.ftp);
+            html += htmlRowText('Command', e.ftp?.command);
+            html += htmlRowText('Reply', e.ftp?.reply);
+            html += htmlRowText('Data Channel', e.ftp?.data_channel?.active ? 'Active' : 'Passive');
+            return html;
+        }
+
+        function renderAnomalyDetails(e) {
+            let html = htmlSection('Anomaly Details', COLORS.EVENT.anomaly);
+            html += htmlRowText('Type', e.anomaly?.type);
+            html += htmlRowText('Message', e.anomaly?.message);
+            return html;
+        }
+
+        function renderFileAlertDetails(e) {
+            const fa = e.filealerts || {};
+            let html = htmlRow('Rule', `<span class="badge" style="background:${COLORS.FILE_ALERT.bg};color:${COLORS.FILE_ALERT.text}">${escapeHtml(fa.rule_name || '')}</span>`);
+            html += htmlRowText('SHA256', fa.sha256, 'mono');
+            if (fa.tags && fa.tags.length > 0) {
+                html += htmlRow('Tags', fa.tags.map(t => yaraTagBadgeHtml(t)).join(''));
             }
-            
-            if (e.event_type === 'http') {
-                html += htmlSection('HTTP Details', COLORS.EVENT.http);
-                html += htmlRow('Method', `<span class="badge badge-info">${escapeHtml(e.http?.http_method || '')}</span>`);
-                html += htmlRowText('Host', e.http?.hostname, 'mono');
-                html += htmlRowText('URL', e.http?.url, 'mono');
-                html += htmlRowText('User Agent', e.http?.http_user_agent, '', 'word-break: break-all;');
-                html += htmlRowText('Status', e.http?.status);
-                html += htmlRowText('Content Type', e.http?.http_content_type);
-            }
-            
-            if (e.event_type === 'tls') {
-                html += htmlSection('TLS Details', COLORS.EVENT.tls);
-                html += htmlRowText('SNI', e.tls?.sni, 'mono');
-                html += htmlRow('Version', `<span class="badge badge-info">${escapeHtml(e.tls?.version || '')}</span>`);
-                html += htmlRowText('Subject', e.tls?.subject, 'mono');
-                html += htmlRowText('Issuer', e.tls?.issuerdn, 'mono');
-                html += htmlRowText('Not Before', e.tls?.notbefore);
-                html += htmlRowText('Not After', e.tls?.notafter);
-                html += htmlRowText('Fingerprint', e.tls?.fingerprint, 'mono');
-            }
-            
-            if (e.event_type === 'flow') {
-                html += htmlSection('Flow Details', COLORS.EVENT.flow);
-                html += htmlRowText('State', e.flow?.state);
-                html += htmlRowText('Age', `${e.flow?.age || ''} seconds`);
-                html += htmlRowText('Pkts to Server', (e.flow?.pkts_toserver || 0).toLocaleString());
-                html += htmlRowText('Pkts to Client', (e.flow?.pkts_toclient || 0).toLocaleString());
-                html += htmlRowText('Bytes to Server', (e.flow?.bytes_toserver || 0).toLocaleString());
-                html += htmlRowText('Bytes to Client', (e.flow?.bytes_toclient || 0).toLocaleString());
-                html += htmlRowText('Alerted', e.flow?.alerted ? 'Yes' : 'No');
-            }
-            
-            if (e.event_type === 'ftp') {
-                html += htmlSection('FTP Details', COLORS.EVENT.ftp);
-                html += htmlRowText('Command', e.ftp?.command);
-                html += htmlRowText('Reply', e.ftp?.reply);
-                html += htmlRowText('Data Channel', e.ftp?.data_channel?.active ? 'Active' : 'Passive');
-            }
-            
-            if (e.event_type === 'anomaly') {
-                html += htmlSection('Anomaly Details', COLORS.EVENT.anomaly);
-                html += htmlRowText('Type', e.anomaly?.type);
-                html += htmlRowText('Message', e.anomaly?.message);
-            }
-            
-            if (e.event_type === 'filealerts') {
-                const fa = e.filealerts || {};
-                const classification = fa.classification || 'informational';
-                html += htmlRow('Classification', classificationBadgeHtml(classification));
-                html += htmlRow('Rule', `<span class="badge" style="background:${COLORS.FILE_ALERT.bg};color:${COLORS.FILE_ALERT.text}">${escapeHtml(fa.rule_name || '')}</span>`);
-                html += htmlRowText('SHA256', fa.sha256, 'mono');
-                html += htmlRowText('Tags', (fa.tags || []).join(', '));
-                if (fa.meta && Object.keys(fa.meta).length > 0) {
-                    const metaEntries = Object.entries(fa.meta).map(([k, v]) => `${k}: ${v}`).join(', ');
-                    html += htmlRowText('Metadata', metaEntries);
+            html += renderMetadataRows(fa.meta);
+            return html;
+        }
+
+        function renderFileInfoDetails(e) {
+            let html = htmlSection('File Info', COLORS.EVENT.fileinfo);
+            html += htmlRowText('Filename', e.fileinfo?.filename, 'mono');
+            html += htmlRowText('Magic', e.fileinfo?.magic);
+            html += htmlRowText('MD5', e.fileinfo?.md5, 'mono');
+            html += htmlRowText('SHA1', e.fileinfo?.sha1, 'mono');
+            html += htmlRowText('SHA256', e.fileinfo?.sha256, 'mono');
+            html += htmlRowText('Size', `${(e.fileinfo?.size || 0).toLocaleString()} bytes`);
+
+            const meta = e.fileinfo?.metadata || {};
+            if (meta.file_type || meta.mime_type || meta.entropy !== undefined || (meta.strings && meta.strings.length)) {
+                html += htmlSection('File Metadata', COLORS.EVENT.fileinfo);
+                if (meta.file_type) html += htmlRowText('File Type', meta.file_type);
+                if (meta.mime_type) html += htmlRowText('MIME Type', meta.mime_type);
+                if (meta.entropy !== undefined) html += htmlRowText('Entropy', String(meta.entropy));
+                if (meta.strings && meta.strings.length) {
+                    html += htmlRowText('Top Strings', meta.strings.slice(0, 20).join(', '), '', 'word-break: break-all;');
                 }
             }
 
-            if (e.event_type === 'fileinfo') {
-                html += htmlSection('File Info', COLORS.EVENT.fileinfo);
-                html += htmlRowText('Filename', e.fileinfo?.filename, 'mono');
-                html += htmlRowText('Magic', e.fileinfo?.magic);
-                html += htmlRowText('MD5', e.fileinfo?.md5, 'mono');
-                html += htmlRowText('SHA1', e.fileinfo?.sha1, 'mono');
-                html += htmlRowText('SHA256', e.fileinfo?.sha256, 'mono');
-                html += htmlRowText('Size', `${(e.fileinfo?.size || 0).toLocaleString()} bytes`);
-                
-                const fileSha = e.fileinfo?.sha256 || '';
-                const matches = allEvents.filter(ev => ev.event_type === 'filealerts' && ev.filealerts?.sha256 === fileSha);
-                html += htmlSection('File Alerts', COLORS.EVENT.filealerts);
-                if (matches.length > 0) {
-                    matches.forEach(m => {
-                        html += htmlRow('Rule', `<span class="badge" style="background:${COLORS.FILE_ALERT.bg};color:${COLORS.FILE_ALERT.text}">${escapeHtml(m.filealerts?.rule_name || '')}</span>`);
-                        if (m.filealerts?.tags && m.filealerts.tags.length) {
-                            html += htmlRowText('Tags', m.filealerts.tags.join(', '));
-                        }
-                    });
-                } else {
-                    html += `<span style="color: #484f58; grid-column: 1 / -1;">No YARA matches</span>`;
-                }
+            if (meta.exif && Object.keys(meta.exif).length) {
+                html += htmlSection('Exif Metadata', COLORS.EVENT.fileinfo);
+                Object.entries(meta.exif).forEach(([k, v]) => {
+                    html += htmlRowText(escapeHtml(k), escapeHtml(v), '', 'word-break: break-all;');
+                });
             }
-            
-            if (e.event_type === 'stats') {
-                html += htmlSection('Stats Details', COLORS.EVENT.stats);
-                if (e.stats?.capture) {
-                    html += htmlRowText('Kernel Packets', (e.stats.capture.kernel_packets || 0).toLocaleString());
-                    html += htmlRowText('Kernel Drops', (e.stats.capture.kernel_drops || 0).toLocaleString());
-                }
-                if (e.stats?.detect) {
-                    html += htmlRowText('Alerts', (e.stats.detect.alert || 0).toLocaleString());
-                }
+
+            const fileSha = e.fileinfo?.sha256 || '';
+            const matches = allEvents.filter(ev => ev.event_type === 'filealerts' && ev.filealerts?.sha256 === fileSha);
+            html += htmlSection('File Alerts', COLORS.EVENT.filealerts);
+            if (matches.length > 0) {
+                matches.forEach(m => {
+                    html += htmlRow('Rule', `<span class="badge" style="background:${COLORS.FILE_ALERT.bg};color:${COLORS.FILE_ALERT.text}">${escapeHtml(m.filealerts?.rule_name || '')}</span>`);
+                    if (m.filealerts?.tags && m.filealerts.tags.length) {
+                        html += htmlRowText('Tags', m.filealerts.tags.join(', '));
+                    }
+                });
+            } else {
+                html += `<span style="color: #484f58; grid-column: 1 / -1;">No YARA matches</span>`;
             }
-            
+            return html;
+        }
+
+        function renderStatsDetails(e) {
+            let html = htmlSection('Stats Details', COLORS.EVENT.stats);
+            if (e.stats?.capture) {
+                html += htmlRowText('Kernel Packets', (e.stats.capture.kernel_packets || 0).toLocaleString());
+                html += htmlRowText('Kernel Drops', (e.stats.capture.kernel_drops || 0).toLocaleString());
+            }
+            if (e.stats?.detect) {
+                html += htmlRowText('Alerts', (e.stats.detect.alert || 0).toLocaleString());
+            }
+            return html;
+        }
+
+        const EVENT_RENDERERS = {
+            alert: renderAlertDetails,
+            dns: renderDnsDetails,
+            http: renderHttpDetails,
+            tls: renderTlsDetails,
+            flow: renderFlowDetails,
+            ftp: renderFtpDetails,
+            anomaly: renderAnomalyDetails,
+            filealerts: renderFileAlertDetails,
+            fileinfo: renderFileInfoDetails,
+            stats: renderStatsDetails,
+        };
+
+        function formatEvent(e) {
+            let html = _formatEventCommon(e);
+            const renderer = EVENT_RENDERERS[e.event_type];
+            if (renderer) {
+                html += renderer(e);
+            }
             html += `</div>`;
-            
-            if (e.src_ip && e.src_port && e.dest_ip && e.dest_port) {
-                html += `<div id="ascii-${e.src_ip}-${e.src_port}-${e.dest_ip}-${e.dest_port}" style="margin-top: 15px;"><div style="color: #8b949e; font-size: 0.85rem; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 5px;">Payload</div><div style="display: flex; justify-content: flex-start; align-items: center; margin-bottom: 10px;"><div class="view-tabs"><button class="view-tab active" onclick="switchStreamView('ascii','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">ASCII Transcript</button><button class="view-tab" onclick="switchStreamView('hexdump','${e.src_ip}',${e.src_port},'${e.dest_ip}',${e.dest_port},this)">Hexdump</button></div><button class="stream-btn" onclick="downloadPcap('${e.src_ip}','${e.src_port}','${e.dest_ip}','${e.dest_port}')" style="margin-left: 12px;">Download PCAP</button></div><div class="stream-view-container" style="background: #0d1117; padding: 15px; border-radius: 8px; font-size: 0.8rem; margin: 0;"><div class="ascii-transcript" style="white-space: pre-wrap; overflow-wrap: break-word;"></div><div class="hexdump-content" style="display: none;"></div></div></div>`;
-            }
-            
+            html += _formatEventPayload(e);
             return html;
         }
         
         function downloadPcap(src, sport, dst, dport) {
-            const md5Param = currentMd5 ? '&md5=' + encodeURIComponent(currentMd5) : '';
-            const url = `/api/download-stream?src=${encodeURIComponent(src)}&sport=${encodeURIComponent(sport)}&dst=${encodeURIComponent(dst)}&dport=${encodeURIComponent(dport)}${md5Param}`;
+            const url = buildStreamUrl('download-stream', src, sport, dst, dport);
             const a = document.createElement('a');
             a.href = url;
             a.download = `stream_${src}_${sport}_to_${dst}_${dport}.pcap`;
@@ -522,6 +590,19 @@
                 const thead = th.closest('thead');
                 const index = Array.from(thead.querySelectorAll('th')).indexOf(th);
                 sortTable(table, index, th);
+            }
+
+            // Delegated handler for previous analyses buttons
+            const btn = e.target.closest('#previousAnalysesList button[data-action]');
+            if (btn) {
+                const md5 = btn.dataset.md5;
+                const name = btn.dataset.name;
+                const action = btn.dataset.action;
+                if (action === 'reanalyze') {
+                    openReanalyzeModal(md5, name);
+                } else if (action === 'delete') {
+                    openDeleteAnalysis(md5, name);
+                }
             }
         });
         
@@ -589,9 +670,9 @@
                 if (analyses.length > 0) {
                     previousHtml = analyses.map(a => 
                         `<div style="display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid #30363d;">
-                            <a href="?file=${a.md5}" onclick="event.preventDefault(); loadAnalysis('${a.md5}');" style="color: #58a6ff; text-decoration: none; flex: 1;">📁 ${a.name}</a>
-                            <button onclick="openReanalyzeModal('${a.md5}', '${a.name}')" style="background: #30363d; border: none; color: #58a6ff; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px; margin-right: 4px;" title="Re-analyze">🔄</button>
-                            <button onclick="openDeleteAnalysis('${a.md5}', '${a.name}')" style="background: #30363d; border: none; color: #ff6b6b; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px;" title="Delete">🗑️</button>
+                            <a href="?file=${a.md5}" onclick="event.preventDefault(); loadAnalysis('${a.md5}');" style="color: #58a6ff; text-decoration: none; flex: 1;">📁 ${escapeHtml(a.name)}</a>
+                            <button data-md5="${a.md5}" data-name="${escapeHtml(a.name)}" data-action="reanalyze" style="background: #30363d; border: none; color: #58a6ff; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px; margin-right: 4px;" title="Re-analyze">🔄</button>
+                            <button data-md5="${a.md5}" data-name="${escapeHtml(a.name)}" data-action="delete" style="background: #30363d; border: none; color: #ff6b6b; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px;" title="Delete">🗑️</button>
                         </div>`
                     ).join('');
                 } else {
@@ -808,7 +889,10 @@
         });
         
         document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') closeModal();
+            if (e.key === 'Escape') {
+                closeModal();
+                document.querySelectorAll('.modal.active').forEach(m => m.remove());
+            }
         });
         
         // Single delegated listener for advanced toggle (prevents memory leak from repeated loadAnalysis calls)
@@ -1091,7 +1175,7 @@
                 case 'fileinfo':
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Filename'];
                 case 'filealerts':
-                    return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Rule Name', 'Classification', 'Tags'];
+                    return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Rule Name', 'Tags'];
                 default:
                     return ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port'];
             }
@@ -1165,10 +1249,9 @@
                 case 'filealerts':
                     const fa = e.filealerts || {};
                     const ruleName = fa.rule_name || 'N/A';
-                    const tags = (fa.tags || []).join(', ');
-                    const classification = fa.classification || 'informational';
-                    colSpan = 9;
-                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><span class="badge" style="background:${COLORS.FILE_ALERT.bg};color:${COLORS.FILE_ALERT.text}">${escapeHtml(ruleName)}</span></td><td>${classificationBadgeHtml(classification)}</td><td>${escapeHtml(tags)}</td></tr>`;
+                    const tagsHtml = (fa.tags || []).map(t => yaraTagBadgeHtml(t)).join('');
+                    colSpan = 8;
+                    row = `<tr onclick="toggleRow(this)"><td class="timestamp">${escapeHtml(ts)}</td><td><span class="badge badge-info">${escapeHtml(proto)}</span></td><td class="mono">${escapeHtml(srcIp)}</td><td class="mono">${escapeHtml(String(srcPort))}</td><td class="mono">${escapeHtml(dstIp)}</td><td class="mono">${escapeHtml(String(dstPort))}</td><td style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><span class="badge" style="background:${COLORS.FILE_ALERT.bg};color:${COLORS.FILE_ALERT.text}">${escapeHtml(ruleName)}</span></td><td>${tagsHtml}</td></tr>`;
                     break;
                 default:
                     colSpan = 6;
@@ -1182,8 +1265,20 @@
             document.querySelectorAll('.file-info-card').forEach(c => c.remove());
             const fileinfoEvent = allEvents.find(e => e.event_type === 'fileinfo');
             if (!fileinfoEvent || !fileinfoEvent.fileinfo) return;
-            
+
             const fi = fileinfoEvent.fileinfo;
+            const meta = fi.metadata || {};
+            const strings = (meta.strings || []).slice(0, 10);
+            const stringsHtml = strings.length
+                ? `<span class="value" style="word-break: break-all;">${escapeHtml(strings.join(', '))}</span>`
+                : '<span class="value" style="color: #484f58;">—</span>';
+
+            const exif = meta.exif || {};
+            const exifEntries = Object.entries(exif).slice(0, 12);
+            const exifHtml = exifEntries.length
+                ? exifEntries.map(([k, v]) => `<span class="label">${escapeHtml(k)}</span><span class="value" style="word-break: break-all;">${escapeHtml(v)}</span>`).join('')
+                : '';
+
             const card = document.createElement('div');
             card.className = 'file-info-card';
             card.innerHTML = `
@@ -1191,13 +1286,17 @@
                 <div class="file-info-grid">
                     <span class="label">Filename</span><span class="value">${escapeHtml(fi.filename || '')}</span>
                     <span class="label">Size</span><span class="value">${escapeHtml(String((fi.size || 0).toLocaleString()))} bytes</span>
-                    <span class="label">Magic</span><span class="value">${escapeHtml(fi.magic || '')}</span>
                     <span class="label">MD5</span><span class="value">${escapeHtml(fi.md5 || '')}</span>
                     <span class="label">SHA1</span><span class="value">${escapeHtml(fi.sha1 || '')}</span>
                     <span class="label">SHA256</span><span class="value">${escapeHtml(fi.sha256 || '')}</span>
+                    <span class="label">Magic</span><span class="value">${escapeHtml(fi.magic || '')}</span>
+                    ${meta.mime_type ? `<span class="label">MIME Type</span><span class="value">${escapeHtml(meta.mime_type)}</span>` : ''}
+                    ${meta.entropy !== undefined ? `<span class="label">Entropy</span><span class="value">${escapeHtml(String(meta.entropy))}</span>` : ''}
+                    ${exifHtml}
+                    ${strings.length ? `<span class="label">Top Strings</span>${stringsHtml}` : ''}
                 </div>
             `;
-            
+
             const sections = document.getElementById('sections');
             if (sections) {
                 sections.parentNode.insertBefore(card, sections);
@@ -1208,55 +1307,50 @@
             const container = document.getElementById('sections');
             if (!container) return;
             
-            // Filter: show threat + technique by default
-            const showInformational = false;
-            const filteredEvents = events.filter(e => {
-                const classification = (e.filealerts || {}).classification || 'informational';
-                return showInformational || classification !== 'informational';
-            });
+            let html = '<div class="yara-matches-section">';
+            html += '<h3>🛡️ YARA Matches</h3>';
             
-            let html = '<div class="file-alerts-grid">';
-            filteredEvents.forEach(e => {
-                const fa = e.filealerts || {};
-                const classification = fa.classification || 'informational';
-                const tags = (fa.tags || []).join(', ');
-                
-                html += `
-                    <div class="file-alert-card" onclick="showFileAlertDetail('${escapeHtml(fa.sha256 || '')}', '${escapeHtml(fa.rule_name || '')}')">
-                        <div class="rule-name">${escapeHtml(fa.rule_name || 'Unknown')}</div>
-                        <div class="card-footer">
-                            ${classificationBadgeHtml(classification)}
-                            <span class="tags">${escapeHtml(tags)}</span>
+            if (events.length === 0) {
+                html += '<div class="no-matches">No YARA matches</div>';
+            } else {
+                html += '<div class="file-alerts-grid">';
+                events.forEach(e => {
+                    const fa = e.filealerts || {};
+                    const tagsHtml = (fa.tags || []).map(t => yaraTagBadgeHtml(t)).join('');
+                    
+                    html += `
+                        <div class="file-alert-card" onclick="showFileAlertDetail('${escapeHtml(fa.sha256 || '')}', '${escapeHtml(fa.rule_name || '')}')">
+                            <div class="rule-name"><span class="badge" style="background:${COLORS.FILE_ALERT.bg};color:${COLORS.FILE_ALERT.text}">${escapeHtml(fa.rule_name || 'Unknown')}</span></div>
+                            <div class="card-footer">
+                                ${tagsHtml}
+                            </div>
                         </div>
-                    </div>
-                `;
-            });
+                    `;
+                });
+                html += '</div>';
+            }
             html += '</div>';
             container.innerHTML = html;
         }
         
         function formatFileAlertDetail(e) {
             const fa = e.filealerts || {};
-            const classification = fa.confidence || 'informational';
-            
-            let html = '<div style="display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; font-size: 0.9rem;">';
-            html += `<span style="color: #8b949e;">Classification</span><span>${classificationBadgeHtml(classification)}</span>`;
+
+            let html = '<div style="display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px 12px; font-size: 0.9rem; overflow-wrap: break-word;">';
             html += `<span style="color: #8b949e;">Rule</span><span><span class="badge" style="background:${COLORS.FILE_ALERT.bg};color:${COLORS.FILE_ALERT.text}">${escapeHtml(fa.rule_name || '')}</span></span>`;
             html += `<span style="color: #8b949e;">SHA256</span><span class="mono">${escapeHtml(fa.sha256 || '')}</span>`;
-            html += `<span style="color: #8b949e;">Tags</span><span>${escapeHtml((fa.tags || []).join(', '))}</span>`;
-            if (fa.meta && Object.keys(fa.meta).length > 0) {
-                const metaEntries = Object.entries(fa.meta).map(([k, v]) => `${k}: ${v}`).join(', ');
-                html += `<span style="color: #8b949e;">Metadata</span><span>${escapeHtml(metaEntries)}</span>`;
-            }
+            html += `<span style="color: #8b949e;">Tags</span><span>${(fa.tags || []).map(t => yaraTagBadgeHtml(t)).join('')}</span>`;
+            html += renderMetadataRows(fa.meta);
             html += '</div>';
             return html;
         }
         
         function showFileAlertDetail(sha256, ruleName) {
             // Find the matching event and show its detail panel
-            const event = allEvents.find(e => 
-                e.event_type === 'filealerts' && 
-                (e.filealerts?.sha256 === sha256 || e.filealerts?.rule_name === ruleName)
+            const event = allEvents.find(e =>
+                e.event_type === 'filealerts' &&
+                e.filealerts?.sha256 === sha256 &&
+                e.filealerts?.rule_name === ruleName
             );
             if (!event) return;
             
@@ -1634,9 +1728,6 @@
                 case 'Alerted': return e.flow?.alerted ? 'Yes' : 'No';
                 case 'Filename': return e.fileinfo?.filename || '';
                 case 'Rule Name': return e.filealerts?.rule_name || '';
-                case 'Classification': {
-                    return getClassificationLabel(e.filealerts?.classification || 'informational');
-                }
                 case 'Tags': return (e.filealerts?.tags || []).join(', ');
                 case 'Detail': {
                     const etype = e.event_type || '';
@@ -1826,7 +1917,7 @@
                 if (fileAlertsEvents.length > 0) {
                     buildFileAlertCards(fileAlertsEvents);
                 } else {
-                    document.getElementById('sections').innerHTML = '<div class="no-matches">No YARA matches</div>';
+                    document.getElementById('sections').innerHTML = '<div class="yara-matches-section"><h3>🛡️ YARA Matches</h3><div class="no-matches">No YARA matches</div></div>';
                 }
             } else {
                 document.body.classList.remove('file-analysis');
@@ -1927,7 +2018,7 @@
                     }
                     
                     const helpText = isFileOnly
-                        ? '<span style="color: #58a6ff;">💡</span> YARA scan results for the uploaded file. Review the File Info card for metadata and the File Alerts table for any matches found by the YARA rules.'
+                        ? '<span style="color: #58a6ff;">💡</span> Review the FILE INFO section for metadata and the YARA MATCHES section for any matches found by the YARA rules.'
                         : '<span style="color: #58a6ff;">💡</span> Start by reviewing all alerts and then you can change to one of the other data types like DNS, HTTP, or TLS. Filter using the search bar, sankey diagram, or aggregation tables. When you find something interesting, you can drill into the row in the data table at the bottom. This will allow you to see the ASCII transcript and hexdump and optionally download the PCAP file for that stream.';
                     
                     document.getElementById('headerContent').innerHTML = `
@@ -1940,7 +2031,7 @@
                                     </svg>
                                     Back to Overview
                                 </a>
-                                <span style="color: #f0f6fc; font-weight: 600; white-space: nowrap;">📄 ${currentFileName}</span>
+                                <span style="color: #f0f6fc; font-weight: 600; white-space: nowrap;">📄 ${escapeHtml(currentFileName)}</span>
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📁 ${currentMd5}</span>
                                 <span style="color: #8b949e; font-size: 0.9rem; white-space: nowrap;">📅 ${dateDisplay}</span>
                             </div>
@@ -1963,7 +2054,7 @@
                         if (fileAlertsEvents.length > 0) {
                             buildFileAlertCards(fileAlertsEvents);
                         } else {
-                            document.getElementById('sections').innerHTML = '<div class="no-matches">No YARA matches</div>';
+                            document.getElementById('sections').innerHTML = '<div class="yara-matches-section"><h3>🛡️ YARA Matches</h3><div class="no-matches">No YARA matches</div></div>';
                         }
                     } else {
                         // PCAP analysis: full layout

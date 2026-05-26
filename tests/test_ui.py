@@ -1779,16 +1779,16 @@ class TestFileAlertsUI(unittest.TestCase):
     def test_filealerts_columns_defined(self):
         self.assertIn("case 'filealerts':", JS_CONTENT,
                       'getColumnsForType must handle filealerts')
-        self.assertIn("'Classification'", JS_CONTENT,
-                      'filealerts columns must include Classification')
+        self.assertIn("'Tags'", JS_CONTENT,
+                      'filealerts columns must include Tags')
 
     def test_filealerts_row_rendering(self):
         self.assertIn("case 'filealerts':", JS_CONTENT,
                       'buildRowForEvent must handle filealerts')
         self.assertIn("fa.rule_name", JS_CONTENT,
                       'buildRowForEvent must render rule_name from filealerts object')
-        self.assertIn("fa.classification", JS_CONTENT,
-                      'buildRowForEvent must render classification from filealerts object')
+        self.assertIn("fa.tags", JS_CONTENT,
+                      'buildRowForEvent must render tags from filealerts object')
 
     def test_filealerts_row_html(self):
         """buildRowForEvent must produce correct HTML for filealerts events."""
@@ -1803,8 +1803,7 @@ class TestFileAlertsUI(unittest.TestCase):
             'dest_port': 80,
             'filealerts': {
                 'rule_name': 'MALWARE_Test',
-                'classification': 'threat',
-                'tags': ['malware', 'apt'],
+                'tags': ['MALWARE', 'APT'],
                 'sha256': 'a' * 64,
             }
         }
@@ -1813,33 +1812,25 @@ class TestFileAlertsUI(unittest.TestCase):
             var html = buildRowForEvent(e);
             window.__jsdom_result = {{
                 hasRuleName: html.indexOf('MALWARE_Test') >= 0,
-                hasThreatBadge: html.indexOf('Threat') >= 0,
-                hasTags: html.indexOf('malware') >= 0 && html.indexOf('apt') >= 0,
+                hasTagBadge: html.indexOf('MALWARE') >= 0,
+                hasTags: html.indexOf('APT') >= 0,
                 hasTCP: html.indexOf('TCP') >= 0,
                 hasSrcIp: html.indexOf('192.168.1.1') >= 0,
             }};
         ''')
         self.assertTrue(result['hasRuleName'], 'Row must contain rule name')
-        self.assertTrue(result['hasThreatBadge'], 'Row must contain threat classification badge')
+        self.assertTrue(result['hasTagBadge'], 'Row must contain tag badge')
         self.assertTrue(result['hasTags'], 'Row must contain tags')
         self.assertTrue(result['hasTCP'], 'Row must contain protocol')
         self.assertTrue(result['hasSrcIp'], 'Row must contain source IP')
 
-    def test_classification_colors_defined(self):
-        self.assertIn("threat: { bg: '#ff6b6b33', text: '#ff6b6b' }", JS_CONTENT,
-                      'Classification colors must include threat (red)')
-        self.assertIn("technique: { bg: '#ffa72633', text: '#ffa726' }", JS_CONTENT,
-                      'Classification colors must include technique (yellow)')
-        self.assertIn("informational: { bg: '#9e9e9e33', text: '#9e9e9e' }", JS_CONTENT,
-                      'Classification colors must include informational (gray)')
+    def test_extract_value_tags(self):
+        self.assertIn("case 'Tags':", JS_CONTENT,
+                      'extractValue must handle Tags column')
 
-    def test_extract_value_classification(self):
-        self.assertIn("case 'Classification':", JS_CONTENT,
-                      'extractValue must handle Classification column')
-
-    def test_fileinfo_shows_file_alerts_section(self):
-        self.assertIn('File Alerts', JS_CONTENT,
-                      'formatEvent must show File Alerts section for fileinfo')
+    def test_fileinfo_shows_yara_matches_section(self):
+        self.assertIn('YARA Matches', JS_CONTENT,
+                      'formatEvent must show YARA Matches section for fileinfo')
 
     def test_filealerts_in_all_event_types(self):
         expected_types = ['alert', 'dns', 'http', 'tls', 'flow', 'ftp', 'stats', 'anomaly', 'fileinfo', 'filealerts']
@@ -1849,8 +1840,101 @@ class TestFileAlertsUI(unittest.TestCase):
     def test_filealerts_uses_nested_schema(self):
         self.assertIn('e.filealerts?.rule_name', JS_CONTENT,
                       'buildRowForEvent must access filealerts via nested schema')
-        self.assertIn('e.filealerts?.classification', JS_CONTENT,
-                      'buildRowForEvent must access classification via nested schema')
+        self.assertIn('e.filealerts?.tags', JS_CONTENT,
+                      'buildRowForEvent must access tags via nested schema')
+
+
+class TestMaybeLinkifyValueSecurity(unittest.TestCase):
+    def test_function_exists(self):
+        self.assertIn('function maybeLinkifyValue(', JS_CONTENT,
+                      'maybeLinkifyValue must exist to safely handle URLs in metadata')
+
+    def test_only_allows_http_https(self):
+        self.assertIn("lower.startsWith('http://')", JS_CONTENT,
+                      'maybeLinkifyValue must whitelist http://')
+        self.assertIn("lower.startsWith('https://')", JS_CONTENT,
+                      'maybeLinkifyValue must whitelist https://')
+
+    def test_link_has_noopener(self):
+        self.assertIn('rel="noopener noreferrer"', JS_CONTENT,
+                      'External links must have rel="noopener noreferrer"')
+        self.assertIn('target="_blank"', JS_CONTENT,
+                      'External links must open in a new tab')
+
+    def test_escapes_url_in_href(self):
+        self.assertIn('escapeHtml(s)', JS_CONTENT,
+                      'maybeLinkifyValue must escape the URL in the href attribute')
+
+    def _extract_js_function(self, name):
+        """Extract a named function definition from JS_CONTENT by brace matching."""
+        import re
+        pattern = re.compile(rf'function\s+{re.escape(name)}\s*\([^)]*\)\s*{{')
+        match = pattern.search(JS_CONTENT)
+        if not match:
+            self.fail(f'Function {name} not found in JS_CONTENT')
+        start = match.start()
+        brace_count = 0
+        pos = match.end() - 1  # position of the opening brace
+        while pos < len(JS_CONTENT):
+            if JS_CONTENT[pos] == '{':
+                brace_count += 1
+            elif JS_CONTENT[pos] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    return JS_CONTENT[start:pos + 1]
+            pos += 1
+        self.fail(f'Could not find closing brace for function {name}')
+
+    def _run_js_plain(self, expr):
+        """Run a JS expression via Node.js using the actual maybeLinkifyValue from ohmypcap.js."""
+        import subprocess
+        escape_html_src = self._extract_js_function('escapeHtml')
+        linkify_src = self._extract_js_function('maybeLinkifyValue')
+        code = escape_html_src + '\n' + linkify_src + '\n' + 'console.log(JSON.stringify(maybeLinkifyValue(' + expr + ')));'
+        result = subprocess.run(['node', '-e', code], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, f'Node.js failed: {result.stderr}')
+        return json.loads(result.stdout.strip())
+
+    def test_javascript_url_not_linkified(self):
+        """javascript: URLs must be rendered as plain text, not clickable links."""
+        result = self._run_js_plain('"javascript:alert(1)"')
+        self.assertNotIn('<a', result, 'javascript: URLs must not produce anchor tags')
+        self.assertEqual(result, 'javascript:alert(1)')
+
+    def test_data_url_not_linkified(self):
+        """data: URLs must be rendered as plain text."""
+        result = self._run_js_plain('"data:text/html,<script>alert(1)</script>"')
+        self.assertNotIn('<a', result, 'data: URLs must not produce anchor tags')
+
+    def test_http_url_gets_link(self):
+        """http:// URLs must produce a safe external link."""
+        result = self._run_js_plain('"http://example.com"')
+        self.assertIn('<a', result, 'http:// URLs must produce anchor tags')
+        self.assertIn('target="_blank"', result, 'Link must open in new tab')
+        self.assertIn('rel="noopener noreferrer"', result, 'Link must have security rel')
+
+    def test_https_url_gets_link(self):
+        """https:// URLs must produce a safe external link."""
+        result = self._run_js_plain('"https://attack.mitre.org/techniques/T1055/"')
+        self.assertIn('<a', result, 'https:// URLs must produce anchor tags')
+        self.assertIn('target="_blank"', result, 'Link must open in new tab')
+        self.assertIn('rel="noopener noreferrer"', result, 'Link must have security rel')
+
+    def test_plain_text_not_linkified(self):
+        """Non-URL strings must be returned as plain text."""
+        result = self._run_js_plain('"ReversingLabs"')
+        self.assertNotIn('<a', result, 'Plain text must not produce anchor tags')
+        self.assertEqual(result, 'ReversingLabs')
+
+    def test_case_insensitive_scheme_check(self):
+        """HTTPS:// uppercase must still be recognized as safe."""
+        result = self._run_js_plain('"HTTPS://example.com"')
+        self.assertIn('<a', result, 'Uppercase HTTPS must still be linkified')
+
+    def test_punycode_idn_not_linkified(self):
+        """javascript: URLs disguised with unicode must not slip through."""
+        result = self._run_js_plain('"\\u0000javascript:alert(1)"')
+        self.assertNotIn('<a', result, 'Null-prefixed javascript must not produce anchor tags')
 
 
 if __name__ == '__main__':

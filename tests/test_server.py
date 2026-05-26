@@ -644,13 +644,12 @@ class TestAPIEndpoints(unittest.TestCase):
         mock_check.return_value = True
         matches = [{
             'rule_name': 'TEST_Malware',
-            'classification': 'threat',
             'tags': ['test'],
             'meta': {'author': 'test'},
             'strings': [],
             'file_id': '',
         }]
-        mock_scan.return_value = (matches, 'a' * 64, 'b' * 32, 'c' * 40)
+        mock_scan.return_value = (matches, 'a' * 64, 'b' * 32, 'c' * 40, {'file_type': 'PE32 executable', 'entropy': 7.5})
 
         file_data = b'MZ' + b'\x00' * 62
         status, body = self._post_multipart('/api/upload', 'test.exe', file_data)
@@ -684,13 +683,14 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(fi['event_type'], 'fileinfo')
         self.assertEqual(fi['fileinfo']['filename'], 'test.exe')
         self.assertEqual(fi['fileinfo']['size'], 64)
+        self.assertEqual(fi['fileinfo']['metadata']['file_type'], 'PE32 executable')
+        self.assertEqual(fi['fileinfo']['metadata']['entropy'], 7.5)
 
         alert_events = db.query_events_sqlite(db_path, event_type='filealerts')
         self.assertEqual(len(alert_events), 1, 'Must have one filealerts event')
         fa = alert_events[0]
         self.assertEqual(fa['event_type'], 'filealerts')
         self.assertEqual(fa['filealerts']['rule_name'], 'TEST_Malware')
-        self.assertEqual(fa['filealerts']['classification'], 'threat')
 
         # Verify mocks were called
         mock_setup.assert_called_once()
@@ -706,13 +706,12 @@ class TestAPIEndpoints(unittest.TestCase):
         mock_check.return_value = True
         matches = [{
             'rule_name': 'ZIP_Malware',
-            'classification': 'technique',
             'tags': ['zip'],
             'meta': {},
             'strings': [],
             'file_id': '',
         }]
-        mock_scan.return_value = (matches, 'd' * 64, 'e' * 32, 'f' * 40)
+        mock_scan.return_value = (matches, 'd' * 64, 'e' * 32, 'f' * 40, {})
 
         # Create ZIP with a non-PCAP file
         zip_buffer = io.BytesIO()
@@ -779,18 +778,19 @@ class TestAPIEndpoints(unittest.TestCase):
         """Upload handler code must attempt common passwords before rejecting protected ZIPs."""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        # Verify helper exists and handles password fallback
-        self.assertIn("def _extract_zip_contents(zip_data, extract_dir, passwords=None):", content,
-                      'Must define _extract_zip_contents helper')
-        helper_section = content.split("def _extract_zip_contents(zip_data, extract_dir, passwords=None):")[1].split("class Handler(")[0]
+        # Verify shared extraction helper exists
+        self.assertIn("def _attempt_zip_extract(zip_ref, extract_dir, passwords):", content,
+                      'Must define _attempt_zip_extract helper')
+        helper_section = content.split("def _attempt_zip_extract(zip_ref, extract_dir, passwords):")[1].split("def extract_pcap_from_zip(")[0]
         # Should try no password first
-        self.assertIn("extracted = False", helper_section,
-                      'Must track extraction success')
         self.assertIn("zip_ref.extractall(extract_dir)", helper_section,
                       'Must attempt extraction without password')
         # Should try provided passwords
         self.assertIn("for pwd in passwords:", helper_section,
                       'Must loop over candidate passwords')
+        # Verify _extract_zip_contents uses the shared helper
+        self.assertIn("_attempt_zip_extract(zip_ref, extract_dir, passwords)", content,
+                      '_extract_zip_contents must delegate to _attempt_zip_extract')
         # Upload handler should derive passwords from filename
         upload_section = content.split("def handle_post_upload(self):")[1].split("def handle_post_load_url(self):")[0]
         self.assertIn("passwords = [b'infected']", upload_section,
@@ -977,11 +977,12 @@ class TestAPIEndpoints(unittest.TestCase):
         with open(os.path.join(dir_path, 'name.txt'), 'w') as f:
             f.write('capture.zip')
 
-        # Create .phase to simulate in-progress analysis (reanalyze should clear it)
-        with open(os.path.join(dir_path, '.phase'), 'w') as f:
-            f.write('network')
+        # Remove .phase so reanalyze is allowed (simulates completed analysis)
+        phase_path = os.path.join(dir_path, '.phase')
+        if os.path.exists(phase_path):
+            os.unlink(phase_path)
 
-        # Call reanalyze
+        # Call reanalyze when no .phase exists
         status, body = self._post('/api/reanalyze', {'md5': md5})
         self.assertEqual(status, 200)
 
@@ -993,6 +994,33 @@ class TestAPIEndpoints(unittest.TestCase):
         # Verify artifacts were removed
         self.assertFalse(os.path.exists(os.path.join(dir_path, 'eve.json')), 'eve.json must be removed')
         self.assertFalse(os.path.exists(os.path.join(dir_path, 'events.db')), 'events.db must be removed')
+
+    def test_reanalyze_blocked_when_analysis_in_progress(self):
+        """Reanalyze must return 409 when .phase file indicates active analysis."""
+        import io, zipfile as zf
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x04' * 100
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('capture.pcap', pcap_data)
+        zip_data = zip_buffer.getvalue()
+        status, body = self._post_multipart('/api/upload', 'capture.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        md5 = data['md5']
+        dir_path = os.path.join(self.tmpdir, md5)
+
+        import time
+        time.sleep(0.2)
+
+        # Create .phase to simulate in-progress analysis
+        with open(os.path.join(dir_path, '.phase'), 'w') as f:
+            f.write('network')
+
+        # Call reanalyze — should be blocked
+        status, body = self._post('/api/reanalyze', {'md5': md5})
+        self.assertEqual(status, 409, 'Reanalyze must be blocked when .phase exists')
+        result = json.loads(body)
+        self.assertIn('already in progress', result.get('error', '').lower())
 
     def test_upload_password_protected_zip(self):
         """Behavioral: upload must extract password-protected ZIPs using common passwords."""
@@ -1408,8 +1436,8 @@ class TestAirgapFallback(unittest.TestCase):
             content = f.read()
         self.assertIn('rules.emergingthreats.net', content,
                       'Must check connectivity to rules server')
-        self.assertIn('socket.create_connection', content,
-                      'Must use socket.create_connection for check')
+        self.assertIn('is_host_reachable', content,
+                      'Must delegate to is_host_reachable for network check')
 
     def test_baked_in_rules_path_defined(self):
         """Verify baked-in rules path is referenced"""
@@ -1635,32 +1663,90 @@ class TestYaraScannerModule(unittest.TestCase):
         self.assertEqual(matches[0]['tags'], [])
         self.assertEqual(matches[0]['meta'], {'author': '_pusher_', 'date': '2015-08'})
 
-    def test_build_rule_classifications(self):
-        """Verify _build_rule_classifications assigns correct classification levels."""
-        import yara_scanner
-        import tempfile
-        import os
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create fake rule files with actual rule declarations
-            os.makedirs(os.path.join(tmpdir, 'yara-rules', 'malware'))
-            os.makedirs(os.path.join(tmpdir, 'yara-rules', 'capabilities'))
-            os.makedirs(os.path.join(tmpdir, 'neo23x0'))
-            with open(os.path.join(tmpdir, 'yara-rules', 'malware', 'MALW_Test.yar'), 'w') as f:
-                f.write('rule MALW_Test {\n  strings:\n    $a = "test"\n  condition:\n    $a\n}\n')
-            with open(os.path.join(tmpdir, 'yara-rules', 'capabilities', 'capability.yar'), 'w') as f:
-                f.write('rule capability {\n  strings:\n    $a = "test"\n  condition:\n    $a\n}\n')
-            with open(os.path.join(tmpdir, 'neo23x0', 'APT_FancyBear.yar'), 'w') as f:
-                f.write('rule APT_FancyBear {\n  strings:\n    $a = "test"\n  condition:\n    $a\n}\n')
-            with open(os.path.join(tmpdir, 'neo23x0', 'SUSP_Unknown.yar'), 'w') as f:
-                f.write('rule SUSP_Unknown {\n  strings:\n    $a = "test"\n  condition:\n    $a\n}\n')
-            with open(os.path.join(tmpdir, 'neo23x0', 'IsPE32.yar'), 'w') as f:
-                f.write('rule IsPE32 {\n  strings:\n    $a = "test"\n  condition:\n    $a\n}\n')
-            classifications = yara_scanner._build_rule_classifications(tmpdir)
-            self.assertEqual(classifications.get('MALW_Test'), 'threat')
-            self.assertEqual(classifications.get('capability'), 'technique')
-            self.assertEqual(classifications.get('APT_FancyBear'), 'threat')
-            self.assertEqual(classifications.get('SUSP_Unknown'), 'technique')
-            self.assertEqual(classifications.get('IsPE32'), 'informational')
+
+class TestZipBombPrevention(unittest.TestCase):
+    def test_oversized_zip_member_rejected(self):
+        """ZIP with a member whose uncompressed size exceeds MAX_UPLOAD_SIZE must be rejected."""
+        import validators
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w') as zf:
+            zf.writestr('normal.txt', b'hello world')
+        zip_buffer.seek(0)
+        with zipfile.ZipFile(zip_buffer, 'r') as zf:
+            # Patch getinfo to claim a huge uncompressed size
+            real_getinfo = zf.getinfo
+            def fake_getinfo(name):
+                info = real_getinfo(name)
+                info.file_size = config.MAX_UPLOAD_SIZE + 1
+                return info
+            zf.getinfo = fake_getinfo
+            with self.assertRaises(ValueError) as ctx:
+                validators.validate_zip_extraction(zf, '/tmp/extract')
+            self.assertIn('ZIP member too large', str(ctx.exception))
+
+    def test_total_uncompressed_size_rejected(self):
+        """ZIP whose total uncompressed size exceeds MAX_UPLOAD_SIZE must be rejected."""
+        import validators
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w') as zf:
+            zf.writestr('file1.txt', b'hello')
+            zf.writestr('file2.txt', b'world')
+        zip_buffer.seek(0)
+        with zipfile.ZipFile(zip_buffer, 'r') as zf:
+            # Patch getinfo so each member claims half the limit + 1
+            real_getinfo = zf.getinfo
+            def fake_getinfo(name):
+                info = real_getinfo(name)
+                info.file_size = config.MAX_UPLOAD_SIZE // 2 + 1
+                return info
+            zf.getinfo = fake_getinfo
+            with self.assertRaises(ValueError) as ctx:
+                validators.validate_zip_extraction(zf, '/tmp/extract')
+            self.assertIn('ZIP contents exceed maximum', str(ctx.exception))
+
+    def test_normal_zip_accepted(self):
+        """ZIP with total uncompressed size under MAX_UPLOAD_SIZE must pass."""
+        import validators
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w') as zf:
+            zf.writestr('normal.txt', b'hello world')
+        zip_buffer.seek(0)
+        with zipfile.ZipFile(zip_buffer, 'r') as zf:
+            # Should not raise
+            validators.validate_zip_extraction(zf, '/tmp/extract')
+
+
+class TestReadPostBody(unittest.TestCase):
+    def _make_handler(self, content_length):
+        """Create a minimal Handler instance with mocked request and headers."""
+        from io import BytesIO
+        handler = server.Handler.__new__(server.Handler)
+        handler.headers = unittest.mock.MagicMock()
+        handler.headers.get = unittest.mock.MagicMock(return_value=str(content_length))
+        handler.rfile = BytesIO(b'a' * max(0, content_length))
+        handler._send_error = unittest.mock.MagicMock()
+        return handler
+
+    def test_negative_content_length_rejected(self):
+        """Negative Content-Length must return None and send 400."""
+        handler = self._make_handler(-1)
+        result = handler._read_post_body(config.MAX_UPLOAD_SIZE)
+        self.assertIsNone(result)
+        handler._send_error.assert_called_once_with(400, 'Invalid Content-Length')
+
+    def test_oversized_content_length_rejected(self):
+        """Content-Length exceeding max_size must return None and send 400."""
+        handler = self._make_handler(config.MAX_UPLOAD_SIZE + 1)
+        result = handler._read_post_body(config.MAX_UPLOAD_SIZE)
+        self.assertIsNone(result)
+        handler._send_error.assert_called_once_with(400, 'Invalid Content-Length')
+
+    def test_valid_content_length_returns_body(self):
+        """Valid Content-Length must return the body bytes."""
+        handler = self._make_handler(10)
+        result = handler._read_post_body(config.MAX_UPLOAD_SIZE)
+        self.assertEqual(result, b'a' * 10)
+        handler._send_error.assert_not_called()
 
 
 if __name__ == '__main__':

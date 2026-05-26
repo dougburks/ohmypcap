@@ -56,9 +56,9 @@ def _build_search_terms(q):
     if q is None:
         return []
     if isinstance(q, str):
-        return [q.strip()[:200]] if q.strip() else []
+        return [q.strip()[:config.MAX_SEARCH_TERM_LENGTH]] if q.strip() else []
     if isinstance(q, list):
-        return [x.strip()[:200] for x in q if x.strip()]
+        return [x.strip()[:config.MAX_SEARCH_TERM_LENGTH] for x in q if x.strip()]
     return []
 
 
@@ -72,25 +72,63 @@ def _db_connection(db_path):
         conn.close()
 
 
+def _init_db(conn):
+    """Initialize SQLite schema, PRAGMAs, and FTS5.
+
+    Returns True if FTS5 is available, False otherwise.
+    """
+    conn.execute('PRAGMA journal_mode = WAL;')
+    conn.execute('PRAGMA synchronous = NORMAL;')
+    conn.executescript(SQLITE_SCHEMA)
+
+    try:
+        conn.execute('''
+            CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
+                json_data,
+                content='events',
+                content_rowid='id'
+            )
+        ''')
+        return True
+    except Exception:
+        return False
+
+
+def _insert_event(conn, event_dict, has_fts):
+    """Insert an event dict into events and optionally index in FTS5.
+
+    Returns the rowid of the inserted event.
+    """
+    line = json.dumps(event_dict, separators=(',', ':'))
+    cur = conn.execute(
+        '''INSERT INTO events (event_type, timestamp, src_ip, src_port, dest_ip, dest_port, protocol, app_proto, json_data)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (
+            event_dict.get('event_type', ''),
+            event_dict.get('timestamp', ''),
+            event_dict.get('src_ip', ''),
+            event_dict.get('src_port', 0),
+            event_dict.get('dest_ip', ''),
+            event_dict.get('dest_port', 0),
+            event_dict.get('proto', ''),
+            event_dict.get('app_proto', ''),
+            line,
+        )
+    )
+    if has_fts:
+        conn.execute(
+            'INSERT INTO events_fts (rowid, json_data) VALUES (?, ?)',
+            (cur.lastrowid, line)
+        )
+    return cur.lastrowid
+
+
 def create_sqlite_db(db_path, eve_file):
     with _db_connection(db_path) as conn:
-        conn.execute('PRAGMA journal_mode = WAL;')
-        conn.execute('PRAGMA synchronous = NORMAL;')
-        conn.executescript(SQLITE_SCHEMA)
-
-        try:
-            conn.execute('''
-                CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
-                    json_data,
-                    content='events',
-                    content_rowid='id'
-                )
-            ''')
-            has_fts = True
-        except Exception:
-            has_fts = False
+        has_fts = _init_db(conn)
 
         fileinfo_by_sha256 = {}
+        fileinfo_rowids = {}
 
         with open(eve_file, 'r') as f:
             for line in f:
@@ -99,33 +137,14 @@ def create_sqlite_db(db_path, eve_file):
                     continue
                 try:
                     event = json.loads(line)
-                    event_type = get_event_type(event)
-                    timestamp = get_timestamp(event)
-
-                    src_ip = get_src_ip(event)
-                    src_port = get_src_port(event)
-                    dest_ip = get_dest_ip(event)
-                    dest_port = get_dest_port(event)
-                    protocol = get_protocol(event)
-                    app_proto = get_app_proto(event)
-
-                    cur = conn.execute(
-                        '''INSERT INTO events (event_type, timestamp, src_ip, src_port, dest_ip, dest_port, protocol, app_proto, json_data)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (event_type, timestamp, src_ip, src_port, dest_ip, dest_port, protocol, app_proto, line)
-                    )
-
-                    if has_fts:
-                        conn.execute(
-                            'INSERT INTO events_fts (rowid, json_data) VALUES (?, ?)',
-                            (cur.lastrowid, line)
-                        )
+                    rowid = _insert_event(conn, event, has_fts)
 
                     # Index fileinfo events by SHA256 for YARA correlation
-                    if event_type == 'fileinfo':
+                    if event.get('event_type') == 'fileinfo':
                         sha256 = event.get('fileinfo', {}).get('sha256')
                         if sha256:
                             fileinfo_by_sha256[sha256] = event
+                            fileinfo_rowids[sha256] = rowid
                 except json.JSONDecodeError:
                     continue
 
@@ -151,7 +170,6 @@ def create_sqlite_db(db_path, eve_file):
                         'app_proto': get_app_proto(fileinfo),
                         'filealerts': {
                             'rule_name': match.get('rule_name', ''),
-                            'classification': match.get('classification', 'informational'),
                             'tags': match.get('tags', []),
                             'sha256': sha256,
                             'file_id': match.get('file_id', ''),
@@ -159,35 +177,35 @@ def create_sqlite_db(db_path, eve_file):
                             'meta': match.get('meta', {}),
                         },
                     }
-                    synthetic_line = json.dumps(synthetic_event, separators=(',', ':'))
-                    cur = conn.execute(
-                        '''INSERT INTO events (event_type, timestamp, src_ip, src_port, dest_ip, dest_port, protocol, app_proto, json_data)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (
-                            'filealerts',
-                            synthetic_event['timestamp'],
-                            synthetic_event['src_ip'],
-                            synthetic_event['src_port'],
-                            synthetic_event['dest_ip'],
-                            synthetic_event['dest_port'],
-                            synthetic_event['proto'],
-                            synthetic_event['app_proto'],
-                            synthetic_line,
-                        )
-                    )
-                    if has_fts:
-                        conn.execute(
-                            'INSERT INTO events_fts (rowid, json_data) VALUES (?, ?)',
-                            (cur.lastrowid, synthetic_line)
-                        )
+                    _insert_event(conn, synthetic_event, has_fts)
             except (json.JSONDecodeError, TypeError) as e:
                 print(f'Warning: could not parse YARA matches: {e}')
+
+        # Merge file metadata for zero-YARA-match files
+        meta_file = db_path.replace('events.db', 'file_metadata.json')
+        if os.path.exists(meta_file) and fileinfo_by_sha256:
+            try:
+                with open(meta_file, 'r') as f:
+                    file_metadata = json.load(f)
+                for sha256, metadata in file_metadata.items():
+                    fileinfo = fileinfo_by_sha256.get(sha256)
+                    rowid = fileinfo_rowids.get(sha256)
+                    if fileinfo and rowid:
+                        fileinfo.setdefault('fileinfo', {})['metadata'] = metadata
+                        updated_json = json.dumps(fileinfo, separators=(',', ':'))
+                        conn.execute(
+                            'UPDATE events SET json_data = ? WHERE id = ?',
+                            (updated_json, rowid)
+                        )
+                        # FTS5 with content=events auto-updates when content table changes
+            except (json.JSONDecodeError, TypeError) as e:
+                print(f'Warning: could not parse file_metadata.json: {e}')
 
         conn.execute('PRAGMA optimize;')
         conn.commit()
 
 
-def create_file_analysis_db(db_path, file_path, yara_matches, file_md5, file_sha1, file_sha256, magic_desc=''):
+def create_file_analysis_db(db_path, file_path, yara_matches, file_md5, file_sha1, file_sha256, magic_desc='', metadata=None):
     """Create events.db for a standalone file scan (non-PCAP).
 
     Inserts one synthetic fileinfo event and zero or more filealerts events
@@ -212,21 +230,7 @@ def create_file_analysis_db(db_path, file_path, yara_matches, file_md5, file_sha
     file_size = os.path.getsize(file_path)
 
     with _db_connection(db_path) as conn:
-        conn.execute('PRAGMA journal_mode = WAL;')
-        conn.execute('PRAGMA synchronous = NORMAL;')
-        conn.executescript(SQLITE_SCHEMA)
-
-        try:
-            conn.execute('''
-                CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
-                    json_data,
-                    content='events',
-                    content_rowid='id'
-                )
-            ''')
-            has_fts = True
-        except Exception:
-            has_fts = False
+        has_fts = _init_db(conn)
 
         # Insert synthetic fileinfo event
         fileinfo_event = {
@@ -245,19 +249,10 @@ def create_file_analysis_db(db_path, file_path, yara_matches, file_md5, file_sha
                 'sha1': file_sha1,
                 'sha256': file_sha256,
                 'magic': magic_desc,
+                **({'metadata': metadata} if metadata else {}),
             },
         }
-        fileinfo_line = json.dumps(fileinfo_event, separators=(',', ':'))
-        cur = conn.execute(
-            '''INSERT INTO events (event_type, timestamp, src_ip, src_port, dest_ip, dest_port, protocol, app_proto, json_data)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-            ('fileinfo', timestamp, '', 0, '', 0, '', '', fileinfo_line)
-        )
-        if has_fts:
-            conn.execute(
-                'INSERT INTO events_fts (rowid, json_data) VALUES (?, ?)',
-                (cur.lastrowid, fileinfo_line)
-            )
+        _insert_event(conn, fileinfo_event, has_fts)
 
         # Insert synthetic filealerts events from YARA matches
         for match in yara_matches:
@@ -272,7 +267,6 @@ def create_file_analysis_db(db_path, file_path, yara_matches, file_md5, file_sha
                 'app_proto': '',
                 'filealerts': {
                     'rule_name': match.get('rule_name', ''),
-                    'classification': match.get('classification', 'informational'),
                     'tags': match.get('tags', []),
                     'sha256': file_sha256,
                     'file_id': '',
@@ -280,17 +274,7 @@ def create_file_analysis_db(db_path, file_path, yara_matches, file_md5, file_sha
                     'meta': match.get('meta', {}),
                 },
             }
-            synthetic_line = json.dumps(synthetic_event, separators=(',', ':'))
-            cur = conn.execute(
-                '''INSERT INTO events (event_type, timestamp, src_ip, src_port, dest_ip, dest_port, protocol, app_proto, json_data)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                ('filealerts', timestamp, '', 0, '', 0, '', '', synthetic_line)
-            )
-            if has_fts:
-                conn.execute(
-                    'INSERT INTO events_fts (rowid, json_data) VALUES (?, ?)',
-                    (cur.lastrowid, synthetic_line)
-                )
+            _insert_event(conn, synthetic_event, has_fts)
 
         conn.execute('PRAGMA optimize;')
         conn.commit()
@@ -327,8 +311,16 @@ def _build_where_conditions(terms, has_fts, event_type, event_type_col):
     return conditions, params
 
 
+def _has_events_table(conn):
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events'")
+    return cursor.fetchone() is not None
+
+
 def query_events_sqlite(db_path, event_type=None, offset=0, limit=1000, q=None):
     with _db_connection(db_path) as conn:
+        if not _has_events_table(conn):
+            return []
+
         conn.row_factory = sqlite3.Row
 
         terms = _build_search_terms(q)
@@ -349,12 +341,18 @@ def query_events_sqlite(db_path, event_type=None, offset=0, limit=1000, q=None):
         sql += ' ORDER BY timestamp LIMIT ? OFFSET ?'
         params = list(params) + [limit, offset]
 
-        cursor = conn.execute(sql, params)
-        return [json.loads(row['json_data']) for row in cursor.fetchall()]
+        try:
+            cursor = conn.execute(sql, params)
+            return [json.loads(row['json_data']) for row in cursor.fetchall()]
+        except sqlite3.OperationalError:
+            return []
 
 
 def get_event_count_sqlite(db_path, event_type=None, q=None):
     with _db_connection(db_path) as conn:
+        if not _has_events_table(conn):
+            return 0
+
         terms = _build_search_terms(q)
         has_fts = _has_fts5(conn) if terms else False
 
@@ -371,12 +369,18 @@ def get_event_count_sqlite(db_path, event_type=None, q=None):
         if conditions:
             sql += ' WHERE ' + ' AND '.join(conditions)
 
-        cursor = conn.execute(sql, params)
-        return cursor.fetchone()[0]
+        try:
+            cursor = conn.execute(sql, params)
+            return cursor.fetchone()[0]
+        except sqlite3.OperationalError:
+            return 0
 
 
 def get_event_types_sqlite(db_path, q=None):
     with _db_connection(db_path) as conn:
+        if not _has_events_table(conn):
+            return {}
+
         conn.row_factory = sqlite3.Row
 
         terms = _build_search_terms(q)
@@ -396,8 +400,11 @@ def get_event_types_sqlite(db_path, q=None):
             sql += ' WHERE ' + ' AND '.join(conditions)
         sql += f' GROUP BY {event_type_col} ORDER BY cnt DESC'
 
-        cursor = conn.execute(sql, params)
-        return {row['event_type']: row['cnt'] for row in cursor.fetchall()}
+        try:
+            cursor = conn.execute(sql, params)
+            return {row['event_type']: row['cnt'] for row in cursor.fetchall()}
+        except sqlite3.OperationalError:
+            return {}
 
 
 

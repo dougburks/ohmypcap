@@ -2,12 +2,12 @@
 import os
 import re
 import shutil
-import socket
 import subprocess
 import threading
 
 import config
 from db import create_sqlite_db
+from validators import is_host_reachable
 from yara_scanner import run_yara_pipeline
 
 REQUIRED_EXECUTABLES = ['tcpdump', 'tshark', 'suricata', 'suricata-update']
@@ -23,11 +23,7 @@ def check_executables():
 
 
 def has_internet_access():
-    try:
-        socket.create_connection(("rules.emergingthreats.net", 80), timeout=5)
-        return True
-    except OSError:
-        return False
+    return is_host_reachable('rules.emergingthreats.net', 80, timeout=5)
 
 
 def setup_suricata_config(data_dir=None):
@@ -161,7 +157,19 @@ def spawn_suricata(dir_path, pcap_path, suricata_config_path=None, data_dir=None
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
-        threading.Thread(target=lambda: (proc.wait(), on_suricata_done()), daemon=True).start()
+
+        def _suricata_watchdog():
+            """Kill Suricata if it runs longer than the configured timeout."""
+            try:
+                proc.wait(timeout=config.SURICATA_RUN_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                _set_error(dir_path, f'Suricata timed out after {config.SURICATA_RUN_TIMEOUT}s')
+                _clear_phase(dir_path)
+                return
+            on_suricata_done()
+
+        threading.Thread(target=_suricata_watchdog, daemon=True).start()
         return True
     except (OSError, PermissionError) as e:
         _set_error(dir_path, f'Suricata failed to start: {e}')

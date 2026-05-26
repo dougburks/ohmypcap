@@ -9,8 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tcpdump \
     tshark \
     yara \
-    git \
+    curl \
+    unzip \
     file \
+    libimage-exiftool-perl \
     && rm -rf /var/lib/apt/lists/*
 
 ENV DATA_DIR=/data
@@ -19,7 +21,7 @@ ENV PORT=8000
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY config.py db.py models.py validators.py suricata.py yara_scanner.py ohmypcap.py ohmypcap.html ./
+COPY config.py db.py models.py validators.py suricata.py yara_scanner.py file_analyzer.py exif_analyzer.py ohmypcap.py ohmypcap.html ./
 COPY static/ static/
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
@@ -28,15 +30,13 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /usr/share/suricata/rules && \
     suricata-update --no-test --data-dir /usr/share/suricata --output /usr/share/suricata/rules
 
-# Bake YARA rules into image for air-gapped deployments
-RUN mkdir -p /usr/share/yara-rules/neo23x0 && \
-    git clone --depth 1 https://github.com/Neo23x0/signature-base /tmp/signature-base && \
-    cp /tmp/signature-base/yara/*.yar /usr/share/yara-rules/neo23x0/ && \
-    rm -rf /tmp/signature-base && \
-    git clone --depth 1 https://github.com/YARA-Rules/rules.git /usr/share/yara-rules/yara-rules
-
-COPY scripts/generate-yara-index.py /usr/local/bin/
-RUN python3 /usr/local/bin/generate-yara-index.py
+# Bake YARA Forge rules into image for air-gapped deployments
+RUN mkdir -p /usr/share/yara-rules && \
+    curl -fsSL -o /tmp/yara-forge-full.zip \
+    "https://github.com/YARAHQ/yara-forge/releases/latest/download/yara-forge-rules-full.zip" && \
+    unzip -p /tmp/yara-forge-full.zip "packages/full/yara-rules-full.yar" \
+    > /usr/share/yara-rules/yara-rules-full.yar && \
+    rm /tmp/yara-forge-full.zip
 
 RUN mkdir -p /data && chown -R 1000:1000 /data
 

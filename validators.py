@@ -3,6 +3,7 @@ import os
 import ipaddress
 import socket
 from urllib.parse import urlparse
+import config
 
 ALLOWED_URL_SCHEMES = ('http', 'https')
 BLOCKED_HOSTS = ('localhost', '127.0.0.1', '0.0.0.0', '::1')
@@ -56,7 +57,13 @@ def validate_url_safety(url):
         raise ValueError("Access to localhost is not allowed")
 
     try:
-        addrinfo = socket.getaddrinfo(hostname, None)
+        # Set a 5-second timeout to prevent hanging on slow/unresponsive DNS
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(5)
+        try:
+            addrinfo = socket.getaddrinfo(hostname, None)
+        finally:
+            socket.setdefaulttimeout(old_timeout)
         resolved_ips = set()
         for info in addrinfo:
             resolved_ips.add(info[4][0])
@@ -67,13 +74,22 @@ def validate_url_safety(url):
                     raise ValueError(f"Access to private/internal addresses is not allowed ({addr})")
     except socket.gaierror:
         raise ValueError(f"Could not resolve hostname: {hostname}")
+    except socket.timeout:
+        raise ValueError(f"DNS resolution timed out for hostname: {hostname}")
 
 
 def validate_zip_extraction(zip_ref, extract_path):
+    total_uncompressed = 0
     for member in zip_ref.namelist():
         member_path = os.path.realpath(os.path.join(extract_path, member))
         if not member_path.startswith(os.path.realpath(extract_path) + os.sep):
             raise ValueError(f"Zip slip detected: {member}")
+        info = zip_ref.getinfo(member)
+        total_uncompressed += info.file_size
+        if info.file_size > config.MAX_UPLOAD_SIZE:
+            raise ValueError(f"ZIP member too large: {member}")
+    if total_uncompressed > config.MAX_UPLOAD_SIZE:
+        raise ValueError("ZIP contents exceed maximum allowed size")
 
 
 def validate_pcap_content(data):
@@ -87,3 +103,15 @@ def validate_pcap_content(data):
     if magic in (b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'):
         return True
     return False
+
+
+def is_host_reachable(host, port, timeout=5):
+    """Check if a TCP host:port is reachable.
+
+    Returns True if connection succeeds, False otherwise.
+    """
+    try:
+        socket.create_connection((host, port), timeout=timeout)
+        return True
+    except OSError:
+        return False

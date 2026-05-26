@@ -30,7 +30,7 @@ from suricata import (
 from yara_scanner import check_yara_executable, setup_yara_rules, scan_single_file
 import config
 
-VERSION = '3.0.0'
+VERSION = '4.0.0'
 PORT = int(os.environ.get('PORT', 8000))
 BIND_ADDRESS = os.environ.get('BIND_ADDRESS', '127.0.0.1')
 DATA_DIR = os.environ.get('DATA_DIR', os.path.expanduser('~/ohmypcap-data'))
@@ -42,6 +42,33 @@ SURICATA_DIR = os.path.join(DATA_DIR, 'suricata')
 SURICATA_RULES_DIR = os.path.join(SURICATA_DIR, 'rules')
 
 PCAP_EXTENSIONS = ('.pcap', '.pcapng', '.cap', '.trace')
+MD5_RE = re.compile(r'^[a-f0-9]{32}$')
+
+
+def _attempt_zip_extract(zip_ref, extract_dir, passwords):
+    """Extract ZIP contents, trying passwords if needed.
+
+    Returns True on success, False if extraction failed.
+    Raises ValueError on zip slip or size violations.
+    """
+    validate_zip_extraction(zip_ref, extract_dir)
+    extracted = False
+    try:
+        zip_ref.extractall(extract_dir)
+        extracted = True
+    except RuntimeError:
+        pass
+
+    if not extracted and passwords:
+        for pwd in passwords:
+            try:
+                zip_ref.extractall(extract_dir, pwd=pwd)
+                extracted = True
+                break
+            except RuntimeError:
+                continue
+
+    return extracted
 
 
 def extract_pcap_from_zip(zip_data, extract_dir, passwords=None):
@@ -56,24 +83,7 @@ def extract_pcap_from_zip(zip_data, extract_dir, passwords=None):
 
     try:
         with zipfile.ZipFile(tmp_zip, 'r') as zip_ref:
-            validate_zip_extraction(zip_ref, extract_dir)
-            extracted = False
-            try:
-                zip_ref.extractall(extract_dir)
-                extracted = True
-            except RuntimeError:
-                pass
-
-            if not extracted and passwords:
-                for pwd in passwords:
-                    try:
-                        zip_ref.extractall(extract_dir, pwd=pwd)
-                        extracted = True
-                        break
-                    except RuntimeError:
-                        continue
-
-            if not extracted:
+            if not _attempt_zip_extract(zip_ref, extract_dir, passwords):
                 raise ValueError('Password-protected ZIP could not be opened. Please extract the PCAP first.')
 
         pcap_files = [f for f in os.listdir(extract_dir) if f.endswith(PCAP_EXTENSIONS)]
@@ -116,24 +126,7 @@ def _extract_zip_contents(zip_data, extract_dir, passwords=None):
 
     try:
         with zipfile.ZipFile(tmp_zip, 'r') as zip_ref:
-            validate_zip_extraction(zip_ref, extract_dir)
-            extracted = False
-            try:
-                zip_ref.extractall(extract_dir)
-                extracted = True
-            except RuntimeError:
-                pass
-
-            if not extracted and passwords:
-                for pwd in passwords:
-                    try:
-                        zip_ref.extractall(extract_dir, pwd=pwd)
-                        extracted = True
-                        break
-                    except RuntimeError:
-                        continue
-
-            if not extracted:
+            if not _attempt_zip_extract(zip_ref, extract_dir, passwords):
                 raise ValueError('Password-protected ZIP could not be opened.')
     finally:
         if os.path.exists(tmp_zip):
@@ -181,6 +174,33 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
 
+    def _read_post_body(self, max_size):
+        """Validate Content-Length and read POST body safely.
+
+        Returns the raw body bytes, or None and sends an error response
+        if validation fails.
+        """
+        content_length = int(self.headers.get('Content-Length', 0))
+        if content_length < 0 or content_length > max_size:
+            self._send_error(400, 'Invalid Content-Length')
+            return None
+        return self.rfile.read(content_length)
+
+    def _resolve_md5_dir(self, md5):
+        """Validate MD5 format and resolve to a safe data directory path.
+
+        Returns the absolute directory path, or raises ValueError with a
+        descriptive message if validation fails.
+        """
+        if not md5:
+            raise ValueError('md5 parameter required')
+        if not MD5_RE.match(md5):
+            raise ValueError('Invalid MD5')
+        dir_path = os.path.join(DATA_DIR, md5)
+        if not is_safe_path(DATA_DIR, dir_path):
+            raise ValueError('Invalid path')
+        return dir_path
+
     def _validate_stream_params(self, params):
         src = params.get('src', [''])[0]
         sport = params.get('sport', [''])[0]
@@ -192,7 +212,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return None, 'md5 parameter required'
         if not (validate_ip(src) and validate_ip(dst) and validate_port(sport) and validate_port(dport)):
             return None, 'Invalid IP or port'
-        if not re.match(r'^[a-f0-9]{32}$', md5):
+        if not MD5_RE.match(md5):
             return None, 'Invalid MD5'
 
         dir_path = os.path.join(DATA_DIR, md5)
@@ -246,8 +266,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         handler_name = self.GET_ROUTES.get(path)
         if handler_name:
             getattr(self, handler_name)(params)
-        else:
+        elif path == '/ohmypcap.html' or path.startswith('/static/'):
             super().do_GET()
+        else:
+            self._send_error(404, 'Not found')
 
     def do_POST(self):
         handler_name = self.POST_ROUTES.get(self.path)
@@ -265,7 +287,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not md5:
             self._send_json([])
             return
-        if not re.match(r'^[a-f0-9]{32}$', md5):
+        if not MD5_RE.match(md5):
             self._send_json([])
             return
         dir_path = os.path.join(DATA_DIR, md5)
@@ -298,7 +320,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not md5:
             self._send_json({'error': 'md5 parameter required'})
             return
-        if not re.match(r'^[a-f0-9]{32}$', md5):
+        if not MD5_RE.match(md5):
             self._send_json({})
             return
         dir_path = os.path.join(DATA_DIR, md5)
@@ -323,7 +345,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         q_raw = params.get('q', [])
         q = [x.strip()[:200] for x in q_raw if x.strip()] or None
 
-        if not re.match(r'^[a-f0-9]{32}$', md5):
+        if not MD5_RE.match(md5):
             self._send_json({'count': 0})
             return
         dir_path = os.path.join(DATA_DIR, md5)
@@ -480,7 +502,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         analyses = []
         if os.path.exists(DATA_DIR):
             for md5_dir in os.listdir(DATA_DIR):
-                if not re.match(r'^[a-f0-9]{32}$', md5_dir):
+                if not MD5_RE.match(md5_dir):
                     continue
                 dir_path = os.path.join(DATA_DIR, md5_dir)
                 if not os.path.isdir(dir_path):
@@ -510,7 +532,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def handle_get_load_analysis(self, params):
         md5 = params.get('md5', [''])[0]
-        if not re.match(r'^[a-f0-9]{32}$', md5):
+        if not MD5_RE.match(md5):
             self._send_error(400, 'Invalid MD5')
             return
 
@@ -544,7 +566,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def handle_get_delete_analysis(self, params):
         md5 = params.get('md5', [''])[0]
-        if not re.match(r'^[a-f0-9]{32}$', md5):
+        if not MD5_RE.match(md5):
             self._send_error(400, 'Invalid MD5')
             return
 
@@ -561,7 +583,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def handle_get_pcap_path(self, params):
         md5 = params.get('md5', [''])[0]
-        if not re.match(r'^[a-f0-9]{32}$', md5):
+        if not MD5_RE.match(md5):
             self._send_error(400, 'Invalid MD5')
             return
 
@@ -574,7 +596,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'text/plain')
             self.end_headers()
-            self.wfile.write(os.path.join(dir_path, pcap_files[0]).encode())
+            # Return only the filename, not the absolute path
+            self.wfile.write(pcap_files[0].encode())
         else:
             self._send_error(404, 'No pcap found')
 
@@ -684,14 +707,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
             try:
                 data_dir = os.environ.get('DATA_DIR', os.path.expanduser('~/ohmypcap-data'))
-                rules_dir = setup_yara_rules(data_dir)
+                rules_file = setup_yara_rules(data_dir)
                 db_file = os.path.join(dir_path, 'events.db')
                 name_path = os.path.join(dir_path, 'name.txt')
 
-                if rules_dir and check_yara_executable():
+                if rules_file and check_yara_executable():
                     try:
-                        matches, sha256, md5, sha1 = scan_single_file(file_path, rules_dir)
-                        create_file_analysis_db(db_file, file_path, matches, md5, sha1, sha256)
+                        matches, sha256, md5, sha1, metadata = scan_single_file(file_path, rules_file)
+                        create_file_analysis_db(db_file, file_path, matches, md5, sha1, sha256, metadata=metadata)
                     except Exception as e:
                         _set_error(dir_path, f'YARA scan failed: {e}')
                         create_file_analysis_db(db_file, file_path, [], '', '', '')
@@ -716,11 +739,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def handle_post_upload(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        if content_length > MAX_UPLOAD_SIZE:
-            self._send_error(413, 'File too large')
+        body = self._read_post_body(MAX_UPLOAD_SIZE)
+        if body is None:
             return
 
+        content_length = len(body)
         content_type = self.headers.get('Content-Type', '')
         match = re.search(r'boundary=(.+)', content_type)
         if not match:
@@ -728,7 +751,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
 
         boundary = match.group(1).encode()
-        body = self.rfile.read(content_length)
 
         parts = body.split(b'--' + boundary)
         file_data = None
@@ -766,12 +788,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send_error(500, 'Internal server error')
 
     def handle_post_load_url(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        if content_length > config.MAX_REQUEST_BODY_SIZE:
-            self._send_error(413, 'Request too large')
+        post_data = self._read_post_body(config.MAX_REQUEST_BODY_SIZE)
+        if post_data is None:
             return
-
-        post_data = self.rfile.read(content_length)
         data = json.loads(post_data)
         url = data.get('url', '')
 
@@ -783,13 +802,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             validate_url_safety(url)
 
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            validate_url_safety(url)
             with urllib.request.urlopen(req, timeout=config.URL_DOWNLOAD_TIMEOUT) as response:
-                file_data = response.read()
-
-            if len(file_data) > MAX_UPLOAD_SIZE:
-                self._send_error(413, 'File too large')
-                return
+                chunk_size = 64 * 1024
+                file_data = bytearray()
+                while True:
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    file_data.extend(chunk)
+                    if len(file_data) > MAX_UPLOAD_SIZE:
+                        self._send_error(413, 'File too large')
+                        return
+                file_data = bytes(file_data)
 
             parsed_url = urlparse(url)
             original_filename = os.path.basename(parsed_url.path)
@@ -811,12 +835,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send_error(500, 'Internal server error')
 
     def handle_post_check_status(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(content_length)
+        post_data = self._read_post_body(config.MAX_REQUEST_BODY_SIZE)
+        if post_data is None:
+            return
         data = json.loads(post_data)
         md5 = data.get('md5', '')
 
-        if not re.match(r'^[a-f0-9]{32}$', md5):
+        if not MD5_RE.match(md5):
             self._send_error(400, 'Invalid MD5')
             return
 
@@ -867,12 +892,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send_json({'status': 'processing', 'phase': phase})
 
     def handle_post_reanalyze(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(content_length)
+        post_data = self._read_post_body(config.MAX_REQUEST_BODY_SIZE)
+        if post_data is None:
+            return
         data = json.loads(post_data)
         md5 = data.get('md5', '')
 
-        if not re.match(r'^[a-f0-9]{32}$', md5):
+        if not MD5_RE.match(md5):
             self._send_error(400, 'Invalid MD5')
             return
 
@@ -883,6 +909,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
             self._send_error(404, 'Analysis not found')
+            return
+
+        phase_file = os.path.join(dir_path, '.phase')
+        if os.path.exists(phase_file):
+            self._send_error(409, 'Analysis already in progress')
             return
 
         pcap_files = [f for f in os.listdir(dir_path) if f.endswith(PCAP_EXTENSIONS)]

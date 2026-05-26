@@ -25,6 +25,13 @@ YARA_DOWNLOAD_TIMEOUT = 60
 YARA_CLONE_TIMEOUT = 120
 YARA_SCAN_TIMEOUT = 300
 SURICATA_UPDATE_TIMEOUT = 60
+SURICATA_RUN_TIMEOUT = 300                 # 5 minutes max for a single PCAP
+
+# Search / analysis limits
+MAX_SEARCH_TERM_LENGTH = 200               # characters
+HASH_CHUNK_SIZE = 65536                    # bytes for incremental hashing
+MAX_STRINGS_READ_SIZE = 2 * 1024 * 1024    # 2 MB cap for string extraction
+MAX_ENTROPY_READ_SIZE = 10 * 1024 * 1024 # 10 MB cap for entropy calculation
 
 # Thresholds
 STALE_THRESHOLD_SECONDS = 600              # 10 minutes

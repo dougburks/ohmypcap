@@ -133,8 +133,10 @@
         body.file-analysis #aggregations { display: none !important; }
         .file-info-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
         .file-info-card h3 { color: #58a6ff; margin: 0 0 15px 0; font-size: 1rem; text-transform: uppercase; }
-        .file-info-grid { display: grid; grid-template-columns: 120px 1fr; gap: 8px 12px; font-size: 0.9rem; }
-        .file-info-grid .label { color: #8b949e; }
+        .yara-matches-section { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-top: 20px; }
+        .yara-matches-section h3 { color: #58a6ff; margin: 0 0 15px 0; font-size: 1rem; text-transform: uppercase; }
+        .file-info-grid { display: grid; grid-template-columns: 200px 1fr; gap: 8px 12px; font-size: 0.9rem; }
+        .file-info-grid .label { color: #8b949e; white-space: nowrap; }
         .file-info-grid .value { color: #c9d1d9; font-family: monospace; }
         .file-analysis .sections { margin-top: 0; }
         .no-matches { padding: 40px; text-align: center; color: #8b949e; font-size: 0.95rem; }
