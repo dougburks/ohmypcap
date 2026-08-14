@@ -6,6 +6,7 @@ import concurrent.futures
 import json
 import os
 import ssl
+import sqlite3
 import subprocess
 import hashlib
 from urllib.parse import urlparse, parse_qs, urljoin
@@ -27,6 +28,7 @@ from db import (
     get_sigma_alert_count_sqlite, get_event_date_range_sqlite,
     get_sankey_data_sqlite, get_aggregation_data_sqlite,
     set_row_note, has_row_notes,
+    set_acknowledged, set_acknowledged_bulk,
 )
 from validators import (
     validate_ip, validate_port, sanitize_filename, is_safe_path,
@@ -57,7 +59,7 @@ from ai_summary_lookup import get_ai_summary
 import config
 import tomllib
 
-VERSION = '3.2.0'
+VERSION = '4.0.0'
 GITHUB_RELEASES_API = 'https://api.github.com/repos/dougburks/so-crates/releases/latest'
 PORT = int(os.environ.get('PORT', 8000))
 BIND_ADDRESS = os.environ.get('BIND_ADDRESS', '127.0.0.1')
@@ -579,11 +581,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return False
         return True
 
-    def _read_post_body(self, max_size):
-        """Validate Content-Length and read POST body safely.
+    def _parse_content_length(self, max_size):
+        """Parse and bounds-check the Content-Length header.
 
-        Returns the raw body bytes, or None and sends an error response
-        if validation fails.
+        Returns the validated length, or None and sends a 400 error if the
+        header is missing/malformed or outside [0, max_size]. Shared by
+        _read_post_body (which also reads the body right after) and
+        handle_post_upload (which needs the length up front to stream the
+        body through _parse_multipart_stream, rather than buffering it via
+        _read_post_body's own read).
         """
         try:
             content_length = int(self.headers.get('Content-Length', 0))
@@ -592,6 +598,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return None
         if content_length < 0 or content_length > max_size:
             self._send_error(400, 'Invalid Content-Length')
+            return None
+        return content_length
+
+    def _read_post_body(self, max_size):
+        """Validate Content-Length and read POST body safely.
+
+        Returns the raw body bytes, or None and sends an error response
+        if validation fails.
+        """
+        content_length = self._parse_content_length(max_size)
+        if content_length is None:
             return None
         return self.rfile.read(content_length)
 
@@ -628,6 +645,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         dir_path = os.path.join(DATA_DIR, md5)
         if not is_safe_path(DATA_DIR, dir_path):
             return None, 'Invalid path'
+        return dir_path, None
+
+    def _resolve_existing_analysis_dir(self, md5):
+        """Like _resolve_md5_dir, but also requires the directory to
+        actually exist on disk - the "resolve this md5 to an existing
+        analysis, or 400/404" shape shared by handle_post_delete_analysis/
+        rename_analysis/analysis_notes/row_note/reanalyze.
+
+        Returns (dir_path, error). On success error is None. On failure
+        dir_path is None and error is a (status_code, message) tuple - the
+        caller should self._send_error(*error) and return.
+        """
+        dir_path, error = self._resolve_md5_dir(md5)
+        if error:
+            return None, (400, error)
+        if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
+            return None, (404, 'Analysis not found')
         return dir_path, None
 
     def _parse_search_terms(self, params):
@@ -761,6 +795,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         '/api/rename-analysis': 'handle_post_rename_analysis',
         '/api/analysis-notes': 'handle_post_analysis_notes',
         '/api/row-note': 'handle_post_row_note',
+        '/api/acknowledge-alert': 'handle_post_acknowledge_alert',
+        '/api/acknowledge-alerts-bulk': 'handle_post_acknowledge_alerts_bulk',
         '/api/delete-all-analyses': 'handle_post_delete_all_analyses',
         '/api/update-rules': 'handle_post_update_rules',
     }
@@ -804,7 +840,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         md5 = params.get('md5', [''])[0]
         dir_path, error = self._resolve_md5_dir(md5)
         if error:
-            self._send_json([])
+            self._send_error(400, error)
             return
 
         pagination = self._parse_pagination(params)
@@ -817,11 +853,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         q = self._parse_search_terms(params)
         order_by = params.get('order_by', [''])[0] or None
         sort_dir = params.get('sort_dir', ['asc'])[0]
+        # 'only' is the sole recognized value (used by the Acknowledged
+        # Alerts tab's own fetches) - anything else, including the param's
+        # absence, keeps the default exclude-acknowledged behavior every
+        # other tab relies on.
+        acknowledged_only = params.get('acknowledged', [''])[0] == 'only'
 
         db_file = os.path.join(dir_path, 'events.db')
         if os.path.exists(db_file):
             try:
-                json_str, _ids = query_events_sqlite_json(db_file, event_type, offset, limit, q, order_by, sort_dir)
+                json_str, _ids = query_events_sqlite_json(db_file, event_type, offset, limit, q, order_by, sort_dir, acknowledged_only)
                 self._send_raw_json(json_str)
             except Exception:
                 self._send_error(500, 'Database error')
@@ -840,8 +881,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         counts = {}
         date_range = {'min': None, 'max': None}
         if os.path.exists(db_file):
-            counts = get_event_types_sqlite(db_file, q)
-            date_range = get_event_date_range_sqlite(db_file, q)
+            try:
+                counts = get_event_types_sqlite(db_file, q)
+                date_range = get_event_date_range_sqlite(db_file, q)
+            except Exception:
+                self._send_error(500, 'Database error')
+                return
         self._send_json({'counts': counts, 'date_range': date_range})
 
     def handle_get_count(self, params):
@@ -852,11 +897,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         event_type = params.get('type', [''])[0] or None
         q = self._parse_search_terms(params)
+        acknowledged_only = params.get('acknowledged', [''])[0] == 'only'
 
         db_file = os.path.join(dir_path, 'events.db')
 
         if os.path.exists(db_file):
-            count = get_event_count_sqlite(db_file, event_type, q)
+            try:
+                count = get_event_count_sqlite(db_file, event_type, q, acknowledged_only)
+            except Exception:
+                self._send_error(500, 'Database error')
+                return
         else:
             count = 0
         self._send_json({'count': count})
@@ -875,18 +925,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not os.path.exists(db_file):
             self._send_json({'nodes': [], 'links': []})
             return
-        if q is None:
-            cache_key = (md5, event_type)
-            with _CACHE_LOCK:
-                cached = _SANKEY_CACHE.get(cache_key)
-            if cached is not None:
-                self._send_json(cached)
-                return
-            data = get_sankey_data_sqlite(db_file, event_type, q)
-            with _CACHE_LOCK:
-                _SANKEY_CACHE[cache_key] = data
-        else:
-            data = get_sankey_data_sqlite(db_file, event_type, q)
+        try:
+            if q is None:
+                cache_key = (md5, event_type)
+                with _CACHE_LOCK:
+                    cached = _SANKEY_CACHE.get(cache_key)
+                if cached is not None:
+                    self._send_json(cached)
+                    return
+                data = get_sankey_data_sqlite(db_file, event_type, q)
+                with _CACHE_LOCK:
+                    _SANKEY_CACHE[cache_key] = data
+            else:
+                data = get_sankey_data_sqlite(db_file, event_type, q)
+        except Exception:
+            self._send_error(500, 'Database error')
+            return
         self._send_json(data)
 
     def handle_get_aggregation_data(self, params):
@@ -902,18 +956,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not os.path.exists(db_file):
             self._send_json({})
             return
-        if q is None:
-            cache_key = (md5, event_type)
-            with _CACHE_LOCK:
-                cached = _AGGREGATION_CACHE.get(cache_key)
-            if cached is not None:
-                self._send_json(cached)
-                return
-            data = get_aggregation_data_sqlite(db_file, event_type, q)
-            with _CACHE_LOCK:
-                _AGGREGATION_CACHE[cache_key] = data
-        else:
-            data = get_aggregation_data_sqlite(db_file, event_type, q)
+        try:
+            if q is None:
+                cache_key = (md5, event_type)
+                with _CACHE_LOCK:
+                    cached = _AGGREGATION_CACHE.get(cache_key)
+                if cached is not None:
+                    self._send_json(cached)
+                    return
+                data = get_aggregation_data_sqlite(db_file, event_type, q)
+                with _CACHE_LOCK:
+                    _AGGREGATION_CACHE[cache_key] = data
+            else:
+                data = get_aggregation_data_sqlite(db_file, event_type, q)
+        except Exception:
+            self._send_error(500, 'Database error')
+            return
         self._send_json(data)
 
     def handle_get_download_stream(self, params):
@@ -1147,17 +1205,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if data is None:
             return
         md5 = data.get('md5', '')
-        dir_path, error = self._resolve_md5_dir(md5)
+        dir_path, error = self._resolve_existing_analysis_dir(md5)
         if error:
-            self._send_error(400, error)
+            self._send_error(*error)
             return
 
-        if os.path.exists(dir_path) and os.path.isdir(dir_path):
-            shutil.rmtree(dir_path)
-            _evict_analysis_cache(md5)
-            self._send_json({'success': True})
-        else:
-            self._send_error(404, 'Analysis not found')
+        shutil.rmtree(dir_path)
+        _evict_analysis_cache(md5)
+        self._send_json({'success': True})
 
     def handle_post_rename_analysis(self):
         """Overwrite name.txt with a user-chosen display name.
@@ -1170,12 +1225,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if data is None:
             return
         md5 = data.get('md5', '')
-        dir_path, error = self._resolve_md5_dir(md5)
+        dir_path, error = self._resolve_existing_analysis_dir(md5)
         if error:
-            self._send_error(400, error)
-            return
-        if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
-            self._send_error(404, 'Analysis not found')
+            self._send_error(*error)
             return
 
         new_name = data.get('name', '')
@@ -1210,12 +1262,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if data is None:
             return
         md5 = data.get('md5', '')
-        dir_path, error = self._resolve_md5_dir(md5)
+        dir_path, error = self._resolve_existing_analysis_dir(md5)
         if error:
-            self._send_error(400, error)
-            return
-        if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
-            self._send_error(404, 'Analysis not found')
+            self._send_error(*error)
             return
 
         notes = data.get('notes', '')
@@ -1249,12 +1298,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if data is None:
             return
         md5 = data.get('md5', '')
-        dir_path, error = self._resolve_md5_dir(md5)
+        dir_path, error = self._resolve_existing_analysis_dir(md5)
         if error:
-            self._send_error(400, error)
-            return
-        if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
-            self._send_error(404, 'Analysis not found')
+            self._send_error(*error)
             return
 
         table = data.get('table', '')
@@ -1281,10 +1327,123 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         try:
             set_row_note(db_file, table, row_id, note)
-        except OSError:
+        except (OSError, sqlite3.Error):
+            # get_row_notes/has_row_notes (the read-path siblings of
+            # set_row_note) both already catch sqlite3.OperationalError and
+            # degrade to an empty result - set_row_note itself has no such
+            # guard (a write failure can't silently degrade to "success"),
+            # so this catch belongs at the caller. sqlite3.Error is not an
+            # OSError subclass, so a genuine SQLite failure here (lock
+            # contention past the busy_timeout, disk I/O error, corruption)
+            # used to propagate uncaught instead of becoming a clean 500.
             self._send_error(500, 'Could not save note')
             return
         self._send_json({'success': True, 'note': note})
+
+    def _validate_ack_table(self, data):
+        """Shared table validation for both acknowledge endpoints below -
+        same shape as handle_post_row_note's own check. Returns the table
+        name on success, or None after already sending an error response."""
+        table = data.get('table', '')
+        if table not in ('events', 'sigma_alerts'):
+            self._send_error(400, 'Invalid table')
+            return None
+        return table
+
+    def _validate_ack_row_id(self, data):
+        """Shared table/rowId validation for the single-row acknowledge
+        endpoint below. Returns (table, row_id) on success, or (None, None)
+        after already sending an error response."""
+        table = self._validate_ack_table(data)
+        if table is None:
+            return None, None
+        row_id = data.get('rowId')
+        if not isinstance(row_id, int) or isinstance(row_id, bool):
+            self._send_error(400, 'Invalid rowId')
+            return None, None
+        return table, row_id
+
+    def handle_post_acknowledge_alert(self):
+        """Acknowledge or un-acknowledge one alert row - the single-row
+        counterpart to handle_post_acknowledge_alerts_bulk below. Removing
+        an alert from view (rather than just flagging it) happens entirely
+        as a side effect of set_acknowledged() feeding into every read
+        query's own WHERE clause (see db.py's _build_where_conditions/
+        _sigma_alert_where) - nothing else needs updating here.
+        """
+        data = self._read_json_body(config.MAX_REQUEST_BODY_SIZE)
+        if data is None:
+            return
+        md5 = data.get('md5', '')
+        dir_path, error = self._resolve_existing_analysis_dir(md5)
+        if error:
+            self._send_error(*error)
+            return
+
+        table, row_id = self._validate_ack_row_id(data)
+        if table is None:
+            return
+
+        acknowledged = data.get('acknowledged', True)
+        if not isinstance(acknowledged, bool):
+            self._send_error(400, 'Invalid acknowledged')
+            return
+
+        db_file = os.path.join(dir_path, 'events.db')
+        if not os.path.exists(db_file):
+            self._send_error(404, 'Analysis not found')
+            return
+        try:
+            set_acknowledged(db_file, table, row_id, acknowledged)
+        except (OSError, sqlite3.Error):
+            self._send_error(500, 'Could not update acknowledged state')
+            return
+        self._send_json({'success': True, 'acknowledged': acknowledged})
+
+    def handle_post_acknowledge_alerts_bulk(self):
+        """Acknowledge every id in rowIds in one call - the "all instances
+        of this alert" path. The matching row-id set is computed
+        client-side (from whatever's already loaded via ensureCappedBatch)
+        rather than server-side by signature_id/rule_id, so this is a
+        dumb bulk insert, not a filtered query of its own. No bulk
+        un-acknowledge counterpart - undoing is always one row at a time,
+        from within the Acknowledged Alerts tab.
+        """
+        data = self._read_json_body(config.MAX_REQUEST_BODY_SIZE)
+        if data is None:
+            return
+        md5 = data.get('md5', '')
+        dir_path, error = self._resolve_existing_analysis_dir(md5)
+        if error:
+            self._send_error(*error)
+            return
+
+        table = self._validate_ack_table(data)
+        if table is None:
+            return
+
+        row_ids = data.get('rowIds')
+        # Same bool-is-an-int-subclass guard as the single-row path above,
+        # applied to every entry - and a defensive cap (matching the
+        # server's own hard query-result ceiling, config.MAX_QUERY_LIMIT)
+        # against a malformed/hostile request trying to force an
+        # enormous executemany.
+        if (not isinstance(row_ids, list) or not row_ids
+                or len(row_ids) > config.MAX_QUERY_LIMIT
+                or not all(isinstance(r, int) and not isinstance(r, bool) for r in row_ids)):
+            self._send_error(400, 'Invalid rowIds')
+            return
+
+        db_file = os.path.join(dir_path, 'events.db')
+        if not os.path.exists(db_file):
+            self._send_error(404, 'Analysis not found')
+            return
+        try:
+            set_acknowledged_bulk(db_file, table, row_ids)
+        except (OSError, sqlite3.Error):
+            self._send_error(500, 'Could not update acknowledged state')
+            return
+        self._send_json({'success': True, 'count': len(row_ids)})
 
     def handle_post_delete_all_analyses(self):
         deleted = 0
@@ -1542,7 +1701,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         md5 = params.get('md5', [''])[0]
         dir_path, error = self._resolve_md5_dir(md5)
         if error:
-            self._send_json([])
+            self._send_error(400, error)
             return
 
         pagination = self._parse_pagination(params)
@@ -1553,11 +1712,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         severity = params.get('severity', [''])[0] or None
         q = self._parse_search_terms(params)
+        acknowledged_only = params.get('acknowledged', [''])[0] == 'only'
 
         db_file = os.path.join(dir_path, 'events.db')
         if os.path.exists(db_file):
             try:
-                alerts = query_sigma_alerts_sqlite(db_file, offset, limit, q, severity)
+                alerts = query_sigma_alerts_sqlite(db_file, offset, limit, q, severity, acknowledged_only)
                 self._send_json(alerts)
             except Exception:
                 self._send_error(500, 'Database error')
@@ -1572,11 +1732,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         q = self._parse_search_terms(params)
         severity = params.get('severity', [''])[0] or None
+        acknowledged_only = params.get('acknowledged', [''])[0] == 'only'
 
         db_file = os.path.join(dir_path, 'events.db')
 
         if os.path.exists(db_file):
-            count = get_sigma_alert_count_sqlite(db_file, q, severity)
+            try:
+                count = get_sigma_alert_count_sqlite(db_file, q, severity, acknowledged_only)
+            except Exception:
+                self._send_error(500, 'Database error')
+                return
         else:
             count = 0
         self._send_json({'count': count})
@@ -1585,7 +1750,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         md5 = params.get('md5', [''])[0]
         dir_path, error = self._resolve_md5_dir(md5)
         if error:
-            self._send_json({})
+            self._send_error(400, error)
             return
 
         db_file = os.path.join(dir_path, 'events.db')
@@ -1614,6 +1779,60 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         os.makedirs(dir_path, exist_ok=True)
         commit_fn()
         return None
+
+    def _commit_and_spawn_pcap_analysis(self, extracted_pcap_path, safe_filename, md5_hash=None):
+        """Hash one already-extracted pcap (unless the caller already knows
+        its hash - see _process_uploaded_file's within-batch dedup), commit
+        it into DATA_DIR/<md5>/ if not already analyzed, and spawn Suricata.
+        Used both for a ZIP's primary pcap and every additional pcap found
+        alongside it.
+
+        Returns (md5_hash, deduped: bool).
+        """
+        if md5_hash is None:
+            md5_hash = _hash_file(extracted_pcap_path)
+        dir_path = os.path.join(DATA_DIR, md5_hash)
+        pcap_filename = sanitize_filename(os.path.basename(extracted_pcap_path))
+        pcap_path = os.path.join(dir_path, pcap_filename)
+
+        deduped = self._commit_file_or_return_ready(
+            dir_path, md5_hash, ('eve.json',),
+            lambda: shutil.move(extracted_pcap_path, pcap_path)
+        )
+        if not deduped:
+            with open(os.path.join(dir_path, 'name.txt'), 'w') as f:
+                f.write(pcap_filename)
+            _write_meta(dir_path, safe_filename, pcap_filename, 'pcap')
+            spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'), data_dir=DATA_DIR)
+        return md5_hash, bool(deduped)
+
+    def _commit_and_analyze_standalone_file(self, extracted_path, safe_filename, md5_hash, prefix):
+        """Commit one already-extracted, already-hashed non-pcap file (see
+        _hash_file_with_prefix) into DATA_DIR/<md5>/ if not already
+        analyzed, and dispatch it to log or binary/YARA analysis in the
+        background. Mirrors _commit_and_spawn_pcap_analysis for the pcap
+        case - md5_hash/prefix are always precomputed by the caller so
+        within-zip duplicate content can be recognized before ever
+        touching disk (see _process_uploaded_file's within-batch dedup).
+
+        Returns (md5_hash, deduped: bool, detected_type: 'log'|'binary').
+        """
+        dir_path = os.path.join(DATA_DIR, md5_hash)
+        dest_filename = sanitize_filename(os.path.basename(extracted_path))
+        dest_path = os.path.join(dir_path, dest_filename)
+
+        deduped = self._commit_file_or_return_ready(
+            dir_path, md5_hash, ('events.db',),
+            lambda: shutil.move(extracted_path, dest_path)
+        )
+        detected = 'log' if (is_log_file(prefix) or is_log_file_by_extension(dest_path)) else 'binary'
+        if not deduped:
+            _write_meta(dir_path, safe_filename, dest_filename, detected)
+            if detected == 'log':
+                self._analyze_log_file(dir_path, dest_path, dest_filename)
+            else:
+                self._analyze_standalone_file(dir_path, dest_path, dest_filename)
+        return md5_hash, bool(deduped), detected
 
     def _process_uploaded_file(self, src_path, original_filename, passwords=None, effective_max=None):
         """Process uploaded or downloaded file: detect ZIP, extract, find PCAP, compute MD5, dispatch.
@@ -1647,63 +1866,85 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 tmp_dir = tempfile.mkdtemp(dir=_upload_tmp_dir())
                 try:
                     extracted_files = _extract_zip_contents(src_path, tmp_dir, passwords or [], effective_max)
-                    # Only one file from the archive is ever analyzed (the
-                    # first PCAP, or the first non-hidden file if there's no
-                    # PCAP) - everything else extracted alongside it is
-                    # discarded when tmp_dir is removed below. Surfaced to
-                    # the user via 'filesSkipped' rather than silently lost.
+                    # Every extracted file is analyzed, each as its own
+                    # independent analysis - pcaps get network analysis
+                    # (_commit_and_spawn_pcap_analysis), everything else
+                    # gets log/binary analysis
+                    # (_commit_and_analyze_standalone_file). 'filesSkipped'
+                    # now only ever reflects genuine per-file failures, not
+                    # by-design drops.
                     non_hidden_extracted = [f for f in extracted_files if not os.path.basename(f).startswith('.')]
-                    files_skipped = max(0, len(non_hidden_extracted) - 1)
                     pcap_files = [f for f in extracted_files if f.lower().endswith(PCAP_EXTENSIONS)]
+                    pcap_file_set = set(pcap_files)
+                    non_pcap_files = [f for f in non_hidden_extracted if f not in pcap_file_set]
+
                     if pcap_files:
-                        md5_hash = _hash_file(pcap_files[0])
-                        dir_path = os.path.join(DATA_DIR, md5_hash)
-                        pcap_filename = sanitize_filename(os.path.basename(pcap_files[0]))
-                        pcap_path = os.path.join(dir_path, pcap_filename)
-                        name_path = os.path.join(dir_path, 'name.txt')
-
-                        deduped = self._commit_file_or_return_ready(
-                            dir_path, md5_hash, ('eve.json',),
-                            lambda: shutil.move(pcap_files[0], pcap_path)
-                        )
-                        if deduped:
-                            return deduped
-                        with open(name_path, 'w') as f:
-                            f.write(pcap_filename)
-                        _write_meta(dir_path, safe_filename, pcap_filename, 'pcap')
-
-                        spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'), data_dir=DATA_DIR)
-                        response = {'status': 'processing', 'md5': md5_hash, 'phase': 'network'}
-                        if files_skipped:
-                            response['filesSkipped'] = files_skipped
-                        return response
+                        primary_md5, primary_deduped = self._commit_and_spawn_pcap_analysis(pcap_files[0], safe_filename)
+                        primary_phase = 'network'
+                        remaining_pcaps = pcap_files[1:]
+                        remaining_non_pcaps = non_pcap_files
                     else:
-                        # ZIP contained no PCAP — treat as standalone file archive
-                        if not non_hidden_extracted:
+                        if not non_pcap_files:
                             raise ValueError('ZIP archive is empty')
-                        first_file = non_hidden_extracted[0]
-                        md5_hash, prefix = _hash_file_with_prefix(first_file)
-                        dir_path = os.path.join(DATA_DIR, md5_hash)
-                        dest_filename = sanitize_filename(os.path.basename(first_file))
-                        dest_path = os.path.join(dir_path, dest_filename)
+                        first_md5, first_prefix = _hash_file_with_prefix(non_pcap_files[0])
+                        primary_md5, primary_deduped, primary_detected = self._commit_and_analyze_standalone_file(
+                            non_pcap_files[0], safe_filename, first_md5, first_prefix)
+                        primary_phase = 'logs' if primary_detected == 'log' else 'files'
+                        remaining_pcaps = []
+                        remaining_non_pcaps = non_pcap_files[1:]
 
-                        deduped = self._commit_file_or_return_ready(
-                            dir_path, md5_hash, ('events.db',),
-                            lambda: shutil.move(first_file, dest_path)
-                        )
-                        if deduped:
-                            return deduped
-                        detected = 'log' if (is_log_file(prefix) or is_log_file_by_extension(dest_path)) else 'binary'
-                        _write_meta(dir_path, safe_filename, os.path.basename(dest_path), detected)
-                        if detected == 'log':
-                            self._analyze_log_file(dir_path, dest_path, os.path.basename(dest_path))
-                            response = {'status': 'processing', 'md5': md5_hash, 'phase': 'logs'}
-                        else:
-                            self._analyze_standalone_file(dir_path, dest_path, os.path.basename(dest_path))
-                            response = {'status': 'processing', 'md5': md5_hash, 'phase': 'files'}
-                        if files_skipped:
-                            response['filesSkipped'] = files_skipped
-                        return response
+                    # A duplicate's own dedup marker (eve.json/events.db)
+                    # can't have appeared yet for a byte-identical *later*
+                    # file in this same zip while its analysis is still in
+                    # flight - track md5s already handled in this batch and
+                    # check *before* committing/analyzing (not just before
+                    # listing) so such a duplicate is never re-committed or
+                    # double-analyzed.
+                    seen = {primary_md5}
+                    additional_md5s = []
+                    failed_count = 0
+
+                    for extra in remaining_pcaps:
+                        try:
+                            md5_hash = _hash_file(extra)
+                        except OSError:
+                            failed_count += 1
+                            continue
+                        if md5_hash in seen:
+                            continue
+                        try:
+                            self._commit_and_spawn_pcap_analysis(extra, safe_filename, md5_hash=md5_hash)
+                        except OSError:
+                            failed_count += 1
+                            continue
+                        seen.add(md5_hash)
+                        additional_md5s.append(md5_hash)
+
+                    for extra in remaining_non_pcaps:
+                        try:
+                            md5_hash, prefix = _hash_file_with_prefix(extra)
+                        except OSError:
+                            failed_count += 1
+                            continue
+                        if md5_hash in seen:
+                            continue
+                        try:
+                            self._commit_and_analyze_standalone_file(extra, safe_filename, md5_hash, prefix)
+                        except OSError:
+                            failed_count += 1
+                            continue
+                        seen.add(md5_hash)
+                        additional_md5s.append(md5_hash)
+
+                    if primary_deduped:
+                        response = {'status': 'ready', 'md5': primary_md5}
+                    else:
+                        response = {'status': 'processing', 'md5': primary_md5, 'phase': primary_phase}
+                    if additional_md5s:
+                        response['additionalMd5s'] = additional_md5s
+                    if failed_count:
+                        response['filesSkipped'] = failed_count
+                    return response
                 finally:
                     shutil.rmtree(tmp_dir, ignore_errors=True)
             else:
@@ -1932,14 +2173,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             raise
 
     def handle_post_upload(self):
-        try:
-            content_length = int(self.headers.get('Content-Length', 0))
-        except ValueError:
-            self._send_error(400, 'Invalid Content-Length')
-            return
         effective_max = _resolve_upload_size_limit(self.headers.get('X-Max-Upload-Size'))
-        if content_length < 0 or content_length > effective_max:
-            self._send_error(400, 'Invalid Content-Length')
+        content_length = self._parse_content_length(effective_max)
+        if content_length is None:
             return
         if not self._check_disk_space(effective_max):
             return
@@ -2083,18 +2319,43 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         self._send_json(self._build_status_response(dir_path))
 
+    def _remove_artifacts(self, dir_path, artifacts):
+        """Delete each named artifact file from dir_path if present.
+        Best-effort per-file (a stuck/permission-denied file doesn't block
+        cleanup of the rest) - shared by handle_post_reanalyze's pcap and
+        non-pcap branches, which previously each inlined an identical copy
+        of this loop over their own artifact tuple.
+        """
+        for artifact in artifacts:
+            artifact_path = os.path.join(dir_path, artifact)
+            if os.path.exists(artifact_path):
+                try:
+                    os.unlink(artifact_path)
+                except OSError:
+                    pass
+
+    def _restore_meta(self, meta_path, preserved_meta):
+        """Rewrite .meta after a reanalyze cleanup, so the frontend
+        retains detected_type across the reanalyze - best-effort, same
+        reasoning as _remove_artifacts. Shared by handle_post_reanalyze's
+        pcap and non-pcap branches, which previously each inlined an
+        identical copy of this block.
+        """
+        if preserved_meta:
+            try:
+                with open(meta_path, 'w') as f:
+                    json.dump(preserved_meta, f)
+            except OSError:
+                pass
+
     def handle_post_reanalyze(self):
         data = self._read_json_body(config.MAX_REQUEST_BODY_SIZE)
         if data is None:
             return
         md5 = data.get('md5', '')
-        dir_path, error = self._resolve_md5_dir(md5)
+        dir_path, error = self._resolve_existing_analysis_dir(md5)
         if error:
-            self._send_error(400, error)
-            return
-
-        if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
-            self._send_error(404, 'Analysis not found')
+            self._send_error(*error)
             return
 
         phase_file = os.path.join(dir_path, '.phase')
@@ -2121,13 +2382,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if pcap_file:
             pcap_path = os.path.join(dir_path, pcap_file)
 
-            for artifact in PCAP_ANALYSIS_ARTIFACTS:
-                artifact_path = os.path.join(dir_path, artifact)
-                if os.path.exists(artifact_path):
-                    try:
-                        os.unlink(artifact_path)
-                    except OSError:
-                        pass
+            self._remove_artifacts(dir_path, PCAP_ANALYSIS_ARTIFACTS)
 
             # Clean up extracted files from previous analysis
             filestore_dir = os.path.join(dir_path, 'filestore')
@@ -2137,13 +2392,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 except OSError:
                     pass
 
-            # Rewrite .meta so frontend retains detected_type after reanalyze
-            if preserved_meta:
-                try:
-                    with open(meta_path, 'w') as f:
-                        json.dump(preserved_meta, f)
-                except OSError:
-                    pass
+            self._restore_meta(meta_path, preserved_meta)
 
             if spawn_suricata(dir_path, pcap_path, os.path.join(SURICATA_DIR, 'suricata.yaml'), data_dir=DATA_DIR):
                 self._send_json({'status': 'processing', 'md5': md5, 'phase': 'network'})
@@ -2166,21 +2415,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     self._send_error(409, 'Analysis already in progress')
         elif non_pcap_files:
             file_path = os.path.join(dir_path, non_pcap_files[0])
-            for artifact in FILE_ANALYSIS_ARTIFACTS:
-                artifact_path = os.path.join(dir_path, artifact)
-                if os.path.exists(artifact_path):
-                    try:
-                        os.unlink(artifact_path)
-                    except OSError:
-                        pass
-
-            # Rewrite .meta so frontend retains detected_type after reanalyze
-            if preserved_meta:
-                try:
-                    with open(meta_path, 'w') as f:
-                        json.dump(preserved_meta, f)
-                except OSError:
-                    pass
+            self._remove_artifacts(dir_path, FILE_ANALYSIS_ARTIFACTS)
+            self._restore_meta(meta_path, preserved_meta)
 
             if is_log_file_by_extension(file_path):
                 self._analyze_log_file(dir_path, file_path, non_pcap_files[0])
@@ -2235,7 +2471,14 @@ def main():
     if os.environ.get('DEMO'):
         msg = 'SO-CRATES is now running. Click the link on the left!'
     else:
-        msg = f'SO-CRATES running at http://{BIND_ADDRESS}:{PORT}/socrates.html'
+        # 0.0.0.0 means "listen on all interfaces," not a browsable address -
+        # printing it verbatim gives a link that (a) isn't treated as a
+        # secure context by browsers, breaking navigator.clipboard, and
+        # (b) doesn't even resolve on some systems. localhost is what the
+        # container's BIND_ADDRESS=0.0.0.0 is actually meant to be reached
+        # through when clicking the link on the machine running docker.
+        display_host = 'localhost' if BIND_ADDRESS == '0.0.0.0' else BIND_ADDRESS
+        msg = f'SO-CRATES running at http://{display_host}:{PORT}/socrates.html'
     padding = ' ' * (61 - len(msg))
     print(f"""
     ================================================================

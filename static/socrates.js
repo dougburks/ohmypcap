@@ -104,8 +104,7 @@
 
         const THEMES = {
             dark: { label: 'Midnight', group: 'dark' },
-            light: { label: 'Daylight', group: 'light' },
-            sguil: { label: 'Sguil', group: 'fun' },
+            sguil: { label: 'Sguil', group: 'light' },
             hacker: { label: 'Hacker', group: 'fun' },
             cga: { label: 'CGA', group: 'fun' },
             'breadbin-blue': { label: 'Breadbin Blue', group: 'fun' },
@@ -138,24 +137,7 @@
             'dracula': { label: 'Dracula', group: 'dark' },
             'solarized-dark': { label: 'Solarized Dark', group: 'dark' },
             'monokai': { label: 'Monokai', group: 'dark' },
-        };
-
-        // Mirrors the keydown easter-egg checks below (kept separate rather
-        // than driving both from one loop, since the keydown handler is
-        // already tested against its literal source text) - used only to
-        // display each Fun theme's code while hovering it in the themes
-        // modal, not to detect the codes themselves.
-        const THEME_CHEAT_CODES = {
-            hacker: '31337',
-            sguil: 'sguil',
-            cga: 'cga',
-            'breadbin-blue': 'bread',
-            vaporwave: 'vapor',
-            'luna-blue': 'luna',
-            amber: 'amber',
-            'dos-blue': 'dos',
-            'digital-frontier': 'digit',
-            'retro-handheld': 'retro',
+            'mp3-player': { label: 'MP3 Player', group: 'fun' },
         };
 
         const THEME_GROUP_LABELS = { dark: 'Dark Themes', fun: 'Fun Themes', light: 'Light Themes' };
@@ -210,7 +192,8 @@
             }
             safeStorageSet(localStorage, 'socrates-theme', themeName);
             updateThemeMenu();
-            updateCodeRain();
+            updateFunThemeClass();
+            updateAllAmbientThemes();
             updateFavicon();
             // If the themes modal is open, treat this as the new baseline so
             // a later close/revert does not undo the change, and keep the
@@ -241,7 +224,8 @@
                 html.style.setProperty(name, colors[name]);
             });
             updateThemeMenu();
-            updateCodeRain();
+            updateFunThemeClass();
+            updateAllAmbientThemes();
             updateFavicon();
         }
 
@@ -317,28 +301,19 @@
             if (frameDoc && frameDoc.documentElement) {
                 frameDoc.documentElement.setAttribute('data-theme', themeName);
             }
-            updateThemeCheatCodeHint(themeName);
+            updatePreviewingLabel(themeName);
         }
 
         // "Previewing <name>" always shows, confirming what the preview
         // panel currently displays (hover target, or the resting/baseline
-        // theme once nothing is hovered). The trailing "- Cheat code: X"
-        // part only applies to Fun themes, so its own space is reserved via
-        // visibility (not display) rather than the whole line, so the
-        // modal doesn't jump as that part appears/disappears while hovering
-        // across Fun vs. other themes.
-        function updateThemeCheatCodeHint(themeName) {
+        // theme once nothing is hovered). Any theme's name can be typed
+        // into the command palette (see AUTOCOMPLETE_COMMANDS) to jump to
+        // it directly, so there's no separate per-theme code to show here
+        // any more.
+        function updatePreviewingLabel(themeName) {
             const label = document.getElementById('themePreviewingLabel');
-            const codePart = document.getElementById('themeCheatCodePart');
-            if (!label || !codePart) return;
+            if (!label) return;
             label.textContent = THEMES[themeName].label;
-            const code = THEME_CHEAT_CODES[themeName];
-            if (code) {
-                codePart.querySelector('code').textContent = code;
-                codePart.style.visibility = 'visible';
-            } else {
-                codePart.style.visibility = 'hidden';
-            }
         }
 
         function revertTheme() {
@@ -446,6 +421,15 @@
             const nextTheme = order[nextIndex];
             setTheme(nextTheme);
             showToast('Switched to ' + THEMES[nextTheme].label + ' theme');
+        }
+
+        function toggleThemeReverse() {
+            const order = THEME_MENU_ORDER;
+            const current = getCurrentTheme();
+            const prevIndex = (order.indexOf(current) - 1 + order.length) % order.length;
+            const prevTheme = order[prevIndex];
+            setTheme(prevTheme);
+            showToast('Switched to ' + THEMES[prevTheme].label + ' theme');
         }
 
         function updateThemeMenu() {
@@ -606,12 +590,1152 @@
             }
         }
 
+        // Subtle falling-tetromino background for Retro Handheld theme -
+        // same fixed-canvas/rAF technique as the code rain above, on its
+        // own separate #blockRain canvas (see .block-rain-canvas's CSS
+        // comment for why a second canvas rather than a shared,
+        // theme-branching one). No rotation, stacking, or collision -
+        // just axis-aligned tetromino shapes drifting straight down and
+        // respawning once off-screen, the same ambient-texture role rain
+        // plays for Hacker.
+        let blockRainCtx = null;
+        let blockRainPieces = [];
+        const fallingBlockSize = 16;
+        let blockRainAnimationId = null;
+        let blockRainLastDraw = 0;
+        const FALLING_BLOCK_SHAPES = [
+            [[0, 0], [1, 0], [2, 0], [3, 0]], // I
+            [[0, 0], [1, 0], [0, 1], [1, 1]], // O
+            [[1, 0], [0, 1], [1, 1], [2, 1]], // T
+            [[1, 0], [2, 0], [0, 1], [1, 1]], // S
+            [[0, 0], [1, 0], [1, 1], [2, 1]], // Z
+            [[0, 0], [0, 1], [1, 1], [2, 1]], // J
+            [[2, 0], [0, 1], [1, 1], [2, 1]]  // L
+        ];
+        // The theme's own darkest palette shades (see [data-theme=
+        // "retro-handheld"]'s --text-primary/--accent/--text-muted) -
+        // reads as the real 4-shade Game Boy LCD palette rather than an
+        // arbitrary green, and needs no separate light/dark handling
+        // since this canvas only ever renders for this one theme.
+        const BLOCK_RAIN_COLORS = ['#0f380f', '#1f5c1f', '#306230'];
+
+        function makeFallingBlock(width) {
+            const cols = Math.max(1, Math.floor(width / fallingBlockSize) - 4);
+            return {
+                shape: FALLING_BLOCK_SHAPES[Math.floor(Math.random() * FALLING_BLOCK_SHAPES.length)],
+                col: Math.floor(Math.random() * cols),
+                y: Math.random() * -window.innerHeight,
+                speed: 3 + Math.random() * 3,
+                color: BLOCK_RAIN_COLORS[Math.floor(Math.random() * BLOCK_RAIN_COLORS.length)]
+            };
+        }
+
+        function resizeBlockRain() {
+            const canvas = document.getElementById('blockRain');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            blockRainCtx = ctx;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            blockRainCtx.scale(dpr, dpr);
+            const pieceCount = Math.max(14, Math.ceil(window.innerWidth / 90));
+            blockRainPieces = [];
+            for (let i = 0; i < pieceCount; i++) {
+                blockRainPieces.push(makeFallingBlock(window.innerWidth));
+            }
+        }
+
+        function drawBlockRain(timestamp) {
+            const canvas = document.getElementById('blockRain');
+            if (!canvas || getCurrentTheme() !== 'retro-handheld') return;
+            if (!blockRainCtx) resizeBlockRain();
+            if (!blockRainCtx) return;
+
+            const dt = timestamp - blockRainLastDraw;
+            if (dt < 50) {
+                blockRainAnimationId = requestAnimationFrame(drawBlockRain);
+                return;
+            }
+            blockRainLastDraw = timestamp;
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            // Fades the previous frame's blocks out against the theme's
+            // own light background color (--bg-primary: #9bbc0f) rather
+            // than black, which the code rain above clears with - that
+            // theme's page is dark so a black fade is invisible; this
+            // one's page is pale yellow-green, so fading to black would
+            // paint a visible dark smear behind every piece instead of a
+            // clean fade. Higher alpha than code rain's 0.08 (which
+            // suits sparse, thin text glyphs) - these are solid blocks,
+            // so the same low alpha left a long, still-fairly-opaque
+            // smear behind each one that was genuinely hard to tell from
+            // the actual piece. This clears each old frame in 2-3 draws
+            // instead of a dozen+, leaving just a short Game-Boy-LCD-
+            // ghosting hint rather than a confusing trail.
+            blockRainCtx.fillStyle = 'rgba(155, 188, 15, 0.35)';
+            blockRainCtx.fillRect(0, 0, width, height);
+
+            for (const piece of blockRainPieces) {
+                blockRainCtx.fillStyle = piece.color;
+                for (const block of piece.shape) {
+                    const x = (piece.col + block[0]) * fallingBlockSize;
+                    const y = piece.y + block[1] * fallingBlockSize;
+                    if (y > -fallingBlockSize && y < height) {
+                        blockRainCtx.fillRect(x + 1, y + 1, fallingBlockSize - 2, fallingBlockSize - 2);
+                    }
+                }
+                piece.y += piece.speed;
+                if (piece.y > height) {
+                    Object.assign(piece, makeFallingBlock(width));
+                }
+            }
+
+            blockRainAnimationId = requestAnimationFrame(drawBlockRain);
+        }
+
+        function startBlockRain() {
+            if (blockRainAnimationId) return;
+            resizeBlockRain();
+            if (!blockRainCtx) return;
+            blockRainLastDraw = performance.now();
+            blockRainAnimationId = requestAnimationFrame(drawBlockRain);
+        }
+
+        function stopBlockRain() {
+            if (blockRainAnimationId) {
+                cancelAnimationFrame(blockRainAnimationId);
+                blockRainAnimationId = null;
+            }
+            const canvas = document.getElementById('blockRain');
+            if (canvas && blockRainCtx) {
+                blockRainCtx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function updateBlockRain() {
+            if (getCurrentTheme() === 'retro-handheld') {
+                startBlockRain();
+            } else {
+                stopBlockRain();
+            }
+        }
+
+        // Synthwave grid-horizon ambient background for Vaporwave - on
+        // its own #vaporwaveGrid canvas, same fixed/behind-everything
+        // positioning as the two effects above, but a single static
+        // draw rather than a continuous rAF loop (tried animated first,
+        // then made static - see git history). A composed scene like
+        // this (converging grid + a sun sitting on the horizon) needs to
+        // be recognizable even glimpsed only in the thin slivers of page
+        // not covered by real content - continuous motion in those
+        // small, disconnected slivers read as flicker rather than a
+        // coherent "flying over the grid" feel, and a still image both
+        // avoids that and costs nothing once drawn (no ongoing rAF work,
+        // no timers). Only redrawn on theme activation and window
+        // resize - resizeVaporwaveGrid() itself does the (re)draw, so it
+        // stays the single place both "wire up the canvas" and "put
+        // pixels on it" happen, the same function the window resize
+        // listener already calls.
+        let vaporwaveCtx = null;
+        const VAPORWAVE_H_LINE_COUNT = 24;
+        const VAPORWAVE_V_LINE_COUNT = 16;
+
+        function drawVaporwaveGrid() {
+            if (!vaporwaveCtx) return;
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            const horizonY = height * 0.58;
+            const centerX = width / 2;
+            vaporwaveCtx.clearRect(0, 0, width, height);
+
+            // Sun sitting exactly on the horizon - clipping to its upper
+            // half (rather than drawing a full circle) is what makes it
+            // read as "sitting on" rather than "floating above" the
+            // horizon. A few horizontal bands are cut out of the lower
+            // portion (the classic retro sun stripes) via clearRect,
+            // which - on a low-opacity overlay canvas like this one -
+            // correctly reveals whatever real page content is
+            // underneath, the same way the rest of the canvas's
+            // transparent background already does.
+            const sunRadius = Math.min(width, height) * 0.14;
+            vaporwaveCtx.save();
+            vaporwaveCtx.beginPath();
+            vaporwaveCtx.rect(centerX - sunRadius, horizonY - sunRadius, sunRadius * 2, sunRadius);
+            vaporwaveCtx.clip();
+            const sunGradient = vaporwaveCtx.createRadialGradient(centerX, horizonY, 0, centerX, horizonY, sunRadius);
+            sunGradient.addColorStop(0, 'rgba(255, 113, 206, 1)');
+            sunGradient.addColorStop(1, 'rgba(255, 113, 206, 0)');
+            vaporwaveCtx.fillStyle = sunGradient;
+            vaporwaveCtx.beginPath();
+            vaporwaveCtx.arc(centerX, horizonY, sunRadius, 0, Math.PI * 2);
+            vaporwaveCtx.fill();
+            for (let band = 0; band < 4; band++) {
+                const bandY = horizonY - sunRadius * (0.08 + band * 0.09);
+                vaporwaveCtx.clearRect(centerX - sunRadius, bandY, sunRadius * 2, sunRadius * 0.035);
+            }
+            vaporwaveCtx.restore();
+
+            // Converging verticals, evenly spaced along the bottom edge
+            // and spreading past the viewport's left/right edges so the
+            // grid still fills the corners.
+            vaporwaveCtx.strokeStyle = 'rgba(1, 205, 254, 0.65)';
+            vaporwaveCtx.lineWidth = 1;
+            for (let i = 0; i < VAPORWAVE_V_LINE_COUNT; i++) {
+                const spread = (i / (VAPORWAVE_V_LINE_COUNT - 1) - 0.5) * width * 1.6;
+                vaporwaveCtx.beginPath();
+                vaporwaveCtx.moveTo(centerX, horizonY);
+                vaporwaveCtx.lineTo(centerX + spread, height);
+                vaporwaveCtx.stroke();
+            }
+
+            // Horizontal lines at fixed, evenly-spaced depths - t eases
+            // with t*t so they bunch up near the horizon and spread
+            // apart near the bottom, the standard cheap trick for
+            // perspective depth without real 3D projection math. No
+            // longer incremented over time (see this function's own
+            // comment above for why) - each line just sits at its own
+            // fixed t forever.
+            for (let i = 0; i < VAPORWAVE_H_LINE_COUNT; i++) {
+                const t = i / VAPORWAVE_H_LINE_COUNT;
+                const y = horizonY + (height - horizonY) * t * t;
+                const alpha = 0.25 + 0.6 * t;
+                vaporwaveCtx.strokeStyle = `rgba(1, 205, 254, ${alpha})`;
+                vaporwaveCtx.beginPath();
+                vaporwaveCtx.moveTo(0, y);
+                vaporwaveCtx.lineTo(width, y);
+                vaporwaveCtx.stroke();
+            }
+        }
+
+        function resizeVaporwaveGrid() {
+            const canvas = document.getElementById('vaporwaveGrid');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            vaporwaveCtx = ctx;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            vaporwaveCtx.scale(dpr, dpr);
+            if (getCurrentTheme() === 'vaporwave') drawVaporwaveGrid();
+        }
+
+        function startVaporwaveGrid() {
+            resizeVaporwaveGrid();
+        }
+
+        function stopVaporwaveGrid() {
+            const canvas = document.getElementById('vaporwaveGrid');
+            if (canvas && vaporwaveCtx) {
+                vaporwaveCtx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function updateVaporwaveGrid() {
+            if (getCurrentTheme() === 'vaporwave') {
+                startVaporwaveGrid();
+            } else {
+                stopVaporwaveGrid();
+            }
+        }
+
+        // Norton Commander dual-pane ambient background for DOS Blue - on
+        // its own #dosDefrag canvas (id/class kept from the earlier
+        // defrag/prompt/QBasic-dialog effects this replaced, to avoid an
+        // unrelated HTML/CSS rename). One bordered file-list pane in each
+        // side margin (the app's own central content column already
+        // occupies the middle, so a real side-by-side dual pane wouldn't
+        // fit in either margin alone). Row count is computed from the
+        // available margin height on each resize (not a fixed count) so
+        // the panes stretch to fill most of the margin - real Norton
+        // Commander panes span nearly the full screen, unlike a QBasic
+        // dialog box, which is inherently compact and would look wrong
+        // stretched that tall. Each pane's yellow selection bar steps
+        // down the list on its own timer - a mostly-static composed scene
+        // plus one small moving element per pane, same recipe as Luna
+        // Blue's clouds.
+        let dosDefragCtx = null;
+        let dosDefragAnimationId = null;
+        let dosDefragLastDraw = 0;
+        let ncLeftFiles = [];
+        let ncRightFiles = [];
+        let ncLeftHighlight = 0;
+        let ncRightHighlight = 0;
+        let ncLeftNextMove = 0;
+        let ncRightNextMove = 0;
+        let ncVisibleRows = 10;
+        const NC_FILES_LEFT = [
+            'AUTOEXEC.BAT', 'CONFIG.SYS', 'COMMAND.COM', 'IO.SYS', 'MSDOS.SYS',
+            'WIN386.SWP', 'HIMEM.SYS', 'EMM386.EXE', 'MOUSE.COM', 'DOSKEY.COM',
+            'EDIT.COM', 'QBASIC.EXE', 'FORMAT.COM', 'FDISK.EXE', 'SCANDISK.EXE',
+            'DEFRAG.EXE', 'SHARE.EXE', 'SMARTDRV.EXE', 'ANSI.SYS', 'XCOPY.EXE',
+            'SYSTEM.INI', 'WIN.INI', 'PROTOCOL.INI', 'NET.CFG', 'STARTUP.CMD',
+            'DBLSPACE.BIN', 'DRVSPACE.BIN', 'RAMDRIVE.SYS', 'SETVER.EXE', 'APPEND.EXE',
+            'ATTRIB.EXE', 'LABEL.EXE', 'SYS.COM', 'TREE.COM', 'SORT.EXE',
+            'FIND.EXE', 'MORE.COM', 'PRINT.EXE', 'RECOVER.EXE', 'RESTORE.EXE'
+        ];
+        const NC_FILES_RIGHT = [
+            'README.TXT', 'SETUP.EXE', 'GAME.EXE', 'SAVE001.DAT', 'SAVE002.DAT',
+            'MANUAL.TXT', 'SOUND.DRV', 'VGA.DRV', 'CONFIG.CFG', 'HISCORE.DAT',
+            'LEVEL1.DAT', 'PATCH.EXE', 'INSTALL.EXE', 'SOUND.CFG', 'JOYSTICK.CFG',
+            'INTRO.DAT', 'CREDITS.TXT', 'MUSIC.DAT', 'SPRITES.DAT', 'LEVEL2.DAT',
+            'DEMO.EXE', 'TUTORIAL.DAT', 'OPTIONS.CFG', 'KEYS.CFG', 'FONTS.DAT',
+            'PALETTE.DAT', 'MAP01.DAT', 'MAP02.DAT', 'ENEMY.DAT', 'WEAPONS.DAT',
+            'TEXTURE.DAT', 'AUDIO.DAT', 'VOICE.DAT', 'ENDING.DAT', 'BACKUP.DAT',
+            'TEMP.DAT', 'CACHE.DAT', 'LOG.TXT', 'ERROR.LOG', 'STATS.DAT'
+        ];
+        const NC_ROW_HEIGHT = 18;
+        const NC_PANE_WIDTH = 180;
+        const NC_PANE_Y = 100;
+        const NC_BOTTOM_CLEARANCE = 90;
+
+        // Cycles through fresh shuffles of the pool rather than capping at
+        // the pool's own length - a pane taller than the pool (a large
+        // monitor's margin can easily need 40+ rows) still fills
+        // completely instead of leaving blank space below a short list,
+        // at the cost of eventually repeating names further down.
+        function makeNcFileList(pool) {
+            let names = [];
+            while (names.length < ncVisibleRows) {
+                names = names.concat([...pool].sort(() => Math.random() - 0.5));
+            }
+            names = names.slice(0, ncVisibleRows);
+            return names.map(name => ({ name, size: 128 + Math.floor(Math.random() * 98000) }));
+        }
+
+        function drawNcPane(ctx, x, y, title, files, highlightRow) {
+            const width = NC_PANE_WIDTH;
+            const height = NC_ROW_HEIGHT * (1 + files.length);
+
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = '#55FFFF';
+            ctx.strokeRect(x, y, width, height);
+
+            ctx.fillStyle = '#55FFFF';
+            ctx.fillRect(x, y, width, NC_ROW_HEIGHT);
+            ctx.fillStyle = '#0000AA';
+            ctx.font = 'bold 12px "Courier New", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(title, x + width / 2, y + NC_ROW_HEIGHT / 2 + 1);
+
+            ctx.font = '12px "Courier New", monospace';
+            files.forEach((file, i) => {
+                const rowY = y + NC_ROW_HEIGHT * (1 + i);
+                if (i === highlightRow) {
+                    ctx.fillStyle = '#FFFF55';
+                    ctx.fillRect(x + 1, rowY, width - 2, NC_ROW_HEIGHT);
+                    ctx.fillStyle = '#0000AA';
+                } else {
+                    ctx.fillStyle = '#FFFFFF';
+                }
+                ctx.textAlign = 'left';
+                ctx.fillText(file.name, x + 8, rowY + NC_ROW_HEIGHT / 2 + 1);
+                ctx.textAlign = 'right';
+                ctx.fillText(String(file.size), x + width - 8, rowY + NC_ROW_HEIGHT / 2 + 1);
+            });
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+        }
+
+        function drawDosDefrag(timestamp) {
+            const canvas = document.getElementById('dosDefrag');
+            if (!canvas || getCurrentTheme() !== 'dos-blue') return;
+            if (!dosDefragCtx) resizeDosDefrag();
+            if (!dosDefragCtx) return;
+
+            const dt = timestamp - dosDefragLastDraw;
+            if (dt < 50) {
+                dosDefragAnimationId = requestAnimationFrame(drawDosDefrag);
+                return;
+            }
+            dosDefragLastDraw = timestamp;
+
+            if (timestamp >= ncLeftNextMove) {
+                ncLeftHighlight = (ncLeftHighlight + 1) % ncLeftFiles.length;
+                ncLeftNextMove = timestamp + 1200 + Math.random() * 700;
+            }
+            if (timestamp >= ncRightNextMove) {
+                ncRightHighlight = (ncRightHighlight + 1) % ncRightFiles.length;
+                ncRightNextMove = timestamp + 1200 + Math.random() * 700;
+            }
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            dosDefragCtx.clearRect(0, 0, width, height);
+
+            drawNcPane(dosDefragCtx, 20, NC_PANE_Y, 'C:\\DOS', ncLeftFiles, ncLeftHighlight);
+            drawNcPane(dosDefragCtx, width - NC_PANE_WIDTH - 20, NC_PANE_Y, 'A:\\DATA', ncRightFiles, ncRightHighlight);
+
+            dosDefragAnimationId = requestAnimationFrame(drawDosDefrag);
+        }
+
+        function resizeDosDefrag() {
+            const canvas = document.getElementById('dosDefrag');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            dosDefragCtx = ctx;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            dosDefragCtx.scale(dpr, dpr);
+
+            const availableHeight = window.innerHeight - NC_PANE_Y - NC_BOTTOM_CLEARANCE;
+            ncVisibleRows = Math.max(5, Math.floor(availableHeight / NC_ROW_HEIGHT) - 1);
+            ncLeftFiles = makeNcFileList(NC_FILES_LEFT);
+            ncRightFiles = makeNcFileList(NC_FILES_RIGHT);
+            ncLeftHighlight = 0;
+            ncRightHighlight = 0;
+        }
+
+        function startDosDefrag() {
+            if (dosDefragAnimationId) return;
+            resizeDosDefrag();
+            if (!dosDefragCtx) return;
+            dosDefragLastDraw = performance.now();
+            ncLeftNextMove = dosDefragLastDraw + 1200;
+            ncRightNextMove = dosDefragLastDraw + 1200;
+            dosDefragAnimationId = requestAnimationFrame(drawDosDefrag);
+        }
+
+        function stopDosDefrag() {
+            if (dosDefragAnimationId) {
+                cancelAnimationFrame(dosDefragAnimationId);
+                dosDefragAnimationId = null;
+            }
+            const canvas = document.getElementById('dosDefrag');
+            if (canvas && dosDefragCtx) {
+                dosDefragCtx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function updateDosDefrag() {
+            if (getCurrentTheme() === 'dos-blue') {
+                startDosDefrag();
+            } else {
+                stopDosDefrag();
+            }
+        }
+
+        // Dithered plasma ambient background for CGA - on its own
+        // #cgaStarfield canvas (id/class kept from the earlier
+        // twinkling-starfield effect this replaced, to avoid an unrelated
+        // HTML/CSS rename). The same flowing sine-wave plasma field as
+        // Breadbin Blue's, but quantized down to CGA's real 4-color
+        // high-intensity palette (black/cyan/magenta/white) through an
+        // ordered Bayer dither pattern - the actual period technique CGA
+        // software used to fake more colors/shades than the hardware
+        // could really display. Small dither cells (not Breadbin's larger
+        // ones) to read as properly blocky/low-res CGA pixels.
+        let cgaStarfieldCtx = null;
+        const CGA_DITHER_COLORS = ['#000000', '#55ffff', '#ff55ff', '#ffffff'];
+        const CGA_DITHER_MATRIX = [
+            [0, 8, 2, 10],
+            [12, 4, 14, 6],
+            [3, 11, 1, 9],
+            [15, 7, 13, 5]
+        ];
+        const CGA_DITHER_CELL = 4;
+        let cgaStarfieldAnimationId = null;
+        let cgaStarfieldLastDraw = 0;
+
+        function drawCgaStarfield(timestamp) {
+            const canvas = document.getElementById('cgaStarfield');
+            if (!canvas || getCurrentTheme() !== 'cga') return;
+            if (!cgaStarfieldCtx) resizeCgaStarfield();
+            if (!cgaStarfieldCtx) return;
+
+            const dt = timestamp - cgaStarfieldLastDraw;
+            if (dt < 50) {
+                cgaStarfieldAnimationId = requestAnimationFrame(drawCgaStarfield);
+                return;
+            }
+            cgaStarfieldLastDraw = timestamp;
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            const t = timestamp * 0.0006;
+            for (let y = 0; y < height; y += CGA_DITHER_CELL) {
+                for (let x = 0; x < width; x += CGA_DITHER_CELL) {
+                    const value = Math.sin(x * 0.03 + t)
+                        + Math.sin(y * 0.035 + t * 1.2)
+                        + Math.sin((x + y) * 0.02 + t * 0.8)
+                        + Math.sin(Math.sqrt(x * x + y * y) * 0.025 - t * 1.4);
+                    const normalized = (value + 4) / 8;
+                    const scaled = normalized * CGA_DITHER_COLORS.length;
+                    const level = Math.floor(scaled);
+                    const frac = scaled - level;
+                    const dx = (x / CGA_DITHER_CELL) % 4;
+                    const dy = (y / CGA_DITHER_CELL) % 4;
+                    const threshold = CGA_DITHER_MATRIX[dy][dx] / 16;
+                    const ditheredLevel = frac > threshold ? level + 1 : level;
+                    const clamped = Math.max(0, Math.min(CGA_DITHER_COLORS.length - 1, ditheredLevel));
+                    cgaStarfieldCtx.fillStyle = CGA_DITHER_COLORS[clamped];
+                    cgaStarfieldCtx.fillRect(x, y, CGA_DITHER_CELL, CGA_DITHER_CELL);
+                }
+            }
+
+            cgaStarfieldAnimationId = requestAnimationFrame(drawCgaStarfield);
+        }
+
+        function resizeCgaStarfield() {
+            const canvas = document.getElementById('cgaStarfield');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            cgaStarfieldCtx = ctx;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            cgaStarfieldCtx.scale(dpr, dpr);
+        }
+
+        function startCgaStarfield() {
+            if (cgaStarfieldAnimationId) return;
+            resizeCgaStarfield();
+            if (!cgaStarfieldCtx) return;
+            cgaStarfieldLastDraw = performance.now();
+            cgaStarfieldAnimationId = requestAnimationFrame(drawCgaStarfield);
+        }
+
+        function stopCgaStarfield() {
+            if (cgaStarfieldAnimationId) {
+                cancelAnimationFrame(cgaStarfieldAnimationId);
+                cgaStarfieldAnimationId = null;
+            }
+            const canvas = document.getElementById('cgaStarfield');
+            if (canvas && cgaStarfieldCtx) {
+                cgaStarfieldCtx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function updateCgaStarfield() {
+            if (getCurrentTheme() === 'cga') {
+                startCgaStarfield();
+            } else {
+                stopCgaStarfield();
+            }
+        }
+
+        // Classic demoscene plasma field for Breadbin Blue - on the same
+        // #breadbinSprites canvas (id/class kept from the earlier
+        // blinking-sprite effect this replaced, to avoid an unrelated
+        // HTML/CSS rename). Four combined sine waves sampled on a coarse
+        // grid (not per-pixel - far too much trig for 60fps) and mapped
+        // through a lookup table built from the theme's own palette, so
+        // it's cheap to redraw in full every tick. Unlike the sprite
+        // field or the raster-bars/scrolltext combo tried before it, this
+        // is a soft continuous field with no hard edges, so it doesn't
+        // need to dodge the header/footer/panels the way those did - it
+        // just runs across the whole canvas at low opacity and reads
+        // fine wherever it happens to peek through.
+        let breadbinSpriteCtx = null;
+        let breadbinSpriteAnimationId = null;
+        let breadbinSpriteLastDraw = 0;
+        let breadbinPlasmaPalette = null;
+        const BREADBIN_SPRITE_COLORS = ['#7869C4', '#67B6BD', '#94E089', '#BFCE72', '#d19a5a', '#B86962', '#ffffff'];
+        const BREADBIN_PLASMA_CELL = 10;
+
+        function breadbinHexToRgb(hex) {
+            const n = parseInt(hex.slice(1), 16);
+            return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+        }
+
+        function makeBreadbinPlasmaPalette() {
+            const stops = BREADBIN_SPRITE_COLORS.map(breadbinHexToRgb);
+            const palette = new Array(256);
+            for (let i = 0; i < 256; i++) {
+                const t = (i / 256) * stops.length;
+                const idx = Math.floor(t) % stops.length;
+                const nextIdx = (idx + 1) % stops.length;
+                const frac = t - Math.floor(t);
+                const a = stops[idx], b = stops[nextIdx];
+                const r = Math.round(a[0] + (b[0] - a[0]) * frac);
+                const g = Math.round(a[1] + (b[1] - a[1]) * frac);
+                const bl = Math.round(a[2] + (b[2] - a[2]) * frac);
+                palette[i] = `rgb(${r},${g},${bl})`;
+            }
+            return palette;
+        }
+
+        function drawBreadbinSprites(timestamp) {
+            const canvas = document.getElementById('breadbinSprites');
+            if (!canvas || getCurrentTheme() !== 'breadbin-blue') return;
+            if (!breadbinSpriteCtx) resizeBreadbinSprites();
+            if (!breadbinSpriteCtx) return;
+
+            const dt = timestamp - breadbinSpriteLastDraw;
+            if (dt < 60) {
+                breadbinSpriteAnimationId = requestAnimationFrame(drawBreadbinSprites);
+                return;
+            }
+            breadbinSpriteLastDraw = timestamp;
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            const t = timestamp * 0.0006;
+            for (let y = 0; y < height; y += BREADBIN_PLASMA_CELL) {
+                for (let x = 0; x < width; x += BREADBIN_PLASMA_CELL) {
+                    const value = Math.sin(x * 0.02 + t)
+                        + Math.sin(y * 0.025 + t * 1.3)
+                        + Math.sin((x + y) * 0.015 + t * 0.7)
+                        + Math.sin(Math.sqrt(x * x + y * y) * 0.02 - t * 1.5);
+                    const normalized = Math.floor(((value + 4) / 8) * 255) & 255;
+                    breadbinSpriteCtx.fillStyle = breadbinPlasmaPalette[normalized];
+                    breadbinSpriteCtx.fillRect(x, y, BREADBIN_PLASMA_CELL, BREADBIN_PLASMA_CELL);
+                }
+            }
+
+            breadbinSpriteAnimationId = requestAnimationFrame(drawBreadbinSprites);
+        }
+
+        function resizeBreadbinSprites() {
+            const canvas = document.getElementById('breadbinSprites');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            breadbinSpriteCtx = ctx;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            breadbinSpriteCtx.scale(dpr, dpr);
+            if (!breadbinPlasmaPalette) breadbinPlasmaPalette = makeBreadbinPlasmaPalette();
+        }
+
+        function startBreadbinSprites() {
+            if (breadbinSpriteAnimationId) return;
+            resizeBreadbinSprites();
+            if (!breadbinSpriteCtx) return;
+            breadbinSpriteLastDraw = performance.now();
+            breadbinSpriteAnimationId = requestAnimationFrame(drawBreadbinSprites);
+        }
+
+        function stopBreadbinSprites() {
+            if (breadbinSpriteAnimationId) {
+                cancelAnimationFrame(breadbinSpriteAnimationId);
+                breadbinSpriteAnimationId = null;
+            }
+            const canvas = document.getElementById('breadbinSprites');
+            if (canvas && breadbinSpriteCtx) {
+                breadbinSpriteCtx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function updateBreadbinSprites() {
+            if (getCurrentTheme() === 'breadbin-blue') {
+                startBreadbinSprites();
+            } else {
+                stopBreadbinSprites();
+            }
+        }
+
+        let digitalFrontierCtx = null;
+        let dfStreaks = [];
+        let dfAnimationId = null;
+        let dfLastDraw = 0;
+        let dfLastSpawn = 0;
+        let dfNextSpawnDelay = 0;
+        const DF_STREAK_COLORS = ['#00d9ff', '#00d9ff', '#00d9ff', '#ff9d4d'];
+        const DF_STREAK_DURATION = 2200;
+        const DF_STREAK_TRAIL_LENGTH = 220;
+        const DF_MAX_STREAKS = 3;
+
+        function makeDigitalFrontierStreak(width, height, timestamp) {
+            const axis = Math.random() < 0.5 ? 'h' : 'v';
+            return {
+                axis,
+                cross: axis === 'h' ? Math.random() * height : Math.random() * width,
+                start: timestamp,
+                duration: DF_STREAK_DURATION * (0.8 + Math.random() * 0.5),
+                color: DF_STREAK_COLORS[Math.floor(Math.random() * DF_STREAK_COLORS.length)]
+            };
+        }
+
+        function drawDigitalFrontier(timestamp) {
+            const canvas = document.getElementById('digitalFrontierStreaks');
+            if (!canvas || getCurrentTheme() !== 'digital-frontier') return;
+            if (!digitalFrontierCtx) resizeDigitalFrontier();
+            if (!digitalFrontierCtx) return;
+
+            const dt = timestamp - dfLastDraw;
+            if (dt < 50) {
+                dfAnimationId = requestAnimationFrame(drawDigitalFrontier);
+                return;
+            }
+            dfLastDraw = timestamp;
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            digitalFrontierCtx.clearRect(0, 0, width, height);
+
+            if (timestamp - dfLastSpawn > dfNextSpawnDelay && dfStreaks.length < DF_MAX_STREAKS) {
+                dfStreaks.push(makeDigitalFrontierStreak(width, height, timestamp));
+                dfLastSpawn = timestamp;
+                dfNextSpawnDelay = 1500 + Math.random() * 2500;
+            }
+            dfStreaks = dfStreaks.filter(s => timestamp - s.start < s.duration);
+
+            for (const streak of dfStreaks) {
+                const t = (timestamp - streak.start) / streak.duration;
+                const travel = streak.axis === 'h' ? width : height;
+                const headPos = t * (travel + DF_STREAK_TRAIL_LENGTH) - DF_STREAK_TRAIL_LENGTH;
+                const tailPos = headPos - DF_STREAK_TRAIL_LENGTH;
+                if (headPos < 0 || tailPos > travel) continue;
+
+                const x1 = streak.axis === 'h' ? Math.max(0, tailPos) : streak.cross;
+                const y1 = streak.axis === 'h' ? streak.cross : Math.max(0, tailPos);
+                const x2 = streak.axis === 'h' ? Math.min(width, headPos) : streak.cross;
+                const y2 = streak.axis === 'h' ? streak.cross : Math.min(height, headPos);
+
+                const grad = streak.axis === 'h'
+                    ? digitalFrontierCtx.createLinearGradient(tailPos, streak.cross, headPos, streak.cross)
+                    : digitalFrontierCtx.createLinearGradient(streak.cross, tailPos, streak.cross, headPos);
+                grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                grad.addColorStop(1, streak.color);
+
+                digitalFrontierCtx.strokeStyle = grad;
+                digitalFrontierCtx.lineWidth = 2;
+                digitalFrontierCtx.shadowColor = streak.color;
+                digitalFrontierCtx.shadowBlur = 8;
+                digitalFrontierCtx.beginPath();
+                digitalFrontierCtx.moveTo(x1, y1);
+                digitalFrontierCtx.lineTo(x2, y2);
+                digitalFrontierCtx.stroke();
+            }
+            digitalFrontierCtx.shadowBlur = 0;
+
+            dfAnimationId = requestAnimationFrame(drawDigitalFrontier);
+        }
+
+        function resizeDigitalFrontier() {
+            const canvas = document.getElementById('digitalFrontierStreaks');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            digitalFrontierCtx = ctx;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            digitalFrontierCtx.scale(dpr, dpr);
+            dfStreaks = [];
+        }
+
+        function startDigitalFrontier() {
+            if (dfAnimationId) return;
+            resizeDigitalFrontier();
+            if (!digitalFrontierCtx) return;
+            dfLastDraw = performance.now();
+            dfLastSpawn = dfLastDraw;
+            dfNextSpawnDelay = 400 + Math.random() * 800;
+            dfAnimationId = requestAnimationFrame(drawDigitalFrontier);
+        }
+
+        function stopDigitalFrontier() {
+            if (dfAnimationId) {
+                cancelAnimationFrame(dfAnimationId);
+                dfAnimationId = null;
+            }
+            const canvas = document.getElementById('digitalFrontierStreaks');
+            if (canvas && digitalFrontierCtx) {
+                digitalFrontierCtx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+            dfStreaks = [];
+        }
+
+        function updateDigitalFrontier() {
+            if (getCurrentTheme() === 'digital-frontier') {
+                startDigitalFrontier();
+            } else {
+                stopDigitalFrontier();
+            }
+        }
+
+        // "Bliss" homage for Luna Blue - the rolling-hill-under-blue-sky
+        // scene, a nod to Windows XP's default wallpaper (its Luna visual
+        // style is this theme's namesake). Mostly a static composed
+        // scene like Vaporwave's horizon, plus a handful of clouds
+        // drifting slowly across the sky - the one animated element,
+        // small and diffuse like the other continuously-animated themes.
+        let lunaBlissCtx = null;
+        let lunaClouds = [];
+        let lunaBlissAnimationId = null;
+        let lunaBlissLastDraw = 0;
+        const LUNA_CLOUD_COUNT = 5;
+
+        function makeLunaClouds(width, height) {
+            const clouds = new Array(LUNA_CLOUD_COUNT);
+            for (let i = 0; i < LUNA_CLOUD_COUNT; i++) {
+                clouds[i] = {
+                    x: Math.random() * width,
+                    y: height * (0.08 + Math.random() * 0.4),
+                    scale: 0.6 + Math.random() * 0.9,
+                    speed: 4 + Math.random() * 10,
+                    alpha: 0.55 + Math.random() * 0.35
+                };
+            }
+            return clouds;
+        }
+
+        function drawLunaCloud(ctx, cloud) {
+            const { x, y, scale, alpha } = cloud;
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.ellipse(x, y, 40 * scale, 16 * scale, 0, 0, Math.PI * 2);
+            ctx.ellipse(x - 30 * scale, y + 6 * scale, 26 * scale, 14 * scale, 0, 0, Math.PI * 2);
+            ctx.ellipse(x + 32 * scale, y + 5 * scale, 28 * scale, 15 * scale, 0, 0, Math.PI * 2);
+            ctx.ellipse(x - 10 * scale, y - 10 * scale, 24 * scale, 16 * scale, 0, 0, Math.PI * 2);
+            ctx.ellipse(x + 14 * scale, y - 8 * scale, 22 * scale, 14 * scale, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawLunaBliss(timestamp) {
+            const canvas = document.getElementById('lunaBliss');
+            if (!canvas || getCurrentTheme() !== 'luna-blue') return;
+            if (!lunaBlissCtx) resizeLunaBliss();
+            if (!lunaBlissCtx) return;
+
+            const dt = timestamp - lunaBlissLastDraw;
+            if (dt < 50) {
+                lunaBlissAnimationId = requestAnimationFrame(drawLunaBliss);
+                return;
+            }
+            const elapsedSeconds = dt / 1000;
+            lunaBlissLastDraw = timestamp;
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            const horizonY = height * 0.8;
+
+            const sky = lunaBlissCtx.createLinearGradient(0, 0, 0, horizonY);
+            sky.addColorStop(0, '#173F8C');
+            sky.addColorStop(0.55, '#5C93EE');
+            sky.addColorStop(1, '#DCEFFF');
+            lunaBlissCtx.globalAlpha = 1;
+            lunaBlissCtx.fillStyle = sky;
+            lunaBlissCtx.fillRect(0, 0, width, height);
+
+            for (const cloud of lunaClouds) {
+                cloud.x += cloud.speed * elapsedSeconds;
+                const cloudWidth = 90 * cloud.scale;
+                if (cloud.x - cloudWidth > width) {
+                    cloud.x = -cloudWidth;
+                    cloud.y = height * (0.08 + Math.random() * 0.4);
+                }
+                drawLunaCloud(lunaBlissCtx, cloud);
+            }
+            lunaBlissCtx.globalAlpha = 1;
+
+            const hill = lunaBlissCtx.createLinearGradient(0, horizonY - height * 0.12, 0, height);
+            hill.addColorStop(0, '#8ED43C');
+            hill.addColorStop(1, '#3F8A12');
+            lunaBlissCtx.fillStyle = hill;
+            lunaBlissCtx.beginPath();
+            lunaBlissCtx.moveTo(0, horizonY);
+            lunaBlissCtx.bezierCurveTo(width * 0.22, horizonY - height * 0.12, width * 0.38, horizonY + height * 0.05, width * 0.58, horizonY - height * 0.03);
+            lunaBlissCtx.bezierCurveTo(width * 0.78, horizonY - height * 0.1, width * 0.9, horizonY + height * 0.03, width, horizonY - height * 0.02);
+            lunaBlissCtx.lineTo(width, height);
+            lunaBlissCtx.lineTo(0, height);
+            lunaBlissCtx.closePath();
+            lunaBlissCtx.fill();
+
+            lunaBlissAnimationId = requestAnimationFrame(drawLunaBliss);
+        }
+
+        function resizeLunaBliss() {
+            const canvas = document.getElementById('lunaBliss');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            lunaBlissCtx = ctx;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            lunaBlissCtx.scale(dpr, dpr);
+            lunaClouds = makeLunaClouds(window.innerWidth, window.innerHeight);
+        }
+
+        function startLunaBliss() {
+            if (lunaBlissAnimationId) return;
+            resizeLunaBliss();
+            if (!lunaBlissCtx) return;
+            lunaBlissLastDraw = performance.now();
+            lunaBlissAnimationId = requestAnimationFrame(drawLunaBliss);
+        }
+
+        function stopLunaBliss() {
+            if (lunaBlissAnimationId) {
+                cancelAnimationFrame(lunaBlissAnimationId);
+                lunaBlissAnimationId = null;
+            }
+            const canvas = document.getElementById('lunaBliss');
+            if (canvas && lunaBlissCtx) {
+                lunaBlissCtx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function updateLunaBliss() {
+            if (getCurrentTheme() === 'luna-blue') {
+                startLunaBliss();
+            } else {
+                stopLunaBliss();
+            }
+        }
+
+        // Boot-log ambient background for Amber - lines of fake
+        // kernel/system boot messages printed one at a time, like a real
+        // terminal rather than a smooth-scrolling ticker: each new line
+        // appears at a randomized interval (sometimes in rapid
+        // succession, sometimes with a short pause, like a real boot
+        // sequence moving through fast and slow steps), snapping the
+        // existing lines up by one row rather than continuously scrolling
+        // pixel-by-pixel. Brightness fades toward the top (bottom =
+        // newest = full opacity) to mimic CRT phosphor persistence.
+        let amberBootLogCtx = null;
+        let amberLogLines = [];
+        let amberVisibleRows = 0;
+        let amberNextLineTime = 0;
+        let amberBootLogAnimationId = null;
+        let amberBootLogLastDraw = 0;
+        const AMBER_LINE_HEIGHT = 16;
+        const AMBER_BOOT_LOG_MESSAGES = [
+            '[  OK  ] Initializing memory subsystem...',
+            '[  OK  ] Mounting /dev/sda1 on /...',
+            '[  OK  ] Loading kernel modules...',
+            '[  OK  ] Starting network interface eth0...',
+            '[  OK  ] Detecting hardware devices...',
+            '[  OK  ] Starting system logger...',
+            '[  OK  ] Checking filesystem integrity...',
+            '[  OK  ] Loading device drivers...',
+            '[  OK  ] Starting cron daemon...',
+            '[  OK  ] Initializing swap space...',
+            '[ WARN ] Clock skew detected, adjusting...',
+            '[  OK  ] Starting SSH daemon...',
+            '[  OK  ] Bringing up loopback interface...',
+            '[  OK  ] Calibrating delay loop...',
+            '[  OK  ] Starting local services...',
+            'Kernel command line: root=/dev/sda1 ro quiet',
+            'CPU0: base frequency 100MHz, cache 512KB',
+            'Total memory: 640K conventional, 15360K extended'
+        ];
+
+        function drawAmberBootLog(timestamp) {
+            const canvas = document.getElementById('amberBootLog');
+            if (!canvas || getCurrentTheme() !== 'amber') return;
+            if (!amberBootLogCtx) resizeAmberBootLog();
+            if (!amberBootLogCtx) return;
+
+            const dt = timestamp - amberBootLogLastDraw;
+            if (dt < 50) {
+                amberBootLogAnimationId = requestAnimationFrame(drawAmberBootLog);
+                return;
+            }
+            amberBootLogLastDraw = timestamp;
+
+            if (timestamp >= amberNextLineTime) {
+                amberLogLines.push(AMBER_BOOT_LOG_MESSAGES[Math.floor(Math.random() * AMBER_BOOT_LOG_MESSAGES.length)]);
+                if (amberLogLines.length > amberVisibleRows) {
+                    amberLogLines.shift();
+                }
+                amberNextLineTime = timestamp + 60 + Math.random() * 640;
+            }
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            amberBootLogCtx.clearRect(0, 0, width, height);
+            for (let i = 0; i < amberLogLines.length; i++) {
+                const y = i * AMBER_LINE_HEIGHT;
+                const fadeT = Math.max(0, Math.min(1, y / height));
+                amberBootLogCtx.globalAlpha = 0.25 + 0.55 * fadeT;
+                amberBootLogCtx.fillStyle = '#FFB000';
+                amberBootLogCtx.fillText(amberLogLines[i], 16, y);
+            }
+            amberBootLogCtx.globalAlpha = 1;
+
+            amberBootLogAnimationId = requestAnimationFrame(drawAmberBootLog);
+        }
+
+        function resizeAmberBootLog() {
+            const canvas = document.getElementById('amberBootLog');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            amberBootLogCtx = ctx;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            amberBootLogCtx.scale(dpr, dpr);
+            amberBootLogCtx.font = '13px "Courier New", monospace';
+            amberVisibleRows = Math.ceil(window.innerHeight / AMBER_LINE_HEIGHT);
+            amberLogLines = [];
+            amberNextLineTime = 0;
+        }
+
+        function startAmberBootLog() {
+            if (amberBootLogAnimationId) return;
+            resizeAmberBootLog();
+            if (!amberBootLogCtx) return;
+            amberBootLogLastDraw = performance.now();
+            amberBootLogAnimationId = requestAnimationFrame(drawAmberBootLog);
+        }
+
+        function stopAmberBootLog() {
+            if (amberBootLogAnimationId) {
+                cancelAnimationFrame(amberBootLogAnimationId);
+                amberBootLogAnimationId = null;
+            }
+            const canvas = document.getElementById('amberBootLog');
+            if (canvas && amberBootLogCtx) {
+                amberBootLogCtx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function updateAmberBootLog() {
+            if (getCurrentTheme() === 'amber') {
+                startAmberBootLog();
+            } else {
+                stopAmberBootLog();
+            }
+        }
+
+        // Bouncing spectrum-analyzer ambient background for MP3 Player -
+        // the single most recognizable visual signature of that late-90s/
+        // early-2000s skinnable media-player era. A row of bars along the
+        // bottom of the viewport, each easing toward a new random target
+        // height on its own timer (no real audio behind it), colored
+        // bottom-to-top in the classic green-yellow-orange-red EQ gradient,
+        // with a small bright "peak-hold" cap that rises with its bar and
+        // falls back slowly - the authentic touch real hardware/software
+        // equalizers had.
+        let mp3VisualizerCtx = null;
+        let mp3Bars = [];
+        let mp3VisualizerAnimationId = null;
+        let mp3VisualizerLastDraw = 0;
+        let mp3MaxBarHeight = 0;
+        const MP3_BAR_WIDTH = 6;
+        const MP3_BAR_GAP = 3;
+
+        function makeMp3Bars(width) {
+            const barSlot = MP3_BAR_WIDTH + MP3_BAR_GAP;
+            const count = Math.max(12, Math.floor(width / barSlot));
+            const bars = new Array(count);
+            for (let i = 0; i < count; i++) {
+                bars[i] = {
+                    height: Math.random() * mp3MaxBarHeight,
+                    target: Math.random() * mp3MaxBarHeight,
+                    nextChange: performance.now() + 150 + Math.random() * 350,
+                    peak: 0
+                };
+            }
+            return bars;
+        }
+
+        function drawMp3Visualizer(timestamp) {
+            const canvas = document.getElementById('mp3Visualizer');
+            if (!canvas || getCurrentTheme() !== 'mp3-player') return;
+            if (!mp3VisualizerCtx) resizeMp3Visualizer();
+            if (!mp3VisualizerCtx) return;
+
+            const dt = timestamp - mp3VisualizerLastDraw;
+            if (dt < 50) {
+                mp3VisualizerAnimationId = requestAnimationFrame(drawMp3Visualizer);
+                return;
+            }
+            mp3VisualizerLastDraw = timestamp;
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            const baseline = height;
+            mp3VisualizerCtx.clearRect(0, 0, width, height);
+
+            // One gradient reused for every bar - a pure vertical gradient's
+            // color at any point only depends on y, so it's identical for
+            // every bar regardless of its x position.
+            const grad = mp3VisualizerCtx.createLinearGradient(0, baseline, 0, baseline - mp3MaxBarHeight);
+            grad.addColorStop(0, '#3DDC5A');
+            grad.addColorStop(0.55, '#E8E24A');
+            grad.addColorStop(0.8, '#F2A73B');
+            grad.addColorStop(1, '#F24B4B');
+            mp3VisualizerCtx.fillStyle = grad;
+
+            const barSlot = MP3_BAR_WIDTH + MP3_BAR_GAP;
+            for (let i = 0; i < mp3Bars.length; i++) {
+                const bar = mp3Bars[i];
+                if (timestamp >= bar.nextChange) {
+                    bar.target = Math.random() * mp3MaxBarHeight;
+                    bar.nextChange = timestamp + 150 + Math.random() * 350;
+                }
+                bar.height += (bar.target - bar.height) * 0.25;
+                if (bar.height > bar.peak) {
+                    bar.peak = bar.height;
+                } else {
+                    bar.peak -= mp3MaxBarHeight * 0.02;
+                    if (bar.peak < bar.height) bar.peak = bar.height;
+                }
+
+                const x = i * barSlot;
+                const barHeight = Math.max(2, bar.height);
+                mp3VisualizerCtx.fillStyle = grad;
+                mp3VisualizerCtx.fillRect(x, baseline - barHeight, MP3_BAR_WIDTH, barHeight);
+
+                mp3VisualizerCtx.fillStyle = '#ffffff';
+                mp3VisualizerCtx.fillRect(x, baseline - bar.peak - 2, MP3_BAR_WIDTH, 2);
+            }
+
+            mp3VisualizerAnimationId = requestAnimationFrame(drawMp3Visualizer);
+        }
+
+        function resizeMp3Visualizer() {
+            const canvas = document.getElementById('mp3Visualizer');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            mp3VisualizerCtx = ctx;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            mp3VisualizerCtx.scale(dpr, dpr);
+            mp3MaxBarHeight = Math.min(220, window.innerHeight * 0.28);
+            mp3Bars = makeMp3Bars(window.innerWidth);
+        }
+
+        function startMp3Visualizer() {
+            if (mp3VisualizerAnimationId) return;
+            resizeMp3Visualizer();
+            if (!mp3VisualizerCtx) return;
+            mp3VisualizerLastDraw = performance.now();
+            mp3VisualizerAnimationId = requestAnimationFrame(drawMp3Visualizer);
+        }
+
+        function stopMp3Visualizer() {
+            if (mp3VisualizerAnimationId) {
+                cancelAnimationFrame(mp3VisualizerAnimationId);
+                mp3VisualizerAnimationId = null;
+            }
+            const canvas = document.getElementById('mp3Visualizer');
+            if (canvas && mp3VisualizerCtx) {
+                mp3VisualizerCtx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function updateMp3Visualizer() {
+            if (getCurrentTheme() === 'mp3-player') {
+                startMp3Visualizer();
+            } else {
+                stopMp3Visualizer();
+            }
+        }
+
         function updateFavicon() {
             const link = document.getElementById('faviconLink');
             if (!link) return;
             const theme = getCurrentTheme();
-            // Every theme except dark/light has a matching
-            // static/favicon-<theme>.svg; dark and light use the plain one.
+            // Every theme except dark has a matching
+            // static/favicon-<theme>.svg; dark uses the plain one.
             // The synthesized OhMyDebn custom theme has no favicon of its
             // own (colors vary per palette) - reuse the hand-built
             // "OhMyDebn" theme's favicon as the closest branding match.
@@ -619,17 +1743,37 @@
                 link.href = 'static/favicon-ohmydebn.svg';
                 return;
             }
-            link.href = (theme === 'dark' || theme === 'light')
+            link.href = (theme === 'dark')
                 ? 'static/favicon.svg'
                 : `static/favicon-${theme}.svg`;
         }
 
-        window.addEventListener('resize', resizeCodeRain);
+        // Single source of truth for "every ambient theme background
+        // effect" - setTheme()/applyCustomTheme()/init() all need to
+        // re-evaluate every effect's on/off state on every theme change
+        // (each updater itself checks getCurrentTheme() and starts/stops
+        // accordingly), and the resize/visibilitychange listeners just
+        // below need to reach every effect too. Adding a new ambient
+        // theme now only means adding one entry to each of these three
+        // arrays, rather than a new call in 4+ separate places.
+        const AMBIENT_THEME_RESIZERS = [resizeCodeRain, resizeBlockRain, resizeVaporwaveGrid, resizeDosDefrag, resizeCgaStarfield, resizeBreadbinSprites, resizeDigitalFrontier, resizeLunaBliss, resizeAmberBootLog, resizeMp3Visualizer];
+        const AMBIENT_THEME_UPDATERS = [updateCodeRain, updateBlockRain, updateVaporwaveGrid, updateDosDefrag, updateCgaStarfield, updateBreadbinSprites, updateDigitalFrontier, updateLunaBliss, updateAmberBootLog, updateMp3Visualizer];
+        const AMBIENT_THEME_STOPPERS = [stopCodeRain, stopBlockRain, stopVaporwaveGrid, stopDosDefrag, stopCgaStarfield, stopBreadbinSprites, stopDigitalFrontier, stopLunaBliss, stopAmberBootLog, stopMp3Visualizer];
+
+        function updateAllAmbientThemes() {
+            AMBIENT_THEME_UPDATERS.forEach(fn => fn());
+        }
+
+        function stopAllAmbientThemes() {
+            AMBIENT_THEME_STOPPERS.forEach(fn => fn());
+        }
+
+        AMBIENT_THEME_RESIZERS.forEach(fn => window.addEventListener('resize', fn));
         document.addEventListener('visibilitychange', function() {
             if (document.hidden) {
-                stopCodeRain();
+                stopAllAmbientThemes();
             } else {
-                updateCodeRain();
+                updateAllAmbientThemes();
             }
         });
 
@@ -689,6 +1833,7 @@
             document.getElementById('themesModal').classList.remove('active');
             revertTheme();
             menuBaseTheme = null;
+            themeTileNavSelection = null;
         }
 
         // Shared by every modal whose backdrop <div> has onclick="handleModalBackdropClick(event, closeXModal)" -
@@ -1053,7 +2198,7 @@
                 </tbody>
             </table>
             <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 8px; margin-bottom: 0;">
-                Any of the above file types can be uploaded inside a .zip archive to automatically extract and analyze the first supported file found.
+                Any of the above file types can be uploaded inside a .zip archive - every supported file found is extracted and analyzed as its own independent analysis.
             </p>
             <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 15px;">
                 <span style="color: var(--help-icon-color);">${LIGHTBULB_ICON_SVG}</span> Want more fun? Try one of our fun <a href="#" onclick="event.preventDefault(); showThemesModal();" style="color: var(--accent); text-decoration: underline; font-weight: 600;">themes</a>!
@@ -1234,6 +2379,13 @@
         }
 
         function showTab(sectionId, el) {
+            // Both a direct mouse click and navigateStatTabs()'s own
+            // cards[nextIndex].click() funnel through here - a mouse click
+            // is the explicit "I want Left/Right to mean data type again"
+            // signal (see leftRightSwitchesStatTabs's own comment), and
+            // resetting it when navigateStatTabs() itself triggers this is
+            // a harmless no-op (it can only have run while already true).
+            leftRightSwitchesStatTabs = true;
             document.querySelectorAll('.section').forEach(s => s.classList.add('section-hidden'));
             document.getElementById(sectionId).classList.remove('section-hidden');
             document.querySelectorAll('.stat-card').forEach(c => c.classList.remove('tab-active'));
@@ -1244,7 +2396,15 @@
         }
         
         let tabDataCache = {};
-        
+
+        // Populated by buildAcknowledgedAlertsSection() and read back by
+        // renderAcknowledgedAlertsGroups() - separate from tabDataCache
+        // since the Acknowledged Alerts tab's own fetches use
+        // acknowledged_only=true, a fundamentally different query from
+        // every other tab's (which all exclude acknowledged rows by
+        // default).
+        let acknowledgedAlertsCache = { alert: [], sigmaalert: [] };
+
         async function loadTabData(eventType, activeCard) {
             resetPagination();
             const sectionId = `section-${eventType}`;
@@ -1263,7 +2423,13 @@
                     }
                 });
             }
-            
+
+            if (eventType === 'acknowledged') {
+                await buildAcknowledgedAlertsSection();
+                updateFilterBarVisibility();
+                return;
+            }
+
             if (eventType === 'all') {
                 if (canUseScalableFetch()) {
                     if (needsFullBatch('all')) await ensureCappedBatch('all');
@@ -1402,14 +2568,22 @@
 
         // Tracks the single currently-open pivot menu (at most one at a
         // time, same as every other dropdown/modal in this app) so the
-        // outside-click/Escape listeners below know what to close.
+        // outside-click listener below and the main keydown handler's
+        // Escape case (further down in the file) know what to close.
         let activePivotMenuEl = null;
+        // Arrow-key selection within the open pivot menu (see
+        // navigatePivotMenuItems() below) - separate from
+        // verticalNavSelection since the menu is a transient overlay on
+        // top of whatever row opened it, not part of the page's own
+        // vertical list.
+        let pivotMenuNavSelection = null;
 
         function closePivotMenu() {
             if (activePivotMenuEl) {
                 activePivotMenuEl.remove();
                 activePivotMenuEl = null;
             }
+            pivotMenuNavSelection = null;
         }
 
         // Same always-registered-once, contains()-check pattern as the
@@ -1423,15 +2597,16 @@
                 closePivotMenu();
             }
         });
-
-        // Arrow function, not a plain function(e) expression - this file's
-        // hacker-mode easter egg listener elsewhere is located by tests via
-        // a regex matching addEventListener('keydown', ...) followed by a
-        // plain function(e) expression, which would otherwise wrongly
-        // match whichever of the two listeners appears first in the file.
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && activePivotMenuEl) closePivotMenu();
-        });
+        // Escape used to have its own dedicated listener here too, closing
+        // the pivot menu the same way the outside-click listener above
+        // does. Removed - it ran before the main keydown handler further
+        // down the file (listeners fire in registration order), which
+        // raced that handler's own hadSomethingOpen check: activePivotMenuEl
+        // was already null by the time the main handler looked at it, so
+        // Escape closed the pivot menu AND immediately fell through to
+        // showWelcome() in the same keystroke. Folded into the main
+        // handler's own Escape case instead, which closes it before
+        // hadSomethingOpen would otherwise be computed too late to matter.
 
         // The columns list a detail-panel field's label is checked against
         // (see handleDetailValueClick) to decide whether it gets the full
@@ -1505,6 +2680,78 @@
         // every dynamic onclick elsewhere - see TestFilterOnclickQuoting.
         // Only the visible label text goes through escapeHtml, same as
         // any other rendered value.
+        // Non-null only for a row that can be acknowledged (a Suricata
+        // alert or a sigma_alerts row) - anything else (dns, http, a log
+        // row, ...) gets no Acknowledge buttons in showPivotMenu() below.
+        // rowId/identity are read straight off the <tr>'s own dataset
+        // (baked in at render time by rowPrefixCells/buildSigmaAlertRow),
+        // not looked up in tabDataCache - the default (no filter/sort)
+        // view fetches each page through fetchEventsPage()'s own local
+        // `items`, which never populates tabDataCache[eventType] at all
+        // (see canUseScalableFetchForSort in buildSection), so a
+        // tabDataCache-based lookup would silently find nothing for most
+        // real page views. inAcknowledgedTab distinguishes "Acknowledge"
+        // from "Un-acknowledge" - not a field on the row itself (every row
+        // returned by the Acknowledged Alerts tab's own acknowledged_only
+        // fetch is acknowledged by definition, so there'd be nothing to
+        // check), just whether this particular pivot menu was opened from
+        // within that tab's own section.
+        function acknowledgeableRowInfo(expandRowEl) {
+            if (!expandRowEl) return null;
+            const eventType = expandRowEl.dataset.eventType;
+            if (eventType !== 'alert' && eventType !== 'sigmaalert') return null;
+            const table = eventType === 'sigmaalert' ? 'sigma_alerts' : 'events';
+            const identity = expandRowEl.dataset.alertIdentity || null;
+            const inAcknowledgedTab = !!expandRowEl.closest('#section-acknowledged');
+            return { eventType, table, rowId: Number(expandRowEl.dataset.id), identity, inAcknowledgedTab };
+        }
+
+        // Single-row acknowledge/un-acknowledge and the "all instances"
+        // bulk path both end here - refreshAnalysisData() (the same
+        // resync clearAllFilters() already uses after a state change) is
+        // what actually makes the row(s) disappear from view: it re-fetches
+        // from the server, whose own queries now exclude (or, in the
+        // Acknowledged Alerts tab, include-only) acknowledged rows - see
+        // db.py's _build_where_conditions/_sigma_alert_where. No manual
+        // DOM removal needed, and this keeps stat-card counts correct for
+        // free instead of hand-updating them separately.
+        async function setAlertAcknowledged(table, rowId, acknowledged) {
+            await fetch('/api/acknowledge-alert', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ md5: currentMd5, table, rowId, acknowledged }),
+            });
+            await refreshAnalysisData();
+        }
+
+        // "All instances of this alert" - computed client-side from
+        // whatever's already loaded (ensureCappedBatch first, so the match
+        // set isn't limited to a partial page) rather than a server-side
+        // signature_id/rule_id query, matching how every other bulk-ish
+        // action in this app (Include/Exclude/Only) already works purely
+        // off currently-loaded data.
+        async function acknowledgeAllInstances(ackInfo) {
+            if (!ackInfo.identity) {
+                showToast('Could not determine this alert\'s identity');
+                return;
+            }
+            await ensureCappedBatch(ackInfo.eventType);
+            const pool = ackInfo.eventType === 'sigmaalert' ? (tabDataCache['sigmaalert'] || []) : (tabDataCache[ackInfo.eventType] || allEvents || []);
+            const matchIds = pool
+                .filter(e => String(ackInfo.eventType === 'sigmaalert' ? e.rule_id : (e.alert?.signature_id || e.alert?.signature)) === ackInfo.identity)
+                .map(e => e.id);
+            if (matchIds.length === 0) return;
+            if (truncatedTypes.has(ackInfo.eventType)) {
+                showToast('Only matches within the current query limit were acknowledged - some may remain');
+            }
+            await fetch('/api/acknowledge-alerts-bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ md5: currentMd5, table: ackInfo.table, rowIds: matchIds }),
+            });
+            await refreshAnalysisData();
+        }
+
         // trimmed: true omits Include/Exclude/Only - for a value that has
         // no real filterable column behind it (most detail-panel fields,
         // see handleDetailValueClick), Include/Exclude/Only would have
@@ -1537,6 +2784,12 @@
             const expandRowHtml = canExpandRow
                 ? `<button type="button" class="pivot-menu-item" data-pivot-action="expand-row" title="${escapeHtml(expandRowTitle)}"><span class="pivot-menu-icon">${EXPAND_ICON_SVG}</span>${expandRowLabel}</button><div class="pivot-menu-divider"></div>`
                 : '';
+            // Acknowledge/Un-acknowledge - see acknowledgeableRowInfo()'s
+            // own comment for why this is null for any non-alert row.
+            const ackInfo = acknowledgeableRowInfo(expandRowEl);
+            const ackHtml = !ackInfo ? '' : ackInfo.inAcknowledgedTab
+                ? `<button type="button" class="pivot-menu-item" data-pivot-action="unacknowledge">Un-acknowledge this alert</button><div class="pivot-menu-divider"></div>`
+                : `<button type="button" class="pivot-menu-item" data-pivot-action="acknowledge">Acknowledge this alert</button><button type="button" class="pivot-menu-item" data-pivot-action="acknowledge-all">Acknowledge all instances of this alert</button><div class="pivot-menu-divider"></div>`;
             // Only the magnifying glass icon is color-coded (via its own
             // wrapping span, not the button itself) - the button's own text
             // stays the normal menu-item color. Icon colors reuse the same
@@ -1577,6 +2830,7 @@
             menu.innerHTML = `
                 <div class="pivot-menu-label" title="${escapeHtml(fullLabel)}">${escapeHtml(col)}: ${escapeHtml(valueLabel)}</div>
                 ${expandRowHtml}
+                ${ackHtml}
                 ${filterButtonsHtml}
                 <button type="button" class="pivot-menu-item" data-pivot-action="hunt" title="${escapeHtml(huntTitle)}"><span class="pivot-menu-icon">${SEARCH_ICON_SVG}</span>Hunt</button>
                 <div class="pivot-menu-divider"></div>
@@ -1588,6 +2842,21 @@
                 menu.querySelector('[data-pivot-action="expand-row"]').addEventListener('click', function() {
                     closePivotMenu();
                     toggleDetailRow(expandRowEl);
+                });
+            }
+            if (ackInfo && ackInfo.inAcknowledgedTab) {
+                menu.querySelector('[data-pivot-action="unacknowledge"]').addEventListener('click', function() {
+                    closePivotMenu();
+                    setAlertAcknowledged(ackInfo.table, ackInfo.rowId, false);
+                });
+            } else if (ackInfo) {
+                menu.querySelector('[data-pivot-action="acknowledge"]').addEventListener('click', function() {
+                    closePivotMenu();
+                    setAlertAcknowledged(ackInfo.table, ackInfo.rowId, true);
+                });
+                menu.querySelector('[data-pivot-action="acknowledge-all"]').addEventListener('click', function() {
+                    closePivotMenu();
+                    acknowledgeAllInstances(ackInfo);
                 });
             }
             if (!trimmed) {
@@ -1792,20 +3061,26 @@
                         let html = '';
                         let groupHtml = '';
                         let lastDirection = '';
+                        // Appends the just-finished direction's group (with
+                        // its colored left bar) to html and resets groupHtml
+                        // for the next one - called both mid-loop (on a
+                        // direction change) and once more after the loop for
+                        // the final trailing group.
+                        const flushGroup = () => {
+                            const bar = `<span style="display:inline-block;width:3px;background:${lastDirection === 'src' ? '#ff6b6b' : '#58a6ff'};margin-right:8px;flex-shrink:0;"></span>`;
+                            html += `<div style="display:flex;align-items:stretch;">${bar}<div style="flex:1;">${groupHtml}</div></div>`;
+                            groupHtml = '';
+                        };
                         for (const line of data.lines) {
                             const direction = line.direction;
-                            const color = direction === 'src' ? '#ff6b6b' : '#58a6ff';
                             if (direction !== lastDirection && groupHtml) {
-                                const bar = `<span style="display:inline-block;width:3px;background:${lastDirection === 'src' ? '#ff6b6b' : '#58a6ff'};margin-right:8px;flex-shrink:0;"></span>`;
-                                html += `<div style="display:flex;align-items:stretch;">${bar}<div style="flex:1;">${groupHtml}</div></div>`;
-                                groupHtml = '';
+                                flushGroup();
                             }
                             groupHtml += line.text.split('\n').map(t => `<div>${escapeHtml(t)}</div>`).join('');
                             lastDirection = direction;
                         }
                         if (groupHtml) {
-                            const bar = `<span style="display:inline-block;width:3px;background:${lastDirection === 'src' ? '#ff6b6b' : '#58a6ff'};margin-right:8px;flex-shrink:0;"></span>`;
-                            html += `<div style="display:flex;align-items:stretch;">${bar}<div style="flex:1;">${groupHtml}</div></div>`;
+                            flushGroup();
                         }
                         pre.innerHTML = html;
                         if (data.truncated) {
@@ -2342,17 +3617,14 @@
                 sortCurrentTable(index);
             }
 
-            // Delegated handler for previous analyses buttons
+            // Delegated handler for previous analyses buttons - Re-analyze/
+            // Delete moved to the analysis page header (reanalyzeIconHtml()/
+            // deleteIconHtml()), so notes is the only action left here.
             const btn = e.target.closest('#previousAnalysesList button[data-action]');
             if (btn) {
                 const md5 = btn.dataset.md5;
-                const name = btn.dataset.name;
                 const action = btn.dataset.action;
-                if (action === 'reanalyze') {
-                    openReanalyzeModal(md5, name);
-                } else if (action === 'delete') {
-                    openDeleteAnalysis(md5, name);
-                } else if (action === 'notes') {
+                if (action === 'notes') {
                     openAnalysisNotesFromList(md5);
                 }
             }
@@ -2440,7 +3712,7 @@
 
         function showHelpModal() {
             closeOtherMenuModals('helpModal');
-            const isWelcome = document.getElementById('inputBoxes').style.display !== 'none';
+            const isWelcome = isWelcomeScreen();
             const modalTitle = document.getElementById('helpModalTitle');
             const modalBody = document.getElementById('helpModalBody');
             const checkboxContainer = document.getElementById('helpShowAgainContainer');
@@ -2475,7 +3747,7 @@
 
         function closeHelpModal() {
             document.getElementById('helpModal').classList.remove('active');
-            const isWelcome = document.getElementById('inputBoxes').style.display !== 'none';
+            const isWelcome = isWelcomeScreen();
             if (isWelcome) {
                 safeStorageSet(sessionStorage, 'socrates_helpShown', 'true');
                 if (!document.getElementById('helpShowAgain').checked) {
@@ -2491,6 +3763,13 @@
                 closeHelpModal();
             }
         }
+
+        // Backing count for the Danger Zone's Delete All button
+        // (openDeleteAllAnalyses(settingsAnalysisCount) in the HTML reads
+        // this by name at click time, not by the value baked in at
+        // render time, since the real count only arrives after an async
+        // fetch - see showSettingsModal()'s own fetch below).
+        let settingsAnalysisCount = 0;
 
         // focusCustomLookup: true opens the modal with focus already in the
         // Custom Lookup Sites add-form - reached from the pivot menu's own
@@ -2525,10 +3804,35 @@
                 uploadHint.textContent = `Default: ${CONFIG.DEFAULT_UPLOAD_SIZE_MB.toLocaleString()} MB. Server maximum: ${maxUploadMB.toLocaleString()} MB.`;
             }).catch(() => {});
             renderCustomLookupSitesSection();
+            renderSettingsDeleteAllSection();
             document.getElementById('settingsModal').classList.add('active');
             if (focusCustomLookup) {
                 document.getElementById('customLookupNameInput').focus();
             }
+        }
+
+        // Delete All moved here from the welcome screen's Previous Analyses
+        // list (a rare, irreversible bulk action fits a Settings "danger
+        // zone" better than sitting next to the list it wipes out) - unlike
+        // that list, Settings can be opened from anywhere, so the count
+        // shown next to the button is fetched fresh on every open rather
+        // than being handed in from an already-rendered list.
+        function renderSettingsDeleteAllSection() {
+            const hint = document.getElementById('settingsDeleteAllHint');
+            const btn = document.getElementById('settingsDeleteAllBtn');
+            hint.textContent = 'Loading...';
+            btn.disabled = true;
+            fetch('/api/analyses').then(r => r.json()).then(analyses => {
+                settingsAnalysisCount = analyses.length;
+                hint.textContent = settingsAnalysisCount > 0
+                    ? `Permanently delete all ${settingsAnalysisCount.toLocaleString()} previous ${settingsAnalysisCount === 1 ? 'analysis' : 'analyses'}. This cannot be undone.`
+                    : 'No previous analyses to delete.';
+                btn.disabled = settingsAnalysisCount === 0;
+            }).catch(() => {
+                settingsAnalysisCount = 0;
+                hint.textContent = 'Could not load previous analyses.';
+                btn.disabled = true;
+            });
         }
 
         // Re-rendered from scratch (not patched in place) on every open and
@@ -2689,6 +3993,7 @@
         }
 
         function showAnalysisUI() {
+            leftRightSwitchesStatTabs = true;
             document.getElementById('inputBoxes').style.display = 'none';
             document.getElementById('mainHeader').style.display = 'block';
             document.getElementById('dataPanel').style.display = '';
@@ -2698,7 +4003,7 @@
             // "Need help?" prompt during analysis.
             document.getElementById('footerCenterTeaser').innerHTML = '<a href="#" onclick="event.preventDefault(); showSecurityOnionModal();" class="footer-teaser-link">Need more advanced functionality?</a>';
         }
-        
+
         async function showWelcome() {
             document.title = 'SO-CRATES - Welcome';
             closeAllModals();
@@ -2713,11 +4018,9 @@
             
             // Load previous analyses
             let previousHtml = '';
-            let previousAnalysisCount = 0;
             try {
                 const resp = await fetch('/api/analyses');
                 const analyses = await resp.json();
-                previousAnalysisCount = analyses.length;
                 if (analyses.length > 0) {
                     previousHtml = analyses.map(a => {
                         // The MD5 is still reachable via the link's
@@ -2740,13 +4043,11 @@
                         const notesButtonHtml = a.has_notes
                             ? `<button data-md5="${escapeHtml(a.md5)}" data-action="notes" class="previous-analysis-notes" style="border: none; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px; margin-right: 4px;" title="View/edit notes">${NOTES_ICON_SVG}</button>`
                             : '';
-                        return `<div class="previous-analysis-row" style="display: flex; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border-color);">
+                        return `<div class="previous-analysis-row" style="display: flex; align-items: center; padding: 8px 10px;">
                             <a href="?file=${escapeHtml(a.md5)}" onclick="event.preventDefault(); loadAnalysis('${escapeJsString(a.md5)}');" style="color: var(--accent); text-decoration: none; flex: 1; display: flex; align-items: baseline; gap: 8px; overflow: hidden;" title="${escapeHtml(rowTitle)}">
                                 <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${FOLDER_ICON_SVG}${escapeHtml(a.name)}</span>
                             </a>
                             ${notesButtonHtml}
-                            <button data-md5="${escapeHtml(a.md5)}" data-name="${escapeHtml(a.name)}" data-action="reanalyze" class="previous-analysis-reanalyze" style="border: none; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px; margin-right: 4px;" title="Re-analyze">${REFRESH_ICON_SVG}</button>
-                            <button class="previous-analysis-delete" data-md5="${escapeHtml(a.md5)}" data-name="${escapeHtml(a.name)}" data-action="delete" style="border: none; cursor: pointer; font-size: 1rem; padding: 4px 10px; border-radius: 6px;" title="Delete">${DELETE_ICON_SVG}</button>
                         </div>`;
                     }).join('');
                 } else {
@@ -2756,10 +4057,6 @@
                 console.error('Failed to load analyses:', err);
                 previousHtml = '<span style="color: var(--bg-hover-light);">Error loading analyses</span>';
             }
-            const deleteAllButtonHtml = previousAnalysisCount > 0
-                ? `<button class="previous-analysis-delete-all" onclick="openDeleteAllAnalyses(${previousAnalysisCount})" style="border: none; cursor: pointer; font-size: 0.8rem; padding: 4px 10px; border-radius: 6px;" title="Delete all previous analyses">Delete All</button>`
-                : '';
-            
             document.getElementById('inputBoxes').innerHTML = `
                 <div style="max-width: 900px; margin: 0 auto;">
                     <div style="display: flex; flex-direction: column; gap: 20px; margin-bottom: 20px;">
@@ -2805,7 +4102,6 @@
                        <div class="previous-analyses-section" style="background: var(--bg-secondary); padding: 20px; border-radius: 8px; border: 1px solid var(--border-color);">
                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                                <div style="color: var(--text-muted); font-size: 0.9rem; text-transform: uppercase; font-weight: 600;">${FOLDER_OPEN_ICON_SVG} Previous Analyses</div>
-                               ${deleteAllButtonHtml}
                            </div>
                           <div id="previousAnalysesList">${previousHtml}</div>
                       </div>
@@ -2833,98 +4129,983 @@
             closeAboutModal();
             closeNotesModal();
             closeSecurityOnionModal();
+            closeAutocompleteModal();
         }
 
-        let keyBuffer = '';
+        // scrollIntoView({block:'nearest'}) alone isn't enough here - it
+        // only reasons about the raw viewport, with no notion that
+        // .app-header/.footer are position:fixed on top of it (not part of
+        // the normal document flow it scrolls within), so an element can
+        // land technically inside the viewport's bounds and still be
+        // hidden underneath one of them. Runs the native call first
+        // (handles horizontal/inline positioning and gets vertical mostly
+        // right on its own), then corrects for whichever fixed bar is
+        // still covering the element afterward, measured fresh since the
+        // native call may have already moved it. A no-op scrollBy(0) when
+        // nothing's occluded.
+        function scrollKeyboardSelectionIntoView(el) {
+            el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            const headerBottom = document.querySelector('.app-header')?.getBoundingClientRect().bottom ?? 0;
+            const footerTop = document.querySelector('.footer')?.getBoundingClientRect().top ?? window.innerHeight;
+            const rect = el.getBoundingClientRect();
+            if (rect.top < headerBottom) {
+                window.scrollBy(0, rect.top - headerBottom);
+            } else if (rect.bottom > footerTop) {
+                window.scrollBy(0, rect.bottom - footerTop);
+            }
+        }
+
+        // Arrow-key navigation. Two different interaction models
+        // depending on the cost of the underlying action: stat-card tabs
+        // activate immediately on Left/Right (cheap, already-cached tab
+        // switch, like a native tab strip) - sample buttons, previous-
+        // analysis rows, and data-table rows only get a visual
+        // "keyboard-selected" highlight on arrow, activating on Enter,
+        // since their action is a real network fetch or an expand/
+        // collapse that shouldn't fire just from moving past an item.
+        let verticalNavSelection = null;
+        let horizontalSampleNavIndex = -1;
+
+        // Left/Right switches the data-type stat-card tab (navigateStatTabs)
+        // only while this is true. True on a fresh analysis load (set in
+        // showAnalysisUI()) and reset back to true by a direct stat-card
+        // click (set in showTab(), which both a mouse click and
+        // navigateStatTabs() itself funnel through) - flipped false the
+        // moment the user presses Up/Down (navigateVertical()) to move into
+        // the page's own content. Otherwise Left/Right deep in a long table
+        // silently jumps to a different data type, which reads as a stray
+        // keystroke wiping out whatever the user was looking at.
+        let leftRightSwitchesStatTabs = true;
+
+        // showAnalysisUI() only hides #inputBoxes (display: none) rather
+        // than clearing its innerHTML, so the welcome screen's contents
+        // (sample cards, previous-analysis rows) are still sitting in the
+        // DOM - just invisible - while an analysis is open. Checking this
+        // display style is the same "which view is actually showing" test
+        // showWelcomeUI()/showAnalysisUI() themselves use, and is more
+        // reliable than inferring the view from whether some list happens
+        // to be non-empty.
+        function isWelcomeScreen() {
+            return document.getElementById('inputBoxes').style.display !== 'none';
+        }
+
+        // The interactive controls inside an expanded detail-row - one
+        // combined query so they come back in real document order:
+        // [data-detail-pivot] (every clickable field value - Timestamp,
+        // Src/Dst IP, DNS Query, etc., see htmlRowText) is rendered first
+        // by formatEvent(), before the Notes/Payload sections it appends
+        // after (rowNoteDetailHtml() then _formatEventPayload()) - so the
+        // note link precedes ASCII Transcript/Hexdump, which precede
+        // Download PCAP.
+        // .packet-control-btn (Expand All/Collapse All) and .packet-header
+        // (one per packet) live inside .hexdump-content, which loadHexdumpData()
+        // only ever populates after the Hexdump tab has actually been activated
+        // once (see switchStreamView) - querying for them is always safe even
+        // before that (they simply don't exist yet, contributing nothing), and
+        // the offsetParent filter below (not this selector) is what keeps them
+        // out of the list while the ASCII Transcript view is showing instead.
+        const EXPANDED_ROW_ITEM_SELECTOR = '[data-detail-pivot], .row-note-edit-link, .view-tab, .stream-btn, .packet-control-btn, .packet-header';
+
+        // Scoped to the currently visible primary section (excludes
+        // .agg-section, mirroring buildStats()'s own "visible section"
+        // lookup) so Up/Down only ever walks the one event/log table
+        // actually on screen, not a hidden tab's rows or an aggregation
+        // table. tr[data-id] alone (no :not(.detail-row) needed) already
+        // excludes detail-rows - only primary rows carry that attribute.
+        // Each row's own detail-row (its very next sibling - see
+        // toggleDetailRow) is spliced in right after it via
+        // EXPANDED_ROW_ITEM_SELECTOR, but only while that specific row is
+        // expanded - multiple rows can be expanded independently, so this
+        // is checked per row rather than assuming one page-wide expanded
+        // state. A collapsed row (or one with nothing to add - not every
+        // event type has a stream, and some have no note link either)
+        // contributes nothing extra, so Down/Up behave exactly as before
+        // for any row that's never had Enter pressed on it.
+        function getVisibleDataTableRows() {
+            const section = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            // A binary-only analysis has no stat-card tabs at all -
+            // buildBinaryAnalysisView() renders its YARA-match table
+            // directly into #sections with no .section wrapper around
+            // it, unlike every pcap/log tab's own hidden-except-one
+            // .section block. #sections only ever holds that one table
+            // in this mode, so querying it directly is safe here (it
+            // would incorrectly include every hidden tab's rows too if
+            // done unconditionally in the normal pcap/log case above,
+            // which is why this is a fallback, not the first check).
+            const sectionsEl = document.getElementById('sections');
+            const rows = section
+                ? Array.from(section.querySelectorAll('tr[data-id]'))
+                : (sectionsEl ? Array.from(sectionsEl.querySelectorAll('tr[data-id]')) : []);
+            return rows.flatMap(row => {
+                const detailRow = row.nextElementSibling;
+                if (!detailRow || !detailRow.classList.contains('detail-row') || !detailRow.classList.contains('visible')) {
+                    return [row];
+                }
+                // offsetParent !== null - not just querying at all - is what
+                // actually excludes the packet-control-btn/packet-header items
+                // while the ASCII Transcript view is showing instead of Hexdump
+                // (switchStreamView() hides .hexdump-content via display:none,
+                // which zeroes offsetParent for everything inside it). The
+                // other three item types are always visible together whenever
+                // the row itself is expanded, so this filter is a no-op for them.
+                const items = Array.from(detailRow.querySelectorAll(EXPANDED_ROW_ITEM_SELECTOR))
+                    .filter(el => el.offsetParent !== null);
+                return [row, ...items];
+            });
+        }
+
+        // The Sankey/Aggregation toggle bars sit directly above the data
+        // table in the DOM (#sankeyPanel, #aggregations, #sections in that
+        // order - see socrates.html), so prepending them here extends the
+        // same flat top-to-bottom list navigateVertical() already walks for
+        // table rows, rather than introducing a separate selection track.
+        // offsetParent !== null (instead of e.g. checking style.display
+        // directly) catches every way a bar can be hidden - #sankeyPanel's
+        // own inline display:none when cleared, and the CSS rule that
+        // force-hides it in binary/file-analysis mode - without needing to
+        // know which one applies. Each bar already has an onclick handler
+        // (toggleDiagram()/toggleAggregations()), so no change is needed in
+        // activateKeyboardSelection(): its existing generic
+        // verticalNavSelection.click() fallback (used for data rows too)
+        // already fires it.
+        const TOGGLE_BAR_SELECTORS = {
+            sankey: '#sankeyPanel > .section-toggle-bar',
+            agg: '#aggregations .section-toggle-bar',
+        };
+
+        // Aggregation-table value rows (tr.agg-row[data-agg-pivot], see
+        // _renderAggTablesHtml) are included in strict DOM order once the
+        // panel is expanded - the agg-grid can lay several tables out
+        // side by side, but there's no per-table row-count to key a real
+        // 2D Up/Down-within-a-column/Left-Right-between-tables scheme off
+        // of (unlike the themes modal's fixed-column tile grid), so this
+        // just walks the flat document order like every other list here.
+        // Collapsed panels naturally contribute nothing since
+        // #aggregations then has no .agg-row elements to find at all.
+        function getVerticalNavItems() {
+            // #filterBarContainer (search-term/filter-value chips, plus
+            // Clear All) sits before #statsGrid/#sankeyPanel/#aggregations
+            // in the DOM (see socrates.html) - a single combined selector
+            // keeps chips and the Clear All button in their real document
+            // order rather than needing two arrays concatenated by hand.
+            const filterBarItems = Array.from(document.querySelectorAll('#filterBarContainer .filter-chip, #filterBarContainer .filter-clear-all'));
+            const toggleBars = [
+                document.querySelector(TOGGLE_BAR_SELECTORS.sankey),
+                document.querySelector(TOGGLE_BAR_SELECTORS.agg),
+            ];
+            const aggRows = Array.from(document.querySelectorAll('#aggregations tr.agg-row[data-agg-pivot]'));
+            return filterBarItems.concat(toggleBars, aggRows)
+                .filter(el => el && el.offsetParent !== null)
+                .concat(getVisibleDataTableRows());
+        }
+
+        // Which toggle bar (if any) is the current keyboard selection,
+        // tracked by kind rather than by relying on verticalNavSelection's
+        // node reference alone - toggleDiagram()/toggleAggregations()
+        // rebuild their panel's entire innerHTML (including the bar itself)
+        // on every collapse/expand, which would otherwise silently drop the
+        // selection each time. The MutationObservers below use this to
+        // re-glue the selection onto whichever new bar element lands, so
+        // Enter can immediately re-collapse a panel just expanded via Enter
+        // without another arrow-key press.
+        let verticalNavToggleBarKind = null;
+
+        function reapplyToggleBarSelection() {
+            if (!verticalNavToggleBarKind) return;
+            const bar = document.querySelector(TOGGLE_BAR_SELECTORS[verticalNavToggleBarKind]);
+            if (!bar) return;
+            bar.classList.add('keyboard-selected');
+            verticalNavSelection = bar;
+        }
+        // childList (not subtree) is enough for both: toggleDiagram()
+        // always replaces #sankeyPanel's innerHTML directly, and
+        // toggleAggregations() always replaces #aggregations' innerHTML
+        // directly (the .agg-panel wrapper and everything in it), so the
+        // bar's re-creation is always a direct-child mutation of one of
+        // these two containers.
+        new MutationObserver(reapplyToggleBarSelection).observe(document.getElementById('sankeyPanel'), { childList: true });
+        new MutationObserver(reapplyToggleBarSelection).observe(document.getElementById('aggregations'), { childList: true });
+
+        function navigateStatTabs(direction) {
+            const cards = Array.from(document.querySelectorAll('#statsGrid .stat-card'));
+            if (cards.length === 0) return false;
+            const activeIndex = cards.findIndex(c => c.classList.contains('tab-active'));
+            const currentIndex = activeIndex === -1 ? 0 : activeIndex;
+            const nextIndex = (currentIndex + direction + cards.length) % cards.length;
+            cards[nextIndex].click();
+            scrollKeyboardSelectionIntoView(cards[nextIndex]);
+            return true;
+        }
+
+        // True for the 3 controls that behave as one horizontal group within
+        // an expanded row's Payload section (see navigateStreamControls/
+        // navigateStreamControlsVertical below) - ASCII Transcript, Hexdump
+        // (both .view-tab) and Download PCAP (.stream-btn). Excludes
+        // .packet-control-btn (Expand All/Collapse All) deliberately - that
+        // pair is its own separate group one level below this one, not part
+        // of the row/tab strip.
+        function isStreamControlGroupMember(el) {
+            return !!el && (el.classList.contains('view-tab') || el.classList.contains('stream-btn'));
+        }
+
+        // offsetParent, not just isConnected - a stale selection left over
+        // from a stat-card tab the user has since switched away from (mouse
+        // click bypasses navigateVertical()'s own indexOf-based self-heal,
+        // since neither this nor navigateStreamControlsVertical() goes
+        // through getVerticalNavItems() at all) is still attached to the
+        // document, just hidden via .section-hidden's display:none.
+        function currentStreamControlSelection() {
+            if (!(verticalNavSelection && verticalNavSelection.isConnected && verticalNavSelection.offsetParent !== null && isStreamControlGroupMember(verticalNavSelection))) return null;
+            return verticalNavSelection;
+        }
+
+        function moveStreamControlSelectionTo(el) {
+            verticalNavSelection.classList.remove('keyboard-selected');
+            verticalNavSelection = el;
+            verticalNavSelection.classList.add('keyboard-selected');
+            scrollKeyboardSelectionIntoView(verticalNavSelection);
+        }
+
+        // Left/Right's other section-local behavior once
+        // leftRightSwitchesStatTabs is false (see its own comment) - cycles
+        // through all 3 stream controls (ASCII Transcript, Hexdump, Download
+        // PCAP - .stream-payload's own DOM order) as one horizontal group.
+        // Only the two view-tabs activate on arrival (tabs[nextIndex].click(),
+        // same as navigateStatTabs() does for data-type tabs - a real
+        // tab-strip, not preview-then-Enter) - Download PCAP deliberately
+        // does NOT, since unlike switching a view it's a real side effect
+        // (triggers an actual file download), and arrowing past a button
+        // must never fire its action on its own (same reasoning as every
+        // other Enter-to-activate item in this app - see verticalNavSelection's
+        // own comment). keyboard-selected moves along regardless - .active
+        // (which view) and .keyboard-selected (arrow-key cursor) are
+        // independent (see the CSS comment on .view-tab.keyboard-selected),
+        // so switching the active view here must also explicitly move the
+        // cursor, unlike a plain click elsewhere which only ever changes .active.
+        function navigateStreamControls(direction) {
+            const current = currentStreamControlSelection();
+            if (!current) return false;
+            const wrapper = current.closest('.stream-payload');
+            if (!wrapper) return false;
+            const items = Array.from(wrapper.querySelectorAll('.view-tab, .stream-btn'));
+            if (items.length < 2) return false;
+            const index = items.indexOf(current);
+            const next = items[(index + direction + items.length) % items.length];
+            if (next.classList.contains('view-tab')) next.click();
+            moveStreamControlSelectionTo(next);
+            return true;
+        }
+
+        // Up/Down's other section-local behavior for the same 3-item group
+        // navigateStreamControls() cycles with Left/Right - treats the whole
+        // group as a single row in a small 2D layout (Add Note above, the
+        // Expand All/Collapse All section below), so Up/Down jump straight
+        // out of the row to one of those instead of stepping to a
+        // neighboring control within it (which is what plain flat-list
+        // navigateVertical() would otherwise do, landing on whichever
+        // control happens to be next in DOM order). Checked ahead of
+        // navigateVertical() in the keydown handler, same precedence as
+        // navigatePivotMenuItems()/navigateThemeTiles(). Falls through
+        // (returns false) to navigateVertical()'s normal flat-list stepping
+        // whenever the jump target doesn't exist yet - Hexdump not activated
+        // at least once means no .packet-control-btn to jump to for Down.
+        function navigateStreamControlsVertical(direction) {
+            const current = currentStreamControlSelection();
+            if (!current) return false;
+            let target;
+            if (direction > 0) {
+                target = current.closest('.stream-payload')?.querySelector('.packet-control-btn');
+            } else {
+                target = current.closest('.detail-row')?.querySelector('.row-note-edit-link');
+            }
+            if (!target || target.offsetParent === null) return false;
+            moveStreamControlSelectionTo(target);
+            return true;
+        }
+
+        // Left/Right's behavior for the Expand All/Collapse All pair - its
+        // own separate 2-item horizontal group, not merged into
+        // navigateStreamControls()'s group above (that group's Down jumps
+        // INTO this one as a distinct row, so it can't also BE this one).
+        // Neither button activates on arrival, unlike ASCII Transcript/
+        // Hexdump in the group above - both are real state-mutating actions
+        // (bulk-toggling every packet's visibility) rather than a passive
+        // view switch, so this follows the same reasoning Download PCAP
+        // does: arrowing past a button must never fire its action on its
+        // own, only Enter does.
+        function navigatePacketControls(direction) {
+            if (!(verticalNavSelection && verticalNavSelection.isConnected && verticalNavSelection.offsetParent !== null && verticalNavSelection.classList.contains('packet-control-btn'))) return false;
+            const wrapper = verticalNavSelection.closest('.packet-controls');
+            if (!wrapper) return false;
+            const items = Array.from(wrapper.querySelectorAll('.packet-control-btn'));
+            if (items.length < 2) return false;
+            const index = items.indexOf(verticalNavSelection);
+            moveStreamControlSelectionTo(items[(index + direction + items.length) % items.length]);
+            return true;
+        }
+
+        // Up/Down's other section-local behavior for the Expand All/Collapse
+        // All pair - mirrors navigateStreamControlsVertical()'s own jump
+        // logic, one level down: Up from either button jumps to Download
+        // PCAP (its nearest DOM neighbor in the group above, same "jump to
+        // the boundary neighbor" pattern navigateStreamControlsVertical()
+        // uses for Add Note), Down jumps to the first packet regardless of
+        // which of the two is currently selected. Both search from the
+        // shared .stream-payload ancestor (not just .packet-controls, which
+        // only wraps the two buttons themselves) since that's the closest
+        // container holding .stream-btn/.packet-header too. Checked ahead
+        // of navigateVertical() in the keydown handler, same precedence as
+        // navigateStreamControlsVertical().
+        function navigatePacketControlsVertical(direction) {
+            if (!(verticalNavSelection && verticalNavSelection.isConnected && verticalNavSelection.offsetParent !== null && verticalNavSelection.classList.contains('packet-control-btn'))) return false;
+            const wrapper = verticalNavSelection.closest('.stream-payload');
+            if (!wrapper) return false;
+            const target = direction > 0 ? wrapper.querySelector('.packet-header') : wrapper.querySelector('.stream-btn');
+            if (!target || target.offsetParent === null) return false;
+            moveStreamControlSelectionTo(target);
+            return true;
+        }
+
+        function navigateSampleCards(direction) {
+            // Guard on the view, not just DOM presence - same reasoning
+            // as navigateVertical(): showAnalysisUI() only hides
+            // #inputBoxes rather than clearing it, so the sample cards
+            // are still sitting in the DOM (just invisible) while an
+            // analysis is open.
+            const isWelcome = isWelcomeScreen();
+            if (!isWelcome) return false;
+            const cards = Array.from(document.querySelectorAll('.sample-card'));
+            if (cards.length === 0) return false;
+            cards.forEach(c => c.classList.remove('keyboard-selected'));
+            // Left/Right and Up/Down are two independent selection tracks
+            // on the welcome screen - moving on one axis must clear the
+            // other's highlight, or Enter can activate a stale selection
+            // instead of whatever's actually highlighted.
+            document.querySelectorAll('.previous-analysis-row.keyboard-selected').forEach(el => el.classList.remove('keyboard-selected'));
+            verticalNavSelection = null;
+            verticalNavToggleBarKind = null;
+            if (horizontalSampleNavIndex === -1 || horizontalSampleNavIndex >= cards.length) {
+                horizontalSampleNavIndex = direction > 0 ? 0 : cards.length - 1;
+            } else {
+                horizontalSampleNavIndex = (horizontalSampleNavIndex + direction + cards.length) % cards.length;
+            }
+            cards[horizontalSampleNavIndex].classList.add('keyboard-selected');
+            scrollKeyboardSelectionIntoView(cards[horizontalSampleNavIndex]);
+            return true;
+        }
+
+        // Which list applies is driven by which view is actually showing
+        // (same #inputBoxes display check showWelcomeUI()/showAnalysisUI()
+        // themselves use), not just by which list happens to be non-empty
+        // - showAnalysisUI() only hides #inputBoxes, it doesn't clear its
+        // innerHTML, so the previous-analysis rows are still sitting in
+        // the DOM (just invisible) while an analysis is open, and a
+        // presence-only check would keep finding those instead of ever
+        // falling through to the data table.
+        function navigateVertical(direction) {
+            const isWelcome = isWelcomeScreen();
+            const items = isWelcome
+                ? Array.from(document.querySelectorAll('.previous-analysis-row'))
+                : getVerticalNavItems();
+            if (items.length === 0) return false;
+            // See leftRightSwitchesStatTabs's own comment - any real Up/Down
+            // move hands Left/Right over to whatever's now keyboard-selected
+            // instead of the data-type tabs.
+            leftRightSwitchesStatTabs = false;
+            items.forEach(el => el.classList.remove('keyboard-selected'));
+            if (isWelcome) {
+                // See the matching note in navigateSampleCards(): clear the
+                // other axis's stale highlight so Enter always activates
+                // whatever's actually highlighted.
+                document.querySelectorAll('.sample-card.keyboard-selected').forEach(el => el.classList.remove('keyboard-selected'));
+                horizontalSampleNavIndex = -1;
+            }
+            // isConnected guards against a stale reference into a row set
+            // that's since been replaced (tab switch, pagination, a
+            // search/filter re-render) - self-heals by just starting a
+            // fresh selection instead of erroring or selecting nothing.
+            let index = (verticalNavSelection && verticalNavSelection.isConnected) ? items.indexOf(verticalNavSelection) : -1;
+            if (index === -1) {
+                index = direction > 0 ? 0 : items.length - 1;
+            } else {
+                index = (index + direction + items.length) % items.length;
+            }
+            verticalNavSelection = items[index];
+            verticalNavToggleBarKind = isWelcome ? null
+                : verticalNavSelection.matches(TOGGLE_BAR_SELECTORS.sankey) ? 'sankey'
+                : verticalNavSelection.matches(TOGGLE_BAR_SELECTORS.agg) ? 'agg'
+                : null;
+            verticalNavSelection.classList.add('keyboard-selected');
+            scrollKeyboardSelectionIntoView(verticalNavSelection);
+            return true;
+        }
+
+        let themeTileNavSelection = null;
+
+        // .theme-tile-grid uses a responsive auto-fill column count (see
+        // its own CSS rule), so the number of tiles per row changes with
+        // modal width rather than being a fixed constant - read back
+        // whatever it actually resolved to via getComputedStyle so
+        // Up/Down can jump by a real row instead of guessing a column
+        // count. All 3 group grids (Dark/Light/Fun) share the same
+        // container width, so they always resolve to the same column
+        // count - reading the first one is enough. Falls back to 1 (Up/
+        // Down behaves like Left/Right) if the grid can't be found for
+        // any reason, rather than throwing.
+        function themeTileGridColumnCount() {
+            const grid = document.querySelector('.theme-tile-grid');
+            if (!grid) return 1;
+            const columns = getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length;
+            return columns > 0 ? columns : 1;
+        }
+
+        // Themes modal tiles are laid out as a responsive CSS grid split
+        // across 3 separate group grids (Dark/Light/Fun) - rather than
+        // handle cross-grid column alignment explicitly, this treats
+        // every tile across all 3 groups as one flat sequential list in
+        // DOM order (matching every other arrow-nav list in this app) and
+        // moves through it by 1 (Left/Right) or by a full row's width
+        // (Up/Down, via themeTileGridColumnCount()) - close enough to true
+        // 2D movement in practice, since group boundaries rarely land
+        // exactly on a row boundary anyway. Each move calls previewTheme()
+        // on the newly-selected tile, exactly mirroring onmouseenter's
+        // live-preview behavior, so keyboard navigation feels like
+        // hovering with the keyboard rather than a separate mechanism.
+        function navigateThemeTiles(direction, vertical) {
+            const themesModal = document.getElementById('themesModal');
+            if (!themesModal || !themesModal.classList.contains('active')) return false;
+            const tiles = Array.from(document.querySelectorAll('.theme-tile[data-theme-option]'));
+            if (tiles.length === 0) return false;
+            const step = direction * (vertical ? themeTileGridColumnCount() : 1);
+            tiles.forEach(t => t.classList.remove('keyboard-selected'));
+            let index = (themeTileNavSelection && themeTileNavSelection.isConnected) ? tiles.indexOf(themeTileNavSelection) : -1;
+            if (index === -1) {
+                // No keyboard selection yet (the very first arrow press
+                // since the modal opened) - start from the currently
+                // active theme (menuBaseTheme, set by showThemesModal())
+                // rather than always jumping to the first/last tile in the
+                // whole grid, so navigation continues from wherever the
+                // user already is instead of restarting from a corner.
+                // menuBaseTheme is always a valid THEMES key by the time
+                // this can run (showThemesModal() falls back to 'dark' if
+                // the applied theme isn't a real one, e.g. the synthesized
+                // OhMyDebn custom-theme marker) - the -1 fallback below is
+                // purely defensive.
+                const currentIndex = tiles.findIndex(t => t.dataset.themeOption === menuBaseTheme);
+                index = currentIndex === -1
+                    ? (direction > 0 ? 0 : tiles.length - 1)
+                    : (currentIndex + step + tiles.length) % tiles.length;
+            } else {
+                index = (index + step + tiles.length) % tiles.length;
+            }
+            themeTileNavSelection = tiles[index];
+            themeTileNavSelection.classList.add('keyboard-selected');
+            previewTheme(themeTileNavSelection.dataset.themeOption);
+            themeTileNavSelection.scrollIntoView({ block: 'nearest' });
+            return true;
+        }
+
+        let themeTileTypeaheadBuffer = '';
+        let themeTileTypeaheadTimer = null;
+
+        // Type-ahead select for the Themes modal grid, mirroring the
+        // standard native <select>-element convention (type a name's start
+        // to jump to it) rather than reusing the app's own separate
+        // command-palette overlay (see AUTOCOMPLETE_COMMANDS) - the modal
+        // is already a picker with live preview, so jumping the highlight
+        // in place reads more naturally here than popping a second,
+        // floating search box on top of the grid you're already looking
+        // at. Matches against THEMES[key].label directly (not the tile's
+        // own textContent) so it's exact regardless of whatever else a
+        // tile happens to render. The buffer resets after a short pause
+        // between keystrokes - same idea as native select typeahead -
+        // rather than growing forever, so typing "ret" then pausing then
+        // typing "amber" searches for "amber", not "retamber".
+        function handleThemeTileTypeahead(e) {
+            const themesModal = document.getElementById('themesModal');
+            if (!themesModal || !themesModal.classList.contains('active')) return false;
+            if (!(e.key.length === 1 && /[a-z0-9]/i.test(e.key))) return false;
+            clearTimeout(themeTileTypeaheadTimer);
+            themeTileTypeaheadBuffer += e.key.toLowerCase();
+            themeTileTypeaheadTimer = setTimeout(() => { themeTileTypeaheadBuffer = ''; }, 800);
+            const tiles = Array.from(document.querySelectorAll('.theme-tile[data-theme-option]'));
+            const match = tiles.find(t => (THEMES[t.dataset.themeOption]?.label || '').toLowerCase().startsWith(themeTileTypeaheadBuffer));
+            // Still consumes the keystroke (returns true, so the caller
+            // calls e.preventDefault()) even with no match yet - e.g. right
+            // after "z" alone, before the buffer resets - since a
+            // keystroke that's part of an in-progress typeahead search
+            // still isn't meant for anything else, whether or not it
+            // happens to resolve to a tile.
+            if (!match) return true;
+            document.querySelectorAll('.theme-tile.keyboard-selected').forEach(t => t.classList.remove('keyboard-selected'));
+            themeTileNavSelection = match;
+            themeTileNavSelection.classList.add('keyboard-selected');
+            previewTheme(themeTileNavSelection.dataset.themeOption);
+            themeTileNavSelection.scrollIntoView({ block: 'nearest' });
+            return true;
+        }
+
+        // Both pivot-triggering delegated click listeners (tr.agg-row
+        // [data-agg-pivot] and [data-detail-pivot], see above
+        // getVerticalNavItems()/EXPANDED_ROW_ITEM_SELECTOR) read
+        // event.clientX/clientY to position the menu - a plain .click()
+        // leaves those at 0 (the click() method's synthetic MouseEvent
+        // always zeroes coordinate properties), which would pin the menu
+        // to the viewport's top-left corner instead of opening next to
+        // whatever triggered it. Building the event by hand anchors it to
+        // the element's own bounding box instead, so a keyboard-opened
+        // menu lands in the same place a mouse click on that element would
+        // have. Generic over any pivot-triggering element, not just table
+        // rows, despite the name's history - kept short rather than
+        // renamed to something like openPivotMenuForElement().
+        function openPivotMenuForRow(row) {
+            const rect = row.getBoundingClientRect();
+            row.dispatchEvent(new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                clientX: rect.left + 16,
+                clientY: rect.top + rect.height / 2,
+            }));
+        }
+
+        function activateKeyboardSelection() {
+            // Even higher priority than the pivot menu below - the command
+            // palette's own text input holds real DOM focus while it's
+            // open, so there's nothing else Enter could plausibly mean.
+            if (activateAutocompleteSelection()) {
+                return true;
+            }
+            // Highest priority: an open pivot menu is a transient overlay
+            // on top of everything else, so Enter should always act on its
+            // own highlighted item first rather than falling through to
+            // whatever's keyboard-selected on the page underneath it.
+            if (pivotMenuNavSelection && pivotMenuNavSelection.isConnected && activePivotMenuEl && activePivotMenuEl.contains(pivotMenuNavSelection)) {
+                pivotMenuNavSelection.click();
+                return true;
+            }
+            if (themeTileNavSelection && themeTileNavSelection.isConnected && themeTileNavSelection.classList.contains('keyboard-selected')) {
+                themeTileNavSelection.click();
+                return true;
+            }
+            const isWelcome = isWelcomeScreen();
+            const selectedSample = isWelcome ? document.querySelector('.sample-card.keyboard-selected') : null;
+            if (selectedSample) {
+                selectedSample.click();
+                return true;
+            }
+            if (verticalNavSelection && verticalNavSelection.isConnected && verticalNavSelection.classList.contains('keyboard-selected')) {
+                if (verticalNavSelection.classList.contains('previous-analysis-row')) {
+                    const link = verticalNavSelection.querySelector('a[href]');
+                    if (link) link.click();
+                } else if (verticalNavSelection.matches('tr.agg-row[data-agg-pivot]') || verticalNavSelection.matches('[data-detail-pivot]')) {
+                    openPivotMenuForRow(verticalNavSelection);
+                } else if (verticalNavSelection.classList.contains('filter-chip')) {
+                    // The chip itself carries no onclick (see
+                    // buildFilterBarHtml()) - only its nested
+                    // .filter-chip-remove "x" does, so .click() on the chip
+                    // directly would silently do nothing.
+                    const removeBtn = verticalNavSelection.querySelector('.filter-chip-remove');
+                    if (removeBtn) removeBtn.click();
+                } else {
+                    verticalNavSelection.click();
+                }
+                return true;
+            }
+            return false;
+        }
+
+        // Mirrors navigateVertical()/navigateThemeTiles()'s own flat-list
+        // pattern, scoped to the open pivot menu's own buttons - Escape
+        // (registered separately, see closePivotMenu()'s call site) still
+        // closes the menu outright, this only handles cycling Up/Down
+        // through what's inside it.
+        function navigatePivotMenuItems(direction) {
+            if (!activePivotMenuEl) return false;
+            const items = Array.from(activePivotMenuEl.querySelectorAll('.pivot-menu-item'));
+            if (items.length === 0) return false;
+            items.forEach(el => el.classList.remove('keyboard-selected'));
+            let index = (pivotMenuNavSelection && pivotMenuNavSelection.isConnected) ? items.indexOf(pivotMenuNavSelection) : -1;
+            if (index === -1) {
+                index = direction > 0 ? 0 : items.length - 1;
+            } else {
+                index = (index + direction + items.length) % items.length;
+            }
+            pivotMenuNavSelection = items[index];
+            pivotMenuNavSelection.classList.add('keyboard-selected');
+            pivotMenuNavSelection.scrollIntoView({ block: 'nearest' });
+            return true;
+        }
+
+        // Shared guard for every single-key shortcut below ('?', '>'/'<',
+        // arrow navigation, Enter-to-activate): only fire when no modifier
+        // is held and the user isn't actively typing somewhere (a real
+        // input/textarea, or - defensively, though nothing in this app
+        // currently uses it - a contenteditable element). Centralizing
+        // this means a future change to what counts as "typing" (e.g. a
+        // new input type) only needs updating here instead of at every
+        // call site.
+        function isNavigableKeyContext(e) {
+            return !e.ctrlKey && !e.altKey && !e.metaKey &&
+                e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' &&
+                !e.target.isContentEditable;
+        }
+
+        // Single source of truth for every typed shortcut, all routed
+        // through one live-filtered command palette (see
+        // openAutocompleteModal() below). The 4 modal-openers are listed by
+        // hand; every theme is generated straight from THEMES instead of
+        // maintaining a separate hand-picked list of "cheat codes" for just
+        // the Fun group - any theme (Dark/Light/Fun alike) is reachable by
+        // typing its real displayed name now, so a new theme needs no
+        // manual autocomplete wiring of its own, and there's no separate
+        // short code to invent, document, and keep in sync. analysisOnly
+        // mirrors the old "notes" code's own guard - showNotesModal() with
+        // no args edits currentNotes via currentMd5, neither of which is
+        // meaningful before an analysis is loaded, so it's filtered out of
+        // the list entirely on the welcome screen rather than being offered
+        // and then doing something odd.
+        const AUTOCOMPLETE_COMMANDS = [
+            { code: 'help', label: 'Help', action: () => { closeAutocompleteModal(); showHelpModal(); } },
+            { code: 'about', label: 'About', action: () => { closeAutocompleteModal(); showAboutModal(); } },
+            { code: 'advanced features', label: 'Advanced Features', action: () => { closeAutocompleteModal(); showSecurityOnionModal(); } },
+            // External links - same window.open(url, '_blank', 'noopener,noreferrer')
+            // convention already used elsewhere in this file (see the
+            // detail-panel value linkifier), not a plain <a target="_blank">
+            // since these commands have no anchor element of their own to
+            // click.
+            { code: 'documentation', label: 'Documentation', action: () => { closeAutocompleteModal(); window.open('https://so-crates.org', '_blank', 'noopener,noreferrer'); } },
+            { code: 'security onion', label: 'Security Onion', action: () => { closeAutocompleteModal(); window.open('https://securityonion.net', '_blank', 'noopener,noreferrer'); } },
+            { code: 'github repo', label: 'Github repo', action: () => { closeAutocompleteModal(); window.open('https://github.com/dougburks/so-crates', '_blank', 'noopener,noreferrer'); } },
+            { code: 'pcap samples', label: 'PCAP samples', action: () => { closeAutocompleteModal(); window.open('https://malware-traffic-analysis.net', '_blank', 'noopener,noreferrer'); } },
+            { code: 'log samples', label: 'Log samples', action: () => { closeAutocompleteModal(); window.open('https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES', '_blank', 'noopener,noreferrer'); } },
+            { code: 'binary samples', label: 'Binary samples', action: () => { closeAutocompleteModal(); window.open('https://www.eicar.org/', '_blank', 'noopener,noreferrer'); } },
+            { code: 'themes', label: 'Open Themes', action: () => { closeAutocompleteModal(); showThemesModal(); } },
+            { code: 'rules', label: 'Open Rules', action: () => { closeAutocompleteModal(); showRulesModal(); } },
+            { code: 'settings', label: 'Open Settings', action: () => { closeAutocompleteModal(); showSettingsModal(); } },
+            { code: 'notes', label: 'Open Notes', analysisOnly: true, action: () => { closeAutocompleteModal(); showNotesModal(); } },
+            // openDeleteAnalysis() only opens the confirmation modal (see
+            // its own definition) - it still requires clicking Delete
+            // there to actually delete anything, same "no action until the
+            // user agrees" property as every other command here.
+            { code: 'delete', label: 'Delete this analysis', analysisOnly: true, action: () => { closeAutocompleteModal(); openDeleteAnalysis(currentMd5, currentFileName); } },
+            { code: 're-analyze', label: 'Re-analyze', analysisOnly: true, action: () => { closeAutocompleteModal(); openReanalyzeModal(currentMd5, currentFileName); } },
+            // Focuses, doesn't open anything - #searchBarContainer is
+            // display:none until showAnalysisUI() reveals it, so
+            // analysisOnly keeps this out of the candidate list entirely on
+            // the welcome screen rather than focusing a hidden input.
+            { code: 'search', label: 'Go to Search bar', analysisOnly: true, action: () => { closeAutocompleteModal(); document.getElementById('searchInput').focus(); } },
+            { code: 'clear', label: 'Clear all search filters', analysisOnly: true, action: () => { closeAutocompleteModal(); clearAllFilters(); } },
+            { code: 'sankey', label: 'Toggle Sankey Diagram section', analysisOnly: true, action: () => { closeAutocompleteModal(); toggleDiagram(); } },
+            { code: 'aggregation', label: 'Toggle Aggregation Tables section', analysisOnly: true, action: () => { closeAutocompleteModal(); toggleAggregations(); } },
+            // All three go to the same place (showWelcome()) - they're
+            // different mental models for "I want to start something new"
+            // (upload a file, import from a URL, revisit a past analysis),
+            // not three different screens. analysisOnly here means the
+            // opposite of what it means everywhere else in this list (hide
+            // while already on the welcome screen these navigate to,
+            // rather than hide while NOT on an analysis) - reused as-is
+            // since the underlying need (hide when the destination is
+            // where you already are) is the same shape either way.
+            { code: 'upload', label: 'Upload', analysisOnly: true, action: () => { closeAutocompleteModal(); showWelcome(); } },
+            { code: 'import', label: 'Import', analysisOnly: true, action: () => { closeAutocompleteModal(); showWelcome(); } },
+            { code: 'previous analyses', label: 'Previous Analyses', analysisOnly: true, action: () => { closeAutocompleteModal(); showWelcome(); } },
+            { code: 'copy md5 hash to clipboard', label: 'Copy MD5 hash to clipboard', analysisOnly: true, action: () => { closeAutocompleteModal(); copyMd5ToClipboard(currentMd5); } },
+            { code: 'rename analysis', label: 'Rename Analysis', analysisOnly: true, action: () => { closeAutocompleteModal(); startRenameAnalysis(); } },
+            ...Object.entries(THEMES).map(([key, theme]) => ({
+                code: theme.label.toLowerCase(),
+                label: `${theme.label} theme`,
+                action: () => { closeAutocompleteModal(); setTheme(key); showToast(`Switched to ${theme.label} theme.`); },
+            })),
+        ];
+
+        // The commands currently rendered in #autocompleteResults (post-
+        // filter), kept alongside the DOM so the click delegate/Enter
+        // activation below can map an .autocomplete-item back to its
+        // action without re-deriving the filter.
+        let autocompleteMatches = [];
+        let autocompleteNavSelection = null;
+
+        function isAutocompleteModalActive() {
+            return document.getElementById('autocompleteModal').classList.contains('active');
+        }
+
+        function closeAutocompleteModal() {
+            document.getElementById('autocompleteModal').classList.remove('active');
+            // Blur, not just hide - closing (Escape, backdrop click, or a
+            // command committing) doesn't otherwise move focus off the
+            // input, so it would still be document.activeElement even
+            // while invisible. The very next bare-letter trigger keydown
+            // would then see e.target as that INPUT and isNavigableKeyContext()
+            // would (correctly, for a real focused input) refuse to treat
+            // it as a trigger key - silently blocking the palette from ever
+            // reopening until something else happened to move focus away first.
+            const input = document.getElementById('autocompleteInput');
+            input.blur();
+            input.value = '';
+            autocompleteMatches = [];
+            autocompleteNavSelection = null;
+        }
+
+        // Only letters/digits - the codes are all-alphanumeric, and this
+        // doubles as the trigger-key test (see the keydown handler below):
+        // any bare letter/digit typed outside a text field, with nothing
+        // else already open, opens the palette pre-seeded with that
+        // character instead of silently starting an invisible buffer match.
+        function isAutocompleteTriggerKey(e) {
+            return e.key.length === 1 && /[a-z0-9]/i.test(e.key);
+        }
+
+        function openAutocompleteModal(firstChar) {
+            document.getElementById('autocompleteModal').classList.add('active');
+            const input = document.getElementById('autocompleteInput');
+            input.value = firstChar;
+            filterAutocomplete();
+            input.focus();
+        }
+
+        // Data-type stat-card tabs (DNS, HTTP, All Events, ...) aren't a
+        // fixed list like AUTOCOMPLETE_COMMANDS' other entries - which
+        // tabs exist depends on what that particular analysis actually
+        // contains, so this is read fresh from #statsGrid on every filter
+        // pass instead of being baked into AUTOCOMPLETE_COMMANDS itself.
+        // Naturally contributes nothing on the welcome screen, where
+        // #statsGrid has no .stat-card children yet - no separate
+        // analysisOnly flag needed the way the other analysis-only
+        // commands have. Reuses the card's own real onclick (card.click(),
+        // same as navigateStatTabs() does) rather than duplicating
+        // showTab()'s section-id logic here.
+        function getDataTypeAutocompleteCommands() {
+            return Array.from(document.querySelectorAll('#statsGrid .stat-card')).map(card => {
+                const label = card.querySelector('.stat-label').textContent;
+                return {
+                    code: label.toLowerCase(),
+                    label: `Go to ${label}`,
+                    action: () => { closeAutocompleteModal(); card.click(); },
+                };
+            });
+        }
+
+        // Matches a query anywhere a word starts, not just at the very
+        // start of the whole code - "alerts" needs to find "network
+        // alerts"/"file alerts" (query prefixes the label's 2nd word), not
+        // just codes it's a prefix of outright. A bare substring anywhere
+        // (e.g. "eme" inside "themes") also counts - autocompleteMatchScore
+        // below ranks it lowest of the three, so a real prefix match never
+        // gets buried under mid-word noise for a short query.
+        function autocompleteMatchesQuery(code, query) {
+            if (!query) return true;
+            return code.includes(query);
+        }
+
+        // 2 = the whole code is a prefix match ("dns" -> "dns"), 1 = some
+        // word within it is ("alerts" -> "network alerts", split on spaces
+        // AND hyphens so e.g. "analyze" also finds "re-analyze"), 0 = only
+        // a bare substring match ("eme" -> "themes"). Used purely for
+        // result ordering, not filtering - autocompleteMatchesQuery already
+        // decided this code is a match at all.
+        function autocompleteMatchScore(code, query) {
+            if (code.startsWith(query)) return 2;
+            if (code.split(/[\s-]+/).some(word => word.startsWith(query))) return 1;
+            return 0;
+        }
+
+        // oninput (not keydown) so Backspace/paste/selection-delete all
+        // re-filter for free via the browser's own native text-editing,
+        // rather than this needing to hand-track the query string itself.
+        function filterAutocomplete() {
+            const query = document.getElementById('autocompleteInput').value.trim().toLowerCase();
+            const isWelcome = isWelcomeScreen();
+            const allCommands = AUTOCOMPLETE_COMMANDS.concat(getDataTypeAutocompleteCommands());
+            autocompleteMatches = allCommands
+                .filter(c => autocompleteMatchesQuery(c.code, query) && (!c.analysisOnly || !isWelcome))
+                .sort((a, b) => autocompleteMatchScore(b.code, query) - autocompleteMatchScore(a.code, query));
+            autocompleteNavSelection = null;
+            const resultsEl = document.getElementById('autocompleteResults');
+            resultsEl.innerHTML = autocompleteMatches.length
+                ? autocompleteMatches.map((c, i) => `<button type="button" class="autocomplete-item" data-autocomplete-index="${i}">${escapeHtml(c.label)}</button>`).join('')
+                : '<div class="autocomplete-empty">No matches</div>';
+        }
+
+        // Scoped to #autocompleteResults itself, not delegated from document
+        // like every other click-delegated list in this app (agg-row,
+        // filter-chip, ...) - those live directly on the page or in a
+        // fixed-position popup, but this button sits inside .modal-content,
+        // whose own onclick="event.stopPropagation()" (there to keep a
+        // content click from also closing the modal via the backdrop
+        // handler) would stop a document-level bubble-phase listener from
+        // ever seeing it.
+        document.getElementById('autocompleteResults').addEventListener('click', function(e) {
+            const item = e.target.closest('.autocomplete-item[data-autocomplete-index]');
+            if (!item) return;
+            const cmd = autocompleteMatches[Number(item.dataset.autocompleteIndex)];
+            if (cmd) cmd.action();
+        });
+
+        // Mirrors navigateVertical()'s own flat-list pattern, scoped to the
+        // open palette's own results - always returns true while the modal
+        // is active (even with 0 matches) so Up/Down never falls through to
+        // whatever's keyboard-selected on the page underneath it.
+        function navigateAutocompleteItems(direction) {
+            if (!isAutocompleteModalActive()) return false;
+            const items = Array.from(document.querySelectorAll('#autocompleteResults .autocomplete-item'));
+            if (items.length > 0) {
+                items.forEach(el => el.classList.remove('keyboard-selected'));
+                let index = (autocompleteNavSelection && autocompleteNavSelection.isConnected) ? items.indexOf(autocompleteNavSelection) : -1;
+                index = index === -1 ? (direction > 0 ? 0 : items.length - 1) : (index + direction + items.length) % items.length;
+                autocompleteNavSelection = items[index];
+                autocompleteNavSelection.classList.add('keyboard-selected');
+                autocompleteNavSelection.scrollIntoView({ block: 'nearest' });
+            }
+            return true;
+        }
+
+        // Enter with nothing yet arrow-selected still commits a single
+        // remaining match (typing a unique prefix and hitting Enter,
+        // without an extra arrow press first, is standard command-palette
+        // behavior) - with 0 or 2+ still-ambiguous matches it does nothing,
+        // keeping the "no action until the user agrees" property the whole
+        // palette was built around.
+        function activateAutocompleteSelection() {
+            if (!isAutocompleteModalActive()) return false;
+            if (autocompleteNavSelection && autocompleteNavSelection.isConnected) {
+                autocompleteNavSelection.click();
+            } else {
+                const items = document.querySelectorAll('#autocompleteResults .autocomplete-item');
+                if (items.length === 1) items[0].click();
+            }
+            return true;
+        }
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
+                // Escape backs out one level at a time: close whatever's
+                // open (a modal, the gear dropdown, a pivot menu) if
+                // anything is, and only fall through to leaving the
+                // analysis entirely (back to the welcome screen) once
+                // there's nothing left to close - so a stray Escape while
+                // closing a modal doesn't also yank the analysis out from
+                // under it in the same keystroke. loadingModal is
+                // deliberately excluded (closeAllModals() itself never
+                // touches it either, to avoid abandoning an in-progress
+                // analysis mid-load). Also skipped while typing (e.g.
+                // cancelling the inline analysis-rename input, which has
+                // its own Escape handler for that but doesn't
+                // stopPropagation()) - Escape there should only cancel
+                // the edit, not also abandon the whole analysis.
+                const hadSomethingOpen = !!document.querySelector('.modal.active:not(#loadingModal)') ||
+                    !!document.getElementById('appHeaderMenuDropdown')?.classList.contains('active') ||
+                    !!activePivotMenuEl;
                 closeAllModals();
+                // closeAllModals() only closes .modal elements - the pivot
+                // menu isn't one (it's append/remove'd from document.body
+                // per open, see closePivotMenu()'s own comment), so it
+                // needs its own explicit close call here. This used to live
+                // in a separate keydown listener instead, registered
+                // earlier in the file - which raced this one: on a single
+                // Escape press, that listener always ran first and cleared
+                // activePivotMenuEl before hadSomethingOpen could see it
+                // was ever open, so this handler always computed
+                // hadSomethingOpen === false and fell through to
+                // showWelcome() - Escape closed the pivot menu AND kicked
+                // back to the welcome screen in the same keystroke instead
+                // of just closing the menu.
+                closePivotMenu();
+                const isTypingContext = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable;
+                if (!hadSomethingOpen && !isTypingContext) {
+                    const isWelcome = isWelcomeScreen();
+                    if (!isWelcome) {
+                        showWelcome();
+                    }
+                }
             }
-            if (e.key === '?' && !e.ctrlKey && !e.altKey && !e.metaKey && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+            if (e.key === '?' && isNavigableKeyContext(e)) {
                 e.preventDefault();
                 showHelpModal();
             }
-            if (e.key === 't' && !e.ctrlKey && !e.altKey && !e.metaKey && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
+            // '<'/'>' (not the 't' key formerly used here, and not arrow
+            // keys either) - 't' collided with typing several of the
+            // app's own theme cheat codes (e.g. "retro", "digit" both
+            // contain a 't'), toggling the theme on every matching
+            // keystroke while the cheat code was still being typed.
+            // Arrow keys are reserved for real in-app navigation (stat
+            // tabs, sample buttons, table rows), so this uses '<'/'>'
+            // instead - reads naturally as previous/next (same
+            // convention as media-player buttons) and collides with
+            // neither.
+            if (e.key === '>' && isNavigableKeyContext(e)) {
                 e.preventDefault();
                 toggleTheme();
             }
-            // Easter eggs: type "31337" for Hacker theme, "sguil" for Sguil
-            // theme, "cga" for CGA theme, "bread" for Breadbin Blue theme,
-            // "vapor" for Vaporwave theme, "luna" for Luna Blue theme,
-            // "amber" for Amber CRT theme, "dos" for DOS Blue theme, "digit"
-            // for Digital Frontier theme, or "retro" for Retro Handheld
-            // theme. Checked with endsWith() rather than === since the
-            // buffer holds the last 5 keys typed session-wide - a code
-            // shorter than 5 characters (like "cga") would otherwise only
-            // ever match in the first few keystrokes after page load, when
-            // the buffer hasn't filled up yet.
-            const tag = e.target.tagName;
-            const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable;
-            if (!isTyping && e.key.length === 1) {
-                keyBuffer += e.key.toLowerCase();
-                if (keyBuffer.length > 5) {
-                    keyBuffer = keyBuffer.slice(-5);
-                }
-                if (keyBuffer.endsWith('31337')) {
+            if (e.key === '<' && isNavigableKeyContext(e)) {
+                e.preventDefault();
+                toggleThemeReverse();
+            }
+            // Left/Right no-op while the pivot menu is open rather than
+            // falling through to stat-tab/sample-card navigation - the
+            // menu is a single vertical list with nothing for Left/Right
+            // to do, and letting them reach the page underneath would
+            // switch tabs (rebuilding the very table the open menu's row
+            // belongs to) while the menu is still sitting on screen.
+            if (e.key === 'ArrowRight' && isNavigableKeyContext(e)) {
+                if (!activePivotMenuEl && (navigateThemeTiles(1) || navigateStreamControls(1) || navigatePacketControls(1) || (leftRightSwitchesStatTabs && navigateStatTabs(1)) || navigateSampleCards(1))) {
                     e.preventDefault();
-                    setTheme('hacker');
-                    showToast('Switched to Hacker theme. You are truly 31337!');
-                    keyBuffer = '';
                 }
-                if (keyBuffer.endsWith('sguil')) {
+            }
+            if (e.key === 'ArrowLeft' && isNavigableKeyContext(e)) {
+                if (!activePivotMenuEl && (navigateThemeTiles(-1) || navigateStreamControls(-1) || navigatePacketControls(-1) || (leftRightSwitchesStatTabs && navigateStatTabs(-1)) || navigateSampleCards(-1))) {
                     e.preventDefault();
-                    setTheme('sguil');
-                    showToast('Switched to Sguil theme.');
-                    keyBuffer = '';
                 }
-                if (keyBuffer.endsWith('cga')) {
+            }
+            // navigateAutocompleteItems()/isAutocompleteModalActive() checked
+            // first, and with an extra "|| isAutocompleteModalActive()" on
+            // the guard itself - the palette's own text input necessarily
+            // has real DOM focus while it's open (unlike the pivot menu's
+            // plain buttons), which isNavigableKeyContext() would otherwise
+            // treat as "the user is typing, don't intercept arrows" and
+            // block this whole block from running at all. navigatePivotMenuItems()
+            // next for the same reason activateKeyboardSelection() checks
+            // pivotMenuNavSelection first - an open menu is a transient
+            // overlay, so Up/Down should drive it rather than the page
+            // underneath while it's open. navigateStreamControlsVertical()/
+            // navigatePacketControlsVertical() next, same precedence as
+            // navigateStreamControls()/navigatePacketControls() above -
+            // jump out of whichever horizontal group is selected before
+            // falling through to navigateVertical()'s plain flat-list
+            // stepping.
+            if (e.key === 'ArrowDown' && (isNavigableKeyContext(e) || isAutocompleteModalActive())) {
+                if (navigateAutocompleteItems(1) || navigatePivotMenuItems(1) || navigateThemeTiles(1, true) || navigateStreamControlsVertical(1) || navigatePacketControlsVertical(1) || navigateVertical(1)) {
                     e.preventDefault();
-                    setTheme('cga');
-                    showToast('Switched to CGA theme.');
-                    keyBuffer = '';
                 }
-                if (keyBuffer.endsWith('bread')) {
+            }
+            if (e.key === 'ArrowUp' && (isNavigableKeyContext(e) || isAutocompleteModalActive())) {
+                if (navigateAutocompleteItems(-1) || navigatePivotMenuItems(-1) || navigateThemeTiles(-1, true) || navigateStreamControlsVertical(-1) || navigatePacketControlsVertical(-1) || navigateVertical(-1)) {
                     e.preventDefault();
-                    setTheme('breadbin-blue');
-                    showToast('Switched to Breadbin Blue theme.');
-                    keyBuffer = '';
                 }
-                if (keyBuffer.endsWith('vapor')) {
+            }
+            if (e.key === 'Enter' && (isNavigableKeyContext(e) || isAutocompleteModalActive())) {
+                if (activateKeyboardSelection()) {
                     e.preventDefault();
-                    setTheme('vaporwave');
-                    showToast('Switched to Vaporwave theme.');
-                    keyBuffer = '';
                 }
-                if (keyBuffer.endsWith('luna')) {
-                    e.preventDefault();
-                    setTheme('luna-blue');
-                    showToast('Switched to Luna Blue theme.');
-                    keyBuffer = '';
-                }
-                if (keyBuffer.endsWith('amber')) {
-                    e.preventDefault();
-                    setTheme('amber');
-                    showToast('Switched to Amber CRT theme.');
-                    keyBuffer = '';
-                }
-                if (keyBuffer.endsWith('dos')) {
-                    e.preventDefault();
-                    setTheme('dos-blue');
-                    showToast('Switched to DOS Blue theme.');
-                    keyBuffer = '';
-                }
-                if (keyBuffer.endsWith('digit')) {
-                    e.preventDefault();
-                    setTheme('digital-frontier');
-                    showToast('Switched to Digital Frontier theme.');
-                    keyBuffer = '';
-                }
-                if (keyBuffer.endsWith('retro')) {
-                    e.preventDefault();
-                    setTheme('retro-handheld');
-                    showToast('Switched to Retro Handheld theme.');
-                    keyBuffer = '';
-                }
+            }
+            // Type-ahead select for the Themes modal grid (see
+            // handleThemeTileTypeahead() above) - checked ahead of the
+            // command-palette trigger below purely for grouping (the
+            // trigger's own !document.querySelector('.modal.active') guard
+            // already excludes it whenever Themes is open regardless of
+            // order).
+            if (isNavigableKeyContext(e) && handleThemeTileTypeahead(e)) {
+                e.preventDefault();
+            }
+            // Bare letter/digit trigger for the command palette (see
+            // AUTOCOMPLETE_COMMANDS/openAutocompleteModal() above) - only
+            // when nothing else is already open/focused, so it can't steal
+            // a keystroke meant for a real text field, another modal, the
+            // gear dropdown, or the pivot menu (all of which have their own
+            // reasons to want every keystroke themselves).
+            if (isNavigableKeyContext(e) && isAutocompleteTriggerKey(e) && !isAutocompleteModalActive() &&
+                !document.querySelector('.modal.active') && !activePivotMenuEl &&
+                !document.getElementById('appHeaderMenuDropdown')?.classList.contains('active')) {
+                e.preventDefault();
+                openAutocompleteModal(e.key.toLowerCase());
             }
         });
 
@@ -2977,14 +5158,30 @@
             }
         }
 
-        // Only one file from a multi-file ZIP is ever analyzed (the first
-        // PCAP, or the first non-hidden file if there's no PCAP) - the
-        // server reports how many others were dropped so this isn't
-        // silent data loss the user has no way to notice.
+        // Every file in a multi-file ZIP is analyzed (pcaps get network
+        // analysis, everything else gets log/binary analysis - see
+        // notifyIfAdditionalAnalyses below) - filesSkipped now only ever
+        // means a file genuinely failed to process (unreadable, etc), not
+        // a by-design drop. The server reports how many so a real failure
+        // still isn't silent.
         function notifyIfFilesSkipped(result) {
             if (result && result.filesSkipped) {
                 const plural = result.filesSkipped === 1 ? 'file was' : 'files were';
                 showToast(`${result.filesSkipped} additional ${plural} in the ZIP and not analyzed`, { sticky: true });
+            }
+        }
+
+        // A multi-file ZIP's other files (beyond the primary one the user
+        // is navigated into) are each analyzed as their own independent
+        // analysis in the background - point the user at Recent Analyses
+        // rather than leaving them to wonder where the results went.
+        function notifyIfAdditionalAnalyses(result) {
+            if (result && result.additionalMd5s && result.additionalMd5s.length) {
+                const n = result.additionalMd5s.length;
+                showToast(
+                    `${n} additional file${n === 1 ? '' : 's'} found in the ZIP ${n === 1 ? 'is' : 'are'} also being analyzed`,
+                    { sticky: true, actionLabel: 'View Recent Analyses', onAction: () => showWelcome() }
+                );
             }
         }
 
@@ -4055,7 +6252,7 @@
             const has = !!(note && note.trim());
             const idJs = escapeJsString(String(id));
             const noteJs = escapeJsString(note || '');
-            const editLink = `<a href="#" onclick="event.preventDefault(); openRowNoteEditor('${table}', '${idJs}', '${noteJs}');" style="color: var(--accent); text-decoration: none;">${has ? 'Edit' : '+ Add Note'}</a>`;
+            const editLink = `<a href="#" class="row-note-edit-link" onclick="event.preventDefault(); openRowNoteEditor('${table}', '${idJs}', '${noteJs}');" style="color: var(--accent); text-decoration: none;">${has ? 'Edit' : '+ Add Note'}</a>`;
             const value = has ? `${escapeHtml(note)} ${editLink}` : editLink;
             return `<span class="detail-value row-note-detail-value">${value}</span>`;
         }
@@ -4135,7 +6332,18 @@
             const dstPort = e.dest_port || '';
             const eventType = e.event_type || '';
             const pivotAttrs = pivotDataAttrsHtml(e, eventType, getColumnsForType(eventType), extractValue);
-            return `<tr data-id="${escapeHtml(String(e.id))}"${pivotAttrs} onclick="toggleRow(this, event)"><td class="timestamp">${escapeHtml(ts)}</td><td>${valueDotSpan(DOT_COLORS.PROTO[proto.toUpperCase()])}${escapeHtml(proto)}</td><td class="mono-fixed" title="${escapeHtml(srcIp)}">${escapeHtml(srcIp)}</td><td class="mono-fixed">${escapeHtml(String(srcPort))}</td><td class="mono-fixed" title="${escapeHtml(dstIp)}">${escapeHtml(dstIp)}</td><td class="mono-fixed">${escapeHtml(String(dstPort))}</td>`;
+            // Carries the alert's own matching key for the "Acknowledge all
+            // instances" pivot menu action (see acknowledgeableRowInfo) -
+            // baked into the row at render time rather than looked up from
+            // tabDataCache when clicked, since tabDataCache[eventType] is
+            // often empty: the default (no filter/sort) view fetches each
+            // page through fetchEventsPage()'s own local `items`, which
+            // never touches tabDataCache at all (see canUseScalableFetchForSort
+            // in buildSection).
+            const identityAttr = eventType === 'alert'
+                ? ` data-alert-identity="${escapeHtml(String(e.alert?.signature_id || e.alert?.signature || ''))}"`
+                : '';
+            return `<tr data-id="${escapeHtml(String(e.id))}"${pivotAttrs}${identityAttr} onclick="toggleRow(this, event)"><td class="timestamp">${escapeHtml(ts)}</td><td>${valueDotSpan(DOT_COLORS.PROTO[proto.toUpperCase()])}${escapeHtml(proto)}</td><td class="mono-fixed" title="${escapeHtml(srcIp)}">${escapeHtml(srcIp)}</td><td class="mono-fixed">${escapeHtml(String(srcPort))}</td><td class="mono-fixed" title="${escapeHtml(dstIp)}">${escapeHtml(dstIp)}</td><td class="mono-fixed">${escapeHtml(String(dstPort))}</td>`;
         }
 
         function buildRowForEvent(e) {
@@ -4621,7 +6829,10 @@
             const detailIdJs = escapeJsString(String(detailId));
 
             const pivotAttrs = pivotDataAttrsHtml(alert, 'sigmaalert', getColumnsForType('sigmaalert'), extractSigmaValue);
-            let row = `<tr data-id="${escapeHtml(String(alert.id))}"${pivotAttrs} onclick="toggleSigmaRow(this, '${detailIdJs}', event)">`;
+            // See rowPrefixCells' own comment - same "bake the matching key
+            // into the row at render time" reasoning, for sigma_alerts'
+            // rule_id instead of events' signature_id.
+            let row = `<tr data-id="${escapeHtml(String(alert.id))}"${pivotAttrs} data-alert-identity="${ruleId}" onclick="toggleSigmaRow(this, '${detailIdJs}', event)">`;
             row += `<td class="timestamp">${timestamp}</td>`;
             row += `<td>${valueDotSpan(sevColor)}${escapeHtml(sev.toUpperCase())}</td>`;
             row += `<td><strong>${ruleTitle}</strong>${ruleId ? '<br><span style="color:var(--text-muted);font-size:0.8rem;">' + ruleId + '</span>' : ''}</td>`;
@@ -5396,7 +7607,42 @@
         }
         
         let eventStats = {};
-        
+
+        // The Acknowledged Alerts stat card's count (see buildStats()
+        // below) - unlike every other card, this isn't derivable from
+        // eventStats (acknowledged rows are excluded from every other
+        // count by design, see db.py's _build_where_conditions/
+        // _sigma_alert_where), so it needs its own dedicated fetch rather
+        // than reading off the same object every other card already has
+        // in hand. acknowledgedAlertsCountStale starts true (so the very
+        // first buildStats() call after page load fetches it) and gets
+        // set true again by refreshAnalysisData() (which every acknowledge/
+        // un-acknowledge action already calls) - buildStats() itself
+        // fetches and re-renders lazily whenever it sees the stale flag,
+        // rather than this being threaded through every one of buildStats()'s
+        // own several call sites by hand.
+        let acknowledgedAlertsCount = 0;
+        let acknowledgedAlertsCountStale = true;
+
+        async function refreshAcknowledgedAlertsCount() {
+            if (isLogAnalysisMode || !currentMd5) {
+                acknowledgedAlertsCount = 0;
+                return;
+            }
+            try {
+                const [alertResp, sigmaResp] = await Promise.all([
+                    fetch(`/api/count?md5=${encodeURIComponent(currentMd5)}&type=alert&acknowledged=only&t=${Date.now()}`),
+                    fetch(`/api/sigma-count?md5=${encodeURIComponent(currentMd5)}&acknowledged=only&t=${Date.now()}`)
+                ]);
+                const alertCount = (await alertResp.json()).count || 0;
+                const sigmaCount = (await sigmaResp.json()).count || 0;
+                acknowledgedAlertsCount = alertCount + sigmaCount;
+            } catch (e) {
+                acknowledgedAlertsCount = 0;
+            }
+            buildStats(await computeFilteredStats());
+        }
+
         function eventMatchesFilters(event) {
             if (Object.keys(currentFilters).length === 0) return true;
             return matchesCurrentFilters(event, (ev, col) => {
@@ -5460,6 +7706,36 @@
             return matchesCurrentFilters(alert, extractSigmaValue);
         }
 
+        // Counts a .stat-number element up from 0 to target on a
+        // decelerating ease-out curve instead of snapping straight to the
+        // final value - reads as data "arriving" rather than just
+        // appearing, on every buildStats() call (initial load, filter/
+        // search apply, tab switch). Skipped under prefers-reduced-motion:
+        // reduce, jumping straight to the final value instead - this is
+        // pure decoration, not information the motion itself conveys, so
+        // honoring that preference costs nothing functionally.
+        function animateStatNumber(el, target) {
+            // Count-up is a playful flourish, reserved for the fun themes -
+            // reuses THEMED_LOADING_PHRASES as the single source of truth for
+            // "is this a fun theme" rather than maintaining a second list.
+            const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (reducedMotion || !THEMED_LOADING_PHRASES[getCurrentTheme()]) {
+                el.textContent = target.toLocaleString();
+                return;
+            }
+            const duration = 500;
+            const start = performance.now();
+            function tick(now) {
+                const progress = Math.min((now - start) / duration, 1);
+                const eased = 1 - Math.pow(1 - progress, 3);
+                el.textContent = Math.round(target * eased).toLocaleString();
+                if (progress < 1) {
+                    requestAnimationFrame(tick);
+                }
+            }
+            requestAnimationFrame(tick);
+        }
+
         function buildStats(filteredStats) {
             const grid = document.getElementById('statsGrid');
             const stats = [];
@@ -5482,6 +7758,18 @@
                     count: allFiltered,
                     color: 'var(--text-bright)'
                 });
+                // Not filtered by the current search/filter bar the way
+                // every other card above is (filteredStats has no entry
+                // for it - there's nothing to filter, acknowledged rows
+                // are already excluded from every other query) - always
+                // shows the same count regardless of what's currently
+                // searched/filtered.
+                stats.push({
+                    id: 'acknowledged',
+                    label: 'Acknowledged Alerts',
+                    count: acknowledgedAlertsCount,
+                    color: 'var(--text-muted)'
+                });
             }
 
             const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
@@ -5503,15 +7791,32 @@
                 // reliably keep from overflowing.
                 const countDisplay = s.count.toLocaleString();
                 const activeClass = s.id === activeType ? ' tab-active' : '';
+                // Rendered starting at 0, then animated up to countDisplay
+                // by animateStatNumber() below - aria-label carries the
+                // real final value immediately so assistive tech isn't
+                // stuck reading "0" or a mid-animation number.
                 return `
                     <div class="stat-card${activeClass}" onclick="showTab('section-${s.id}', this)">
-                        <div class="stat-number" style="color: ${s.color}">${countDisplay}</div>
+                        <div class="stat-number" style="color: ${s.color}" aria-label="${countDisplay}">0</div>
                         <div class="stat-label">${s.label}</div>
                     </div>
                 `;
             }).join('');
+            const numberEls = grid.querySelectorAll('.stat-number');
+            stats.filter(s => s.count > 0).forEach((s, i) => animateStatNumber(numberEls[i], s.count));
+
+            // Lazy self-refresh for the Acknowledged Alerts card - see
+            // acknowledgedAlertsCountStale's own comment for why this
+            // lives here rather than being threaded through every one of
+            // this function's several call sites by hand. Guarded so the
+            // recursive buildStats() call refreshAcknowledgedAlertsCount()
+            // itself makes doesn't loop.
+            if (acknowledgedAlertsCountStale) {
+                acknowledgedAlertsCountStale = false;
+                refreshAcknowledgedAlertsCount();
+            }
         }
-        
+
         function buildSections() {
             const sectionsEl = document.getElementById('sections');
             let html = '';
@@ -5522,6 +7827,7 @@
             });
             
             html += '<div class="section section-hidden" id="section-all"><div class="section-header">All Events</div><div class="loading">Loading...</div></div>';
+            html += '<div class="section section-hidden" id="section-acknowledged"><div class="section-header">Acknowledged Alerts</div><div class="loading">Loading...</div></div>';
             sectionsEl.innerHTML = html;
             
         }
@@ -5595,7 +7901,113 @@
 
             container.innerHTML = html;
         }
-        
+
+        // Fetches both acknowledged-only sets in parallel and hands off to
+        // renderAcknowledgedAlertsGroups() below. Reuses buildAllEventRow()/
+        // buildSigmaAlertRow() exactly as each already is (same columns,
+        // same expand/toggle mechanism, same detail formatter) rather than
+        // a new unified renderer - Network Alerts and Sigma Alerts have no
+        // existing combined view to build on the way "All Events" does for
+        // types that already share the one `events` table, so two
+        // clearly-labeled groups reusing proven code is far less risk than
+        // inventing a shared renderer for what's fundamentally a review bin.
+        async function buildAcknowledgedAlertsSection() {
+            const sectionEl = document.getElementById('section-acknowledged');
+            if (!sectionEl || !currentMd5) return;
+            const qParam = buildSearchQuery();
+            const limit = getUserQueryLimit();
+            const [alertResp, sigmaResp] = await Promise.all([
+                fetch(`/api/events?md5=${encodeURIComponent(currentMd5)}&type=alert&acknowledged=only&limit=${limit}${qParam}&t=${Date.now()}`),
+                fetch(`/api/sigma-alerts?md5=${encodeURIComponent(currentMd5)}&acknowledged=only&limit=${limit}${qParam}&t=${Date.now()}`)
+            ]);
+            acknowledgedAlertsCache = {
+                alert: await alertResp.json(),
+                sigmaalert: await sigmaResp.json(),
+            };
+            renderAcknowledgedAlertsGroups();
+        }
+
+        // When only one of the two types has any acknowledged rows, show it
+        // as a single plain table - sortable/paginated via
+        // renderPaginatedTable, the exact same renderer/columns the real
+        // Network Alerts/Sigma Alerts tab itself uses - instead of the
+        // two-group layout below, which would otherwise pair it with an
+        // empty "No acknowledged ..." group for no reason. Safe to reuse
+        // renderPaginatedTable here (unlike the both-groups case just
+        // below) since exactly one table is ever on screen at a time in
+        // this branch, so there's no fight over the shared
+        // currentPage/currentSort state (see renderPaginatedTable's own
+        // sectionKey handling) the way two simultaneously-visible tables
+        // would cause. rerender re-renders from the already-fetched
+        // acknowledgedAlertsCache, not a fresh server round-trip - a
+        // sort/page click never needs new data, just a different slice of
+        // what buildAcknowledgedAlertsSection already loaded.
+        function renderAcknowledgedSingleTypeTable(eventType) {
+            const sectionEl = document.getElementById('section-acknowledged');
+            const isSigma = eventType === 'sigmaalert';
+            sectionEl.innerHTML = '<div class="section-content">' + renderPaginatedTable({
+                sectionKey: 'section-acknowledged',
+                columns: getColumnsForType(eventType),
+                items: isSigma ? acknowledgedAlertsCache.sigmaalert : acknowledgedAlertsCache.alert,
+                extractFn: isSigma ? extractSigmaValue : extractValue,
+                rowRenderer: isSigma ? buildSigmaAlertRow : buildRowForEvent,
+                rerender: () => renderAcknowledgedSingleTypeTable(eventType),
+            }) + '</div>';
+        }
+
+        // Both-groups (or neither) layout - deliberately NOT
+        // renderPaginatedTable() here, since this branch shows two tables
+        // side by side, which would fight over renderPaginatedTable's one
+        // shared currentPage/currentSort (two distinct sectionKeys
+        // wouldn't fix it - paging one table would still move the other's
+        // currentPage out from under it). Rendering both groups in full
+        // instead - a reasonable scope for what's meant to be a small
+        // review list once both types are present, not a primary
+        // high-volume table the way Network Alerts/Sigma Alerts
+        // themselves are.
+        function renderAcknowledgedAlertsGroups() {
+            const sectionEl = document.getElementById('section-acknowledged');
+            if (!sectionEl) return;
+            const hasAlerts = acknowledgedAlertsCache.alert.length > 0;
+            const hasSigma = acknowledgedAlertsCache.sigmaalert.length > 0;
+            if (hasAlerts && !hasSigma) {
+                renderAcknowledgedSingleTypeTable('alert');
+                return;
+            }
+            if (hasSigma && !hasAlerts) {
+                renderAcknowledgedSingleTypeTable('sigmaalert');
+                return;
+            }
+            // tableHeaderCellsHtml(cols, null) - same shared helper
+            // renderPaginatedTable itself uses (see
+            // renderAcknowledgedSingleTypeTable above), with a null
+            // sectionKey so it never highlights a sort column (neither
+            // group here is sortable - see this function's own comment).
+            // Reused rather than hand-rolled specifically for its
+            // FIXED_COLUMN_WIDTHS styling, so column widths in this
+            // two-group view match every other table in the app instead of
+            // drifting to whatever width each column's content happens to
+            // need.
+            const alertCols = getColumnsForType('alert');
+            const alertHeaderHtml = tableHeaderCellsHtml(alertCols, null) + '<th style="width:32px;"></th>';
+            const alertHtml = hasAlerts
+                ? `<div class="table-scroll-wrapper"><table><thead><tr>${alertHeaderHtml}</tr></thead><tbody>${acknowledgedAlertsCache.alert.map(buildRowForEvent).join('')}</tbody></table></div>`
+                : '<div class="no-matches">No acknowledged network alerts</div>';
+            const sigmaCols = getColumnsForType('sigmaalert');
+            const sigmaHeaderHtml = tableHeaderCellsHtml(sigmaCols, null) + '<th style="width:32px;"></th>';
+            const sigmaHtml = hasSigma
+                ? `<div class="table-scroll-wrapper"><table><thead><tr>${sigmaHeaderHtml}</tr></thead><tbody>${acknowledgedAlertsCache.sigmaalert.map(buildSigmaAlertRow).join('')}</tbody></table></div>`
+                : '<div class="no-matches">No acknowledged Sigma alerts</div>';
+            sectionEl.innerHTML = `
+                <div class="section-content">
+                    <div class="section-header">Network Alerts</div>
+                    ${alertHtml}
+                    <div class="section-header">Sigma Alerts</div>
+                    ${sigmaHtml}
+                </div>
+            `;
+        }
+
         async function buildAggregationsSectionAll() {
             const aggContainer = document.getElementById('aggregations');
             if (!aggContainer) return;
@@ -6853,6 +9265,15 @@
 
         async function refreshAnalysisData() {
             if (!currentMd5) return;
+            // Marks the Acknowledged Alerts stat card's own count stale so
+            // the next buildStats() call (this function's own, below)
+            // re-fetches it - see acknowledgedAlertsCountStale's own
+            // comment. Every acknowledge/un-acknowledge action already
+            // calls this function, so this is the one hook that keeps
+            // that card's count correct after them, without threading a
+            // refresh through setAlertAcknowledged/acknowledgeAllInstances
+            // themselves.
+            acknowledgedAlertsCountStale = true;
             const gen = bumpFetchGeneration();
             showLoading(currentSearch.length > 0 ? 'Searching...' : 'Loading events...');
 
@@ -6957,6 +9378,21 @@
                     if (sectionEl) {
                         sectionEl.classList.remove('section-hidden');
                         await loadTabData(activeType, null);
+                        // Un-acknowledging the last remaining row (either
+                        // type) empties the tab the user is currently
+                        // looking at - staying there would just show its
+                        // own "No acknowledged ..." empty state, which
+                        // reads as "did that even work?" rather than the
+                        // clear confirmation of landing back on Network
+                        // Alerts and seeing the row reappear. section-alert
+                        // is guaranteed to exist here: buildSections() above
+                        // already re-ran off the fresh (post-un-acknowledge)
+                        // /api/stats counts, so the row just un-acknowledged
+                        // has already made 'alert' a real eventType again.
+                        if (activeType === 'acknowledged' && acknowledgedAlertsCache.alert.length === 0
+                                && acknowledgedAlertsCache.sigmaalert.length === 0 && document.getElementById('section-alert')) {
+                            showTab('section-alert');
+                        }
                     }
                 } else if (eventTypes[0]) {
                     await loadTabData(eventTypes[0], null);
@@ -7062,6 +9498,14 @@
         // this reuses it as-is rather than a second reanalyze code path.
         function reanalyzeIconHtml() {
             return `<span onclick="openReanalyzeModal(currentMd5, currentFileName)" style="cursor: pointer; white-space: nowrap; color: var(--text-muted);" title="Re-analyze">${REFRESH_ICON_SVG}</span>`;
+        }
+
+        // Same reasoning as reanalyzeIconHtml() just above - openDeleteAnalysis()
+        // is already self-contained (just md5/name) and confirmDelete() already
+        // handles deleting the currently-open analysis (resets state, returns
+        // to the welcome screen), so this reuses that as-is.
+        function deleteIconHtml() {
+            return `<span class="app-header-delete-icon" onclick="openDeleteAnalysis(currentMd5, currentFileName)" style="cursor: pointer; white-space: nowrap;" title="Delete">${DELETE_ICON_SVG}</span>`;
         }
 
         function updateNotesCountHint() {
@@ -7259,6 +9703,7 @@
                         <span style="color: var(--text-muted); font-size: 0.85rem; white-space: nowrap;">${CALENDAR_ICON_SVG}${escapeHtml(dateDisplay)}</span>
                         ${notesIconHtml()}
                         ${reanalyzeIconHtml()}
+                        ${deleteIconHtml()}
                     `;
                     document.getElementById('appHeaderMd5').onclick = () => copyMd5ToClipboard(currentMd5);
                     document.getElementById('appHeaderRight').innerHTML = renderGearMenu();
@@ -7321,16 +9766,20 @@
                             await updateSankeyDiagram();
                         }
                         
+                        // loadTabData(eventTypes[0]) above already builds the
+                        // aggregation table itself when advancedMode is true,
+                        // scoped to that default tab (e.g. Alerts) - same as
+                        // _renderLogAnalysisView's equivalent comment. This
+                        // used to also unconditionally rebuild the All-Events
+                        // aggregation here, clobbering the per-type one above,
+                        // so the only case left to handle here is collapsing
+                        // the panel when advancedMode is false.
                         const aggContainer = document.getElementById('aggregations');
-                        if (aggContainer) {
-                            if (advancedMode) {
-                                await buildAggregationsSectionAll();
-                            } else {
-                                aggContainer.innerHTML = AGG_COLLAPSED_HTML;
-                            }
+                        if (aggContainer && !advancedMode) {
+                            aggContainer.innerHTML = AGG_COLLAPSED_HTML;
                         }
                     }
-                    
+
                     hideLoading();
                     
                     // Reset URL field for next analysis
@@ -7383,6 +9832,7 @@
                 const result = await resp.json();
                 clearInterval(downloadInterval);
                 notifyIfFilesSkipped(result);
+                notifyIfAdditionalAnalyses(result);
 
                 if (result.status === 'processing') {
                     await checkStatus(result.md5, result.phase || 'network');
@@ -7433,6 +9883,7 @@
                     return;
                 }
                 notifyIfFilesSkipped(result);
+                notifyIfAdditionalAnalyses(result);
 
                 if (result.status === 'ready') {
                     hideLoading();
@@ -7472,14 +9923,118 @@
             }
         }
         
-        async function checkStatus(md5, initialPhase = 'network') {
-            const phaseMessages = {
-                'network': 'Analyzing network traffic...',
-                'files': 'Analyzing files...',
-                'importing': 'Importing data...',
-                'logs': 'Analyzing log file...'
+        // Fun, theme-flavored loading phrases - every theme in THEMES's
+        // 'fun' group gets its own pool here (see AGENTS.md's Theming
+        // Conventions for the fun/dark/light group breakdown); every
+        // non-fun theme just gets the plain default messages below - a
+        // serious/professional theme shouldn't suddenly start joking
+        // mid-analysis. One flat pool per theme, not a separate curated
+        // set per checkStatus() phase (network/files/importing/logs) -
+        // the phase itself isn't something a user actually watches for,
+        // so tying a specific joke to a specific phase added authoring
+        // effort without adding anything the user would notice.
+        // getPhaseMessages() below draws independently for each of the
+        // 4 phase slots (so a single load can show a couple of different
+        // lines as it moves through phases), each draw fixed for that
+        // phase's whole duration (not re-rolled every second) so the
+        // message never flickers mid-phase.
+        const THEMED_LOADING_PHRASES = {
+            hacker: [
+                'Bypassing the firewall...', 'Rerouting through the mainframe...', 'Tracing the IP address...',
+                'Decrypting the stolen files...', 'Cracking the encryption...', 'Brute-forcing the login...',
+                'Uploading to the mainframe...', 'Injecting the payload...', 'Compiling the exploit...',
+                'Erasing the security footage...', 'Wiping the access logs...', 'Looping the security cameras...'
+            ],
+            'dos-blue': [
+                'Formatting C:\\ ...', 'Running CHKDSK...', 'Loading MS-DOS...',
+                'Defragging...', 'Scanning for viruses...', 'Compressing with DoubleSpace...',
+                'Editing config.sys...', 'Setting up device drivers...', 'Expanding the memory manager...',
+                'Editing autoexec.bat...', 'Writing to LPT1...', 'Buffering keyboard input...'
+            ],
+            vaporwave: [
+                'Riding the information superhighway...', 'Connecting to the cyber sea...', 'Dialing into the grid...',
+                'Rewinding the VHS tape...', 'Polishing the marble bust...', 'Adjusting the chrome...',
+                'Downloading more RAM...', 'Loading the Windows 95 startup sound...', 'Rendering the sunset grid...',
+                'Achieving aesthetic...', 'Applying the VHS filter...', 'Syncing the neon palm trees...'
+            ],
+            cga: [
+                'Loading CGA graphics driver...', 'Dialing the BBS...', 'Initializing the modem...',
+                'Reading from floppy disk...', 'Verifying the diskette...', 'Seeking track 0...',
+                'Swapping diskette 2 of 5...', 'Loading interrupt handlers...', 'Copying to expanded memory...',
+                'Beeping the PC speaker...', 'Writing to the printer buffer...', 'Flushing the keyboard buffer...'
+            ],
+            amber: [
+                'Establishing terminal session...', 'Negotiating baud rate...', 'Connecting to the mainframe...',
+                'Paging through the file system...', 'Reading tape drive 0...', 'Listing directory contents...',
+                'Compiling FORTRAN...', 'Writing to core memory...', 'Running the batch job...',
+                'Printing to the line printer...', 'Scrolling the CRT buffer...', 'Archiving to magnetic tape...'
+            ],
+            'breadbin-blue': [
+                'LOAD "*",8,1...', 'Searching for tape...', 'Connecting the modem...',
+                'PEEKing and POKEing...', 'Reading from disk drive 8...', 'Verifying the floppy...',
+                'Running the BASIC program...', 'Loading from datasette...', 'Waiting for SYS 64738...',
+                'Writing to the 1541 drive...', 'Printing to the dot matrix...', 'Saving before the power flickers...'
+            ],
+            'digital-frontier': [
+                'Entering the Grid...', 'Riding the light cycle...', 'Scanning for the MCP...',
+                'Derezzing corrupted programs...', 'Searching the data streams...', 'Decoding the identity disc...',
+                'Compiling for the Grid...', 'Broadcasting across the network grid...', 'Rendering the light cycle trail...',
+                'Reviewing the game grid...', 'Contacting Tron...', 'Bypassing the MCP...'
+            ],
+            'luna-blue': [
+                'Connecting to the network...', 'Detecting new hardware...', 'Establishing dial-up connection...',
+                'Emptying the Recycle Bin...', 'Indexing for Windows Search...', 'Cleaning up temporary files...',
+                'Installing Windows updates...', 'Loading the Start menu...', 'Playing the startup chime...',
+                'Writing to the Event Viewer...', 'Checking for updates...', 'Saving your preferences...'
+            ],
+            'retro-handheld': [
+                'Linking up the Game Link cable...', 'Searching for a signal...', 'Syncing with the cartridge...',
+                'Reading the save cartridge...', 'Checking the battery save...', 'Blowing on the cartridge...',
+                'Loading level data...', 'Saving your progress...', 'Compressing sprite data...',
+                'Showing the low battery warning...', 'Writing to save slot 1...', 'Pausing the game...'
+            ],
+            'mp3-player': [
+                'Loading playlist...', 'Buffering...', 'Ripping the CD...',
+                'Encoding to MP3...', 'Skinning the interface...', 'Scanning ID3 tags...',
+                'Equalizing...', 'Crossfading...', 'Building the playlist...',
+                'Visualizing...', 'Normalizing volume levels...', 'Updating the Now Playing display...'
+            ]
+        };
+
+        function pickRandom(arr) {
+            return arr[Math.floor(Math.random() * arr.length)];
+        }
+
+        function getPhaseMessages() {
+            const pool = THEMED_LOADING_PHRASES[getCurrentTheme()];
+            if (!pool) {
+                return {
+                    'network': 'Analyzing network traffic...',
+                    'files': 'Analyzing files...',
+                    'importing': 'Importing data...',
+                    'logs': 'Analyzing log file...'
+                };
+            }
+            return {
+                network: pickRandom(pool),
+                files: pickRandom(pool),
+                importing: pickRandom(pool),
+                logs: pickRandom(pool)
             };
-            
+        }
+
+        // Gates purely-decorative fun-theme flourishes (the HUD
+        // corner-bracket reticle in CSS, keyed off .fun-theme) behind the
+        // same theme set THEMED_LOADING_PHRASES already defines, so "is
+        // this a fun theme" stays single-sourced rather than maintaining a
+        // second list in CSS.
+        function updateFunThemeClass() {
+            document.documentElement.classList.toggle('fun-theme', !!THEMED_LOADING_PHRASES[getCurrentTheme()]);
+        }
+
+        async function checkStatus(md5, initialPhase = 'network') {
+            const phaseMessages = getPhaseMessages();
+
             const startTime = Date.now();
             let currentPhase = initialPhase;
             let elapsedInterval = null;
@@ -7515,10 +10070,17 @@
                     if (result.status === 'ready') {
                         clearInterval(elapsedInterval);
                         hideLoading();
+                        // No fetch-generation guard here: if the user has
+                        // since navigated to a different analysis (e.g. via
+                        // notifyIfAdditionalAnalyses' "View Recent Analyses"
+                        // link), this still unconditionally yanks them back
+                        // to `md5` once it finishes. Pre-existing gap, not
+                        // introduced by multi-pcap-zip support - just more
+                        // reachable now.
                         await loadAnalysis(md5);
                         return;
                     }
-                    
+
                     if (result.status === 'processing') {
                         if (result.phase) {
                             currentPhase = result.phase;
@@ -7597,6 +10159,13 @@
         let pendingDeleteAllCount = 0;
         
         function openDeleteAllAnalyses(count) {
+            // Now reachable from inside the Settings modal (Danger Zone) -
+            // .modal all shares one z-index (see socrates.css), so with
+            // both active at once, DOM order (Settings comes after this
+            // modal in the HTML) would otherwise paint Settings on top and
+            // visually hide this confirmation. A no-op if Settings isn't
+            // open (e.g. if this ever gets a second call site).
+            closeSettingsModal();
             pendingDeleteAllCount = count;
             document.getElementById('deleteAllCount').textContent = count;
             document.getElementById('deleteAllConfirmModal').classList.add('active');
@@ -7720,9 +10289,10 @@
 
         async function init() {
             try {
-                // Initialize theme state, code-rain background, and favicon.
+                // Initialize theme state, ambient theme backgrounds, and favicon.
                 updateThemeMenu();
-                updateCodeRain();
+                updateFunThemeClass();
+                updateAllAmbientThemes();
                 updateFavicon();
                 startThemeSync();
 

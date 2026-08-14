@@ -128,6 +128,19 @@ document.head.appendChild(styleEl);
 // Make globals available
 window.document = document;
 
+// jsdom does not implement Element.prototype.scrollIntoView at all (it's
+// simply undefined, not a no-op) - every real browser has always had it as
+// a standard, always-present method that never throws under normal use, so
+// its absence here is purely a jsdom gap, not something socrates.js's own
+// code needs to guard against. Without this shim, any keyboard-navigation
+// function that calls .scrollIntoView() (there are several) throws
+// partway through - and since that throw happens inside a keydown event
+// listener, jsdom/the DOM spec swallows it silently rather than
+// propagating it to the dispatchEvent() call site, so test code sees no
+// error at all, just seemingly-inexplicable missing side effects from
+// whatever the function was supposed to do AFTER its scrollIntoView call.
+window.Element.prototype.scrollIntoView = window.Element.prototype.scrollIntoView || function() {{}};
+
 // Optionally load d3 / d3-sankey (order matters: d3 first) before socrates.js
 {d3_load_snippet}
 

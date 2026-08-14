@@ -5,8 +5,10 @@ Requires: pip install -r requirements-screenshots.txt, plus a one-time
 `playwright install ffmpeg` (Playwright's video muxing needs its own bundled
 ffmpeg, separate from any system ffmpeg). Also needs a running server
 (default http://127.0.0.1:8000/socrates.html - override with --base-url).
-Uses the app's own built-in "Sample pcap file" (DEFAULT_SAMPLE_URL in
-static/socrates.js), same as scripts/capture_screenshots.py, so it needs no
+Uses the app's own default "Sample pcap file" (DEFAULT_SAMPLE_URL in
+static/socrates.js - a one-click convenience link to an external pcap on
+malware-traffic-analysis.net, not something bundled with the app), same as
+scripts/capture_screenshots.py, so it needs no
 pre-existing local analysis or hardcoded MD5 - it works on a clean checkout
 with an empty DATA_DIR. Pointing the server's DATA_DIR at one that's already
 analyzed that same sample skips straight to the "ready" response (see
@@ -56,7 +58,19 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MP4_OUTPUT = os.path.join(REPO_ROOT, 'docs', 'videos', 'demo.mp4')
 WEBM_FALLBACK_OUTPUT = os.path.join(REPO_ROOT, 'docs', 'videos', 'demo.webm')
 POSTER_OUTPUT = os.path.join(REPO_ROOT, 'docs', 'videos', 'demo-poster.jpg')
-POSTER_TIMESTAMP_SECONDS = 62  # lands on the full merged All Events Sankey diagram, pointer arrow included
+POSTER_TIMESTAMP_SECONDS = 80  # lands on the full merged All Events Sankey diagram, pointer arrow included - re-tune this if the recorded workflow's timing shifts (e.g. steps added/removed/re-ordered)
+# Playwright's raw recording's very first frame can be captured before the
+# page has fully painted into the configured viewport - observed as a
+# corrupted frame 0 showing only a small upper-left region of real content
+# against an otherwise flat grey canvas, gone by the very next frame. Only
+# matters for demo.mp4 itself (not docs/index.md's <video> embed, which
+# uses POSTER_OUTPUT as its poster and never shows frame 0 at all) - but a
+# viewer who downloads/re-uploads demo.mp4 directly (e.g. to social media)
+# is at the mercy of whatever thumbnail that platform extracts from the
+# file's own first frame. Trimmed off the front of the published MP4 here
+# rather than relying on a manual release-checklist step to catch it by
+# hand each time.
+MP4_TRIM_START_SECONDS = 0.15
 VIEWPORT = {'width': 1920, 'height': 1400}
 
 # Solid on-brand blue (not translucent black) - a black/near-black caption
@@ -167,6 +181,16 @@ CAPTION_REMOVE_JS = ("() => { "
 # it already exists.
 CAPTION_INIT_JS_TEMPLATE = """
 (() => {
+    // page.add_init_script() runs in every frame, not just the top-level
+    // page - including the Themes modal's own #themePreviewFrame iframe
+    // (a real, separately-navigated document). Without this guard, that
+    // iframe gets its own "Welcome..." caption baked in at its own first
+    // paint, which nothing ever updates afterward (every caption()/point_to()
+    // call in this script only evaluates against the top-level `page`) - it
+    // would sit there frozen, visible any time the live theme preview shows
+    // through the modal later in the recording, long after the real
+    // top-level caption has moved on to something else entirely.
+    if (window.self !== window.top) return;
     function tryInit() {
         if (!document.documentElement) { setTimeout(tryInit, 0); return; }
         const el = document.createElement('div');
@@ -252,6 +276,7 @@ async def main(base_url):
         # Show the intro caption from the very first paint of the new
         # document, over the real page as it loads in behind it.
         welcome_caption = ("Welcome to the SO-CRATES recorded demo!\n\n"
+                           "https://so-crates.org\n\n"
                            "When you first connect to SO-CRATES, you'll be greeted by a welcome "
                            "window that gives you an overview of what you can do with SO-CRATES.")
         caption_init_script = CAPTION_INIT_JS_TEMPLATE.replace(
@@ -273,7 +298,7 @@ async def main(base_url):
 
         # Select the sample pcap file
         sample_card = page.locator(".sample-card:has-text('Sample pcap file')")
-        await caption(page, "Selecting the built-in sample pcap file", sample_card)
+        await caption(page, "Selecting the default sample pcap file", sample_card)
         await page.wait_for_timeout(2200)
         await sample_card.click()
         await page.wait_for_selector('#statsGrid .stat-card', timeout=60000)
@@ -351,7 +376,7 @@ async def main(base_url):
                     # extra wait needed before the caption itself, but the
                     # arrow still waits for the row to confirm visible before
                     # pointing, same defensive shape as the Playbook arrow.
-                    await caption(page, "SO-CRATES also shows an AI-generated summary "
+                    await caption(page, "SO-CRATES shows an AI-generated summary "
                                         "of what this rule detects")
                     ai_summary_label = page.locator(
                         '.detail-row.visible .detail-label', has_text='AI Summary'
@@ -381,26 +406,81 @@ async def main(base_url):
                     await alert_row.locator('.timestamp').click()
                     await page.wait_for_timeout(400)
 
+                    # Acknowledge this same alert to show how noisy,
+                    # already-triaged signatures can be cleared out of
+                    # view - re-open the pivot menu on the same row and
+                    # commit "Acknowledge this alert".
+                    await value_cell.click()
+                    await page.wait_for_timeout(700)
+                    acknowledge_btn = page.locator('[data-pivot-action="acknowledge"]')
+                    await caption(page, 'Acknowledging this alert removes it from view - '
+                                        'useful for noisy, already-triaged signatures', acknowledge_btn)
+                    await page.wait_for_timeout(2400)
+                    await acknowledge_btn.click()
+                    await page.wait_for_timeout(2000)  # refreshAnalysisData()'s own re-fetch/re-render
+
+                    # Acknowledged rows only reappear in the new
+                    # Acknowledged Alerts tab, for review or undo.
+                    acknowledged_card = page.locator(".stat-card:has-text('Acknowledged Alerts')").first
+                    if await acknowledged_card.count() > 0:
+                        await caption(page, "Acknowledged alerts move to their own "
+                                            "Acknowledged Alerts tab", acknowledged_card)
+                        await page.wait_for_timeout(2200)
+                        await acknowledged_card.click()
+                        await page.wait_for_timeout(1500)
+
+                        acknowledged_row = page.locator(
+                            '.section:not(.section-hidden):not(.agg-section) table tbody tr:not(.detail-row)'
+                        ).first
+                        if await acknowledged_row.count() > 0:
+                            await acknowledged_row.scroll_into_view_if_needed()
+                            ack_value_cell = acknowledged_row.locator('.mono-fixed').first
+                            await caption(page, "Un-acknowledging brings it right back", ack_value_cell)
+                            await page.wait_for_timeout(2200)
+                            await ack_value_cell.click()
+                            await page.wait_for_timeout(700)
+                            unacknowledge_btn = page.locator('[data-pivot-action="unacknowledge"]')
+                            await unacknowledge_btn.click()
+                            # Un-acknowledging the only acknowledged row
+                            # switches back to Network Alerts automatically
+                            # (see refreshAnalysisData in static/socrates.js)
+                            # - no explicit tab click needed here.
+                            await page.wait_for_timeout(2200)
+
         # All Events
         all_events_card = page.locator(".stat-card:has-text('All Events')").first
         await all_events_card.click()
         await caption(page, "Switching to the merged All Events view", all_events_card)
         await page.wait_for_timeout(2800)
 
-        # Collapse the Sankey Diagram so the Aggregation Tables and Data
-        # Table have room to show, now that we're ready to expand them.
+        # Collapse the Sankey Diagram via the keyboard, not a click - Down
+        # selects the toggle bar (getVerticalNavItems in static/socrates.js)
+        # and Enter activates it exactly like a click would
+        # (activateKeyboardSelection's plain verticalNavSelection.click()
+        # fallback for anything that isn't a data row/filter chip/previous-
+        # analysis row) - so the Aggregation Tables and Data Table have room
+        # to show, now that we're ready to expand them.
+        selected = page.locator('.keyboard-selected')
         sankey_toggle = page.locator('.section-toggle-bar', has_text='Sankey Diagram').first
         if await sankey_toggle.count() > 0:
-            await caption(page, "Collapsing the Sankey Diagram to make room to see the Data Table", sankey_toggle)
+            await page.keyboard.press('ArrowDown')
+            await page.wait_for_timeout(500)
+            await caption(page, "Arrow keys navigate the whole page too - Down selects the "
+                                "Sankey Diagram toggle, Enter collapses it to make room for "
+                                "the Data Table", selected)
             await page.wait_for_timeout(3800)
-            await sankey_toggle.click()
+            await page.keyboard.press('Enter')
             await page.wait_for_timeout(1400)
 
-        # Expand Aggregation Tables
-        agg_toggle = page.locator('.section-toggle-bar', has_text='Aggregation Tables').first
-        await agg_toggle.click()
-        await caption(page, "Expanding Aggregation Tables", agg_toggle)
+        # Expand Aggregation Tables the same way - Down moves to the next
+        # toggle bar, Enter expands it.
+        await page.keyboard.press('ArrowDown')
+        await page.wait_for_timeout(500)
+        await caption(page, "Down again, Enter again - expanding Aggregation Tables", selected)
         await page.wait_for_timeout(2800)
+        await page.keyboard.press('Enter')
+        await page.wait_for_timeout(600)
+        await clear_pointer(page)
 
         # Clicking an aggregation value now opens the pivot menu (Include/
         # Exclude/Only/Hunt/...) rather than applying a filter directly -
@@ -477,6 +557,41 @@ async def main(base_url):
             await page.wait_for_timeout(750)
         await page.wait_for_timeout(1500)
 
+        # Command Palette - typing any letter/digit outside a text field
+        # (isNavigableKeyContext/isAutocompleteTriggerKey in
+        # static/socrates.js) opens a searchable list of commands, themes,
+        # and data-type tabs. Closes out the tour with the newest
+        # keyboard-first way to drive the whole app. Scrolled back to the
+        # top first so the palette (a centered overlay) isn't shown against
+        # whatever mid-scroll hexdump content the previous step left behind.
+        await page.evaluate("window.scrollTo(0, 0)")
+        await page.wait_for_timeout(600)
+        await caption(page, "SO-CRATES also has a command palette - just "
+                            "start typing anywhere outside a text field")
+        await page.wait_for_timeout(2800)
+        # page.keyboard.type() sends real keydown events - the first one
+        # (isAutocompleteTriggerKey) opens the palette and seeds its input
+        # with that character (openAutocompleteModal), so every character
+        # after it lands as a normal keystroke in the now-focused input.
+        await page.keyboard.type('e', delay=150)
+        await page.wait_for_timeout(500)
+        palette_results = page.locator('#autocompleteResults')
+        await caption(page, 'Matching isn\'t limited to the start of a word - even a bare '
+                            'fragment like "eme" finds "Open Themes"', palette_results)
+        await page.keyboard.type('me', delay=150)
+        await page.wait_for_timeout(2800)
+        await page.keyboard.press('Enter')
+        await page.wait_for_timeout(1000)
+        themes_modal = page.locator('#themesModal.active .modal-content')
+        await caption(page, "Enter commits the highlighted command immediately - "
+                            "here, opening the Themes modal", themes_modal)
+        await page.wait_for_timeout(4000)
+
+        # No target - the final sign-off caption describes nothing on
+        # screen in particular.
+        await caption(page, "Thanks for watching!\n\nhttps://so-crates.org")
+        await page.wait_for_timeout(4000)
+
         await page.evaluate(CAPTION_REMOVE_JS)
         await page.wait_for_timeout(1000)
 
@@ -507,8 +622,14 @@ async def main(base_url):
         # is UI content with crisp text, not natural video, so a deband
         # filter was deliberately not used instead - it would soften the
         # exact text edges crf 18 already keeps sharp.
+        # -ss placed after -i (output-seeking, not input-seeking) for
+        # frame-accurate trimming rather than snapping to the nearest
+        # keyframe - see MP4_TRIM_START_SECONDS's own comment for why this
+        # trim exists. No extra decode cost from output-seeking here since
+        # this is already a full re-encode (-c:v libx264), not a stream
+        # copy, so every frame gets decoded regardless of where -ss sits.
         subprocess.run(
-            [ffmpeg_path, '-y', '-i', raw_webm_path,
+            [ffmpeg_path, '-y', '-i', raw_webm_path, '-ss', str(MP4_TRIM_START_SECONDS),
              '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'slow', '-crf', '18',
              '-movflags', '+faststart', MP4_OUTPUT],
             check=True, capture_output=True,

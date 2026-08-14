@@ -1,5 +1,193 @@
 # Release Notes
 
+## 4.0.0
+
+### Acknowledge alerts
+
+A noisy analysis - the same benign Suricata or Sigma signature firing
+hundreds of times - used to have no way to mark it "seen, not
+interesting" short of scrolling past it forever. The pivot menu on any
+Network Alert or Sigma Alert row now offers **Acknowledge this alert**
+and **Acknowledge all instances of this alert**: acknowledging removes
+the row from every view immediately (Network Alerts/Sigma Alerts, All
+Events, the Sankey diagram, and every count), not just a dimmed row
+still sitting in the list. A new **Acknowledged Alerts** stat-card tab
+is the only place they still show, for review or undo via
+**Un-acknowledge this alert** - grouped under separate Network Alerts
+and Sigma Alerts sub-sections when both have acknowledged rows, or
+displayed as a single sortable table (identical to that type's own tab)
+when only one does. Un-acknowledging the last remaining row switches
+back to Network Alerts automatically. Acknowledging is scoped to the
+current analysis only and persists in that analysis's own database, the
+same as a row note.
+
+### Full keyboard navigation
+
+Arrow keys now drive navigation across the whole app instead of just
+scrolling the page. On the welcome screen, Left/Right moves between the
+sample-file cards and Up/Down moves between rows in Previous Analyses; on
+an analysis page, Left/Right switches stat-card tabs and Up/Down moves
+through the visible data table's rows (including a binary/YARA analysis,
+whose table renders with no `.section` wrapper around it, unlike every
+pcap/log tab). Enter activates whatever's currently highlighted - opens a
+sample, jumps to a previous analysis, or expands/collapses a table row,
+the same as clicking it. Escape returns to the welcome screen from
+anywhere, closing one thing at a time (a modal, the gear menu, a pivot
+menu) before it ever leaves the current analysis.
+
+The Themes modal gets its own arrow-key grid navigation: all four arrows
+move a highlight through the tile grid and call the same live-preview
+hover uses on every move, Up/Down jump by a real detected row (read back
+from the grid's own `getComputedStyle`, not a hardcoded column count) so
+they behave like Up/Down instead of Left/Right, and the first press
+starts relative to whichever theme is currently active rather than always
+restarting from a corner of the grid.
+
+On an analysis page, keyboard reach now extends past the stat-card tabs
+and data table: the Sankey Diagram and Aggregation Tables section headers
+can be expanded/collapsed with Enter and stay selected afterward, so
+collapsing one back down after looking at something inside it means
+arrowing straight back to it rather than re-navigating from the top.
+Up/Down can also move onto aggregation table values, filter bar chips,
+and everything inside an expanded row's detail panel - Add Note, ASCII
+Transcript, Hexdump, Download PCAP, Expand All/Collapse All, and
+individual packets. Left/Right stays scoped to the stat-card tabs until
+Up/Down is pressed at least once, at which point it becomes
+context-sensitive to whichever section is currently selected instead -
+cycling ASCII Transcript/Hexdump/Download PCAP as one group, or Expand
+All/Collapse All as another, rather than always jumping stat-card tabs.
+Escape now closes an open pivot menu without also leaving the whole
+analysis, and arrow-key selection scrolling accounts for the fixed
+header and footer instead of occasionally landing a selection underneath
+one of them.
+
+Since theme-cycling used to be bound to the `t` key - colliding with
+typing several of the app's own theme cheat codes (`retro`, `digit` both
+contain a `t`) - it moved first to the arrow keys, then to `<`/`>` once
+arrow keys took on real in-app navigation duties instead.
+
+### Command Palette
+
+Typing any letter or digit outside a text field now opens a command
+palette pre-filled with what was typed, replacing the old theme
+cheat-code shortcuts entirely - keep typing to narrow the list, Up/Down
+to highlight a candidate, Enter to commit it, Escape to cancel without
+doing anything. A query matches anywhere in a candidate, not just its
+very first word - typing `alerts` finds both Network Alerts and File
+Alerts, `blue` finds every Fun theme with "Blue" in its name, and even a
+bare mid-word fragment like `eme` finds Open Themes. A match at the very
+start ranks above a word-boundary match, which ranks above a bare
+mid-word match, so a short, precise query never gets buried under
+mid-word noise. It matches every theme's own name (switching to it
+directly, same as picking it
+from the Themes modal), every data-type stat-card tab currently on
+screen, and a long list of shortcuts that used to require the gear menu
+or a page reload: `help`, `about`, `themes`, `rules`, `settings`,
+`notes`, `delete`, `re-analyze`, `search`, `clear`, `sankey`,
+`aggregation`, `advanced features`, `documentation`, `security onion`,
+`github repo`, `pcap samples`, `log samples`, `binary samples`,
+`upload`, `import`, `previous analyses`, `copy md5 hash to clipboard`,
+and `rename analysis`. The Themes modal keeps its own separate, lighter
+type-ahead - typing a theme's name there jumps the grid highlight
+straight to it without opening the palette at all, the same native
+`<select>`-style convention the grid's own arrow-key navigation already
+uses.
+
+### A cleaner main screen
+
+Re-analyze and Delete moved off the welcome screen's Previous Analyses
+list entirely, onto the analysis page header next to the existing Notes
+icon - a row on the main screen now shows just its name and, when
+present, a notes indicator. Delete All moved out of the welcome screen
+too, into a new Danger Zone section in Settings, which fetches a live
+count of previous analyses on every open rather than relying on a count
+handed in from an already-rendered list. Hacker theme's delete-related
+controls (the header delete icon, Delete All) no longer force themselves
+green to avoid clashing with the theme's monochrome CRT look - now that
+neither one sits inline in a scrolling list of other rows, they just use
+the theme's own red danger color like every other danger control does.
+
+### Every file in a ZIP gets analyzed, not just the first one
+
+Uploading (or loading from a URL) a `.zip` containing more than one
+supported file used to only ever analyze the first one found, silently
+dropping the rest - a real gap for sites like
+malware-traffic-analysis.net, which regularly ship ZIPs with two or more
+pcaps for a single incident. Every supported file extracted from a ZIP
+is now analyzed independently: each pcap gets its own network analysis,
+and each log/binary file gets its own log or file analysis, all in
+parallel. A byte-identical duplicate within the same ZIP is only
+analyzed once. Loading the ZIP still opens straight into the first file
+found, same as before, with a toast linking to Previous Analyses for
+anything else that was also analyzed alongside it - and, for a file that
+genuinely couldn't be analyzed (rather than one intentionally skipped),
+a separate toast reporting how many were skipped and why.
+
+### New ambient theme backgrounds, and a reshuffled theme list
+
+Breadbin Blue and CGA both traded their earlier sprite/starfield
+animations for a proper demoscene-style plasma field (four combined sine
+waves sampled on a coarse grid) - CGA's is additionally quantized through
+an ordered Bayer dither down to the real 4-color CGA palette, a
+period-authentic technique for simulating more colors than the palette
+actually has. Amber CRT's background now prints boot-log-style lines one
+at a time at randomized intervals instead of smoothly scrolling, closer
+to how a real terminal fills a screen. DOS Blue's Norton-Commander-style
+dual file panes now scale their name lists to fill the full viewport
+height instead of capping out partway down.
+
+A new **MP3 Player** fun theme joins the lineup - brushed-metal chrome
+grays, a soft LCD-green readout, a cyan bezel highlight, and a bouncing
+spectrum-analyzer background (cheat code `mp3`). The Daylight theme was
+removed (existing users on it fall back to White, close enough visually
+to not need a migration prompt), and Sguil moved from Fun Themes to Light
+Themes, keeping its `sguil` cheat code.
+
+Stat cards, sample cards, the pivot menu, and modals all switched from a
+2-corner (top-left/bottom-right) HUD bracket to a proper 4-corner one -
+still just two pseudo-elements per element, but each now paints two
+adjacent corners via a stack of background gradients instead of a single
+border-based L. Keyboard-selected sample cards and theme tiles now get
+the same corner-bracket glow/border feedback mouse hover already gave
+them, including each fun theme's own neon-glow treatment. Amber CRT was
+missing its own bracket glow entirely (every other neon theme had one) -
+now consistent.
+
+### Fixed while preparing this release
+
+- **A crafted filename could silently defeat YARA scanning entirely.**
+  Uploaded filenames were sanitized against path traversal but not
+  control characters - a filename containing an embedded newline became
+  the real on-disk filename, which YARA's `--scan-list` input (one path
+  per line) then split into two bogus entries, neither the real file. The
+  pipeline still reported a clean, completed scan. `sanitize_filename` now
+  rejects control characters (0x00-0x1F, 0x7F).
+- **A Suricata analysis could get stuck "in progress" forever.** The
+  background watchdog thread only caught a timeout; any other failure
+  (an `OSError` from `proc.wait()`, a problem inside the post-processing
+  phase) left the `.phase` lock file in place with nothing to clear it,
+  and `spawn_suricata()`'s own re-entry guard refuses to start a new run
+  while that lock exists. Every failure path now clears the lock and
+  records an error.
+- Several `/api/*` routes (`/api/events`, `/api/sigma-alerts`,
+  `/api/sigma-stats`) silently returned `200` with empty data for a
+  malformed or missing `md5`, unlike every sibling route, which returns a
+  clean `400` - now consistent. A handful of other routes had no
+  exception handling around their database queries at all; a DB error
+  there reset the connection instead of returning a JSON error like
+  everywhere else already did.
+- A corrupted/truncated `eve.json` line that was syntactically valid JSON
+  but not an object (a bare number, string, or array) aborted ingestion
+  of the whole analysis instead of just that one line.
+- The recorded demo video's very first frame could be captured before
+  the page had fully painted into the recording viewport - visible as a
+  small sliver of real content in the corner of an otherwise flat grey
+  frame, exactly the thumbnail X/LinkedIn/etc. auto-extract when the raw
+  file is uploaded directly. Trimmed automatically now. A caption in the
+  same recording also called the sample pcap "built-in," which it isn't -
+  it's a one-click link to a pcap hosted on malware-traffic-analysis.net,
+  not something bundled with the app.
+
 ## 3.2.0
 
 ### Per-row notes

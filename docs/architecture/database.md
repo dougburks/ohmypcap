@@ -65,6 +65,33 @@ CREATE INDEX idx_sigma_severity ON sigma_alerts(severity);
 CREATE INDEX idx_sigma_timestamp ON sigma_alerts(timestamp);
 CREATE INDEX idx_sigma_rule_id ON sigma_alerts(rule_id);
 
+-- One optional analyst note per row of events/sigma_alerts, keyed by a
+-- (source_table, row_id) pair rather than a real FOREIGN KEY (SQLite
+-- can't express a polymorphic FK against two different parent tables).
+-- UNIQUE(source_table, row_id) both enforces one note per row and gives
+-- SQLite's auto-created covering index for the row_id IN (...) per-page
+-- lookup, so no separate CREATE INDEX is needed.
+CREATE TABLE row_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_table TEXT NOT NULL CHECK (source_table IN ('events', 'sigma_alerts')),
+    row_id INTEGER NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(source_table, row_id)
+);
+
+-- Same polymorphic (source_table, row_id) keying as row_notes above -
+-- presence of a row means acknowledged, not a boolean column, so
+-- un-acknowledging is a plain DELETE rather than an UPDATE.
+CREATE TABLE acknowledged_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_table TEXT NOT NULL CHECK (source_table IN ('events', 'sigma_alerts')),
+    row_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(source_table, row_id)
+);
+
 -- Performance pragmas
 PRAGMA journal_mode = WAL;      -- Better concurrency between readers and writers
 PRAGMA synchronous = NORMAL;    -- Faster writes with WAL crash safety
@@ -72,7 +99,7 @@ PRAGMA busy_timeout = 30000;    -- Retry for 30s when database is locked
 PRAGMA optimize;                -- Gather stats for query planner after bulk load
 ```
 
-The `json_data` column stores the complete original event, allowing the server to return full eve.json objects without re-parsing the source file. An optional `events_fts` virtual table enables fast full-text search over all event data. If FTS5 is unavailable, searches fall back to `json_data LIKE '%term%'`.
+The `json_data` column stores the complete original event, allowing the server to return full eve.json objects without re-parsing the source file. An optional `events_fts` virtual table enables fast full-text search over all event data. If FTS5 is unavailable, searches fall back to `json_data LIKE '%term%'`. `row_notes` backs the per-row notes feature (`POST /api/row-note`, see [API Reference](../api.md)) - separate from the whole-analysis `notes.txt` file, and lost on reanalyze along with the rest of `events.db`. `acknowledged_alerts` backs the Acknowledge Alerts feature (`POST /api/acknowledge-alert`/`POST /api/acknowledge-alerts-bulk`) - every `events`/`sigma_alerts` query excludes a row present here by default (`_build_where_conditions`/`_sigma_alert_where` in `db.py`), which is what makes acknowledging remove a row from view instead of just flagging it; the `acknowledged=only` query param flips that to include *only* acknowledged rows, for the Acknowledged Alerts tab's own fetches. Lost on reanalyze along with the rest of `events.db`, same as `row_notes`.
 
 The composite and expression indexes above are backfilled lazily (`CREATE INDEX IF NOT EXISTS`) onto pre-existing databases the first time `get_sankey_data_sqlite`/`get_aggregation_data_sqlite` runs against them, so upgrading never requires a migration step. Each backfill also re-runs `PRAGMA optimize` to keep the query planner's statistics current - without it, a planner working from stale/missing stats can pick an unhelpful index even for unrelated queries once several indexes share `event_type` as a leading column.
 

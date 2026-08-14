@@ -76,11 +76,11 @@ SO-CRATES supports themes via CSS custom properties. The full, current list (nam
 - **Don't define a variable in every theme block "for completeness" without a real consumer.** `--accent-rgb` and `--filter-bar-bg` were defined identically in all 23 theme blocks but never referenced via `var(--name)` anywhere in CSS/JS/HTML - removed as dead CSS (`test_dead_theme_vars_removed` locks this in). If you add a new per-theme variable, grep for `var(--your-name` before considering it done.
 - **`--bg-hover` and `--border-color` are deliberately separate variables.** `--bg-hover` is for hover-state background *fills* (table row hover, button hover); `--border-color` is for border/outline *decorations* (panel borders, header/footer dividers, input borders). Most themes set both to the same value since a muted color works fine for both roles, but don't assume they must match - CGA sets `--border-color` to a bright cyan (`#55ffff`, the real CGA light-cyan RGBI value) while keeping `--bg-hover` a much more muted teal (`#008080`), since a hover *fill* that bright would hurt text contrast but a 1px *border* reads fine at full brightness. `test_border_color_split_from_bg_hover` enforces that every theme defines both and that border declarations reference `var(--border-color)`, not `var(--bg-hover)`.
 - **A theme can override structural colors per-selector, not just per-variable, when a single shared variable can't express the look.** CGA's header/footer use `background: #55ffff` (bright light cyan) directly on `[data-theme="cga"] .app-header, [data-theme="cga"] .footer`, rather than repointing `--bg-secondary` (which every other panel/card also uses and would go bright cyan too), and override `--text-bright`/`--text-muted` scoped to the same selector for legibility against the new background. See `test_cga_header_footer_light_cyan`. **If you add an override like this, only reset the same variables on an element that is an actual DOM descendant of the overridden selector and that actually reads those variables** - CSS custom properties cascade strictly through DOM nesting, not visual/menu grouping, so a modal or panel that merely *opens from* the header (e.g. `#themesModal`, a top-level sibling in the DOM, not a child of `.app-header`) never inherits the override in the first place and needs no reset. A `#themesModal` reset rule existed here for exactly this non-reason - it silently duplicated the theme's own root values - and was removed once `test_cga_header_footer_light_cyan` was checked against the current markup and found to be a no-op.
-- **`--interactive-highlight` is an optional per-theme override for hover/focus/active border feedback.** Every hover/focus/active border rule (`.app-header-filename-input:focus`, `.stat-card:hover`, `.stat-card.tab-active`, `.pagination-page-input:focus`, `.settings-number-input:focus`, `.notes-textarea:focus`, `.settings-text-input:focus`, `.drop-zone-active`, `.view-tab.active`, `.search-input:focus`, `.sample-card:hover`, `.theme-tile:hover`) reads `var(--interactive-highlight, var(--accent))` - a CSS fallback, so themes that don't define `--interactive-highlight` get exactly the old behavior (`--accent`) with zero risk. A theme needs this when its `--accent` is intentionally identical to `--border-color`/`--text-primary` (a deliberate flat, monochrome look) - without a separate highlight color, hovering/focusing would produce no visible change at all. Breadbin Blue (the original case, formerly named C64), Luna Blue, and DOS Blue all define this for exactly that reason, each to a distinct color from their own palette rather than a jarring color swap. If you add a new theme where `--accent` intentionally matches `--border-color`, check whether it needs `--interactive-highlight` too.
+- **`--interactive-highlight` is an optional per-theme override for hover/focus/active border feedback.** Every hover/focus/active border rule (`.app-header-filename-input:focus`, `.stat-card:hover`, `.stat-card.tab-active`, `.pagination-page-input:focus`, `.settings-number-input:focus`, `.notes-textarea:focus`, `.settings-text-input:focus`, `.drop-zone-active`, `.view-tab.active`, `.search-input:focus`, `.sample-card:hover`, `.theme-tile:hover`, `.app-logo-text:focus-visible`, `.sample-card.keyboard-selected`, `.previous-analysis-row.keyboard-selected`, `tr[data-id].keyboard-selected`, `.theme-tile.keyboard-selected`, `.section-toggle-bar.keyboard-selected`, `.agg-row[data-agg-pivot].keyboard-selected`, `.pivot-menu-item.keyboard-selected`, `.filter-chip.keyboard-selected`, `.filter-clear-all.keyboard-selected`, `.stream-btn.keyboard-selected`, `.view-tab.keyboard-selected`, `.row-note-edit-link.keyboard-selected`, `.packet-header.keyboard-selected`, `.packet-control-btn.keyboard-selected`, `.detail-value-pivot.keyboard-selected`, `.autocomplete-item.keyboard-selected`) reads `var(--interactive-highlight, var(--accent))` - a CSS fallback, so themes that don't define `--interactive-highlight` get exactly the old behavior (`--accent`) with zero risk. A theme needs this when its `--accent` is intentionally identical to `--border-color`/`--text-primary` (a deliberate flat, monochrome look) - without a separate highlight color, hovering/focusing would produce no visible change at all. Breadbin Blue (the original case, formerly named C64), Luna Blue, and DOS Blue all define this for exactly that reason, each to a distinct color from their own palette rather than a jarring color swap. If you add a new theme where `--accent` intentionally matches `--border-color`, check whether it needs `--interactive-highlight` too.
 - **Use `currentColor`** for inline SVG icons so they inherit the surrounding text color and adapt automatically.
 - **Avoid emojis** for UI icons when possible - use inline SVGs instead, since emojis render as full-color system glyphs that ignore CSS `color` and may be invisible in one theme.
 
-Theme selection is not in the gear menu itself - the gear icon menu in the upper-right corner (`renderGearMenu()`) is just five static items (Help, Settings, Themes, Rules, About), with no divider and no theme buttons. Clicking **Themes** opens a separate Themes modal whose grid (`renderThemesModalGrid()`) groups tiles into the **Dark Themes** section (alphabetical: Catppuccin … Vantablack), then **Light Themes** (alphabetical: Catppuccin Latte … White), then **Fun Themes** (alphabetical: Amber CRT … Vaporwave) - this order is `THEME_GROUP_ORDER = ['dark', 'light', 'fun']` in `static/socrates.js`, with tiles alphabetical by label within each group (`THEME_MENU_ORDER`). The `toggleTheme()` hotkey cycle follows this same `THEME_MENU_ORDER`. Each tile carries `data-theme-option="<key>"`; the currently applied theme's tile gets the `theme-active` class (accent-colored border + bold text - not a checkmark) plus `aria-current="true"`, kept in sync by `updateThemeMenu()`, which runs from `setTheme()`, `applyCustomTheme()` (OhMyDebn sync), `showThemesModal()`, `init()`, and after every `renderGearMenu()` re-render. Hovering a tile does **not** call `updateThemeMenu()` or repaint the real page - `previewTheme()` only updates an isolated `<iframe>` preview panel (`themePreviewFrame`) inside the modal, deliberately scoped that way to avoid a WCAG 2.3.1 flash-risk from hovering rapidly across ~32 tiles; only clicking a tile (`commitTheme()` → `setTheme()`) applies the theme for real. The user's choice is persisted to `localStorage` as `socrates-theme` and restored on page load to prevent a flash of unstyled content.
+Theme selection is not in the gear menu itself - the gear icon menu in the upper-right corner (`renderGearMenu()`) is just five static items (Help, Settings, Themes, Rules, About), with no divider and no theme buttons. Clicking **Themes** opens a separate Themes modal whose grid (`renderThemesModalGrid()`) groups tiles into the **Dark Themes** section (alphabetical: Catppuccin … Vantablack), then **Light Themes** (alphabetical: Catppuccin Latte … White), then **Fun Themes** (alphabetical: Amber CRT … Vaporwave) - this order is `THEME_GROUP_ORDER = ['dark', 'light', 'fun']` in `static/socrates.js`, with tiles alphabetical by label within each group (`THEME_MENU_ORDER`). The `toggleTheme()` hotkey cycle follows this same `THEME_MENU_ORDER`. Each tile carries `data-theme-option="<key>"`; the currently applied theme's tile gets the `theme-active` class (accent-colored border + bold text - not a checkmark) plus `aria-current="true"`, kept in sync by `updateThemeMenu()`, which runs from `setTheme()`, `applyCustomTheme()` (OhMyDebn sync), `showThemesModal()`, `init()`, and after every `renderGearMenu()` re-render. Hovering a tile does **not** call `updateThemeMenu()` or repaint the real page - `previewTheme()` only updates an isolated `<iframe>` preview panel (`themePreviewFrame`) inside the modal, deliberately scoped that way to avoid a WCAG 2.3.1 flash-risk from hovering rapidly across ~35 tiles; only clicking a tile (`commitTheme()` → `setTheme()`) applies the theme for real. The user's choice is persisted to `localStorage` as `socrates-theme` and restored on page load to prevent a flash of unstyled content.
 
 To add a new theme:
 
@@ -89,7 +89,7 @@ To add a new theme:
 3. If the theme needs a custom favicon, add `static/favicon-your-name.svg` - `updateFavicon()` resolves per-theme favicons by naming convention (the `dark` and `light` themes use the plain `static/favicon.svg`).
 4. Add any theme-specific runtime behavior (e.g. background effects) and gate it on `getCurrentTheme()`.
 5. Add it to the `THEMES` list in `scripts/capture_screenshots.py` (a separate hardcoded list, not derived from the registry) and re-run the script to generate its Themes-page screenshot - see the Release Checklist below.
-6. If it's a Fun-group theme, consider giving it a typed cheat code (see the `keyBuffer` easter eggs in the `keydown` listener in `static/socrates.js` - CGA/Hacker/Sguil all have one). Use `keyBuffer.endsWith('yourcode')` rather than `===` - the buffer holds the last 5 keys typed session-wide, so a code shorter than 5 characters checked with `===` would only ever match in the first few keystrokes after page load. Document the code in parentheses next to the theme on the Themes page (`docs/themes.md`).
+6. Nothing else to wire up for the command palette - `AUTOCOMPLETE_COMMANDS` in `static/socrates.js` generates a typed-autocomplete entry for every theme straight from the `THEMES` registry (matched against the theme's own `label`, lowercased), so step 1 alone already makes the new theme reachable by typing its name outside a text field.
 
 ## Detection Rule Freshness
 
@@ -140,8 +140,10 @@ Before cutting a release:
 1. **Regenerate screenshots.** Start the server (`python3 socrates.py`), then run
    `pip install -r requirements-screenshots.txt && python3 scripts/capture_screenshots.py`.
    This refreshes all 7 `docs/images/so-crates-*.png` (Home page) and all 35
-   `docs/images/themes/*.png` (Themes page) against the app's own built-in
-   sample pcap (`DEFAULT_SAMPLE_URL` in `static/socrates.js`) - no local
+   `docs/images/themes/*.png` (Themes page) against the app's own default
+   sample pcap (`DEFAULT_SAMPLE_URL` in `static/socrates.js` - a one-click
+   convenience link to an external pcap on malware-traffic-analysis.net,
+   not something bundled with the app) - no local
    fixture or hardcoded MD5 needed, works on a clean checkout with an empty
    `DATA_DIR`. Run this on every release, not just when the UI visibly
    changes - stale screenshots (e.g. showing an old default value in the
@@ -165,7 +167,13 @@ Before cutting a release:
    a system `ffmpeg` binary from Playwright's raw WebM capture - MP4 is used
    rather than WebM since it's universally browser-supported and is also the
    format required to upload the same clip directly to
-   X/Instagram/LinkedIn/Facebook. The video is embedded on the Home page
+   X/Instagram/LinkedIn/Facebook. `demo.mp4`'s encode trims a fraction of a
+   second (`MP4_TRIM_START_SECONDS`) off the very start, since Playwright's
+   raw recording's first frame can be captured before the page has fully
+   painted into the configured viewport - left untrimmed, that showed up
+   as the thumbnail X/LinkedIn/etc. auto-extract when someone uploads
+   `demo.mp4` directly (small upper-left region of real content against an
+   otherwise flat grey frame). The video is embedded on the Home page
    just above Screenshots. If `ffmpeg` isn't on PATH, it falls back to
    publishing the raw `docs/videos/demo.webm` instead with a warning - see
    the script's module docstring. Re-run whenever the recorded workflow's
@@ -193,6 +201,22 @@ Before cutting a release:
    them, and even a hardcoded *count* standing in for a full list (event
    types, columns, tests) goes stale the same way a full list would - see
    `docs/filtering.md`'s "Per-type columns are not enumerated here" note.
+6. **Build the container image.** From the repo root, prefer `podman build
+   -t so-crates:local -f Dockerfile .` when `podman` is on PATH; fall back
+   to the equivalent `docker build -t so-crates:local -f Dockerfile .`
+   otherwise. This is the only checklist step that actually exercises the
+   full multi-stage Dockerfile end-to-end (the Zircolite venv build, the
+   `resources-builder` stage's Playbooks/AI Summaries bake, the Suricata
+   rule bake loop, final image assembly) - local dev's env-var overrides
+   (`PLAYBOOKS_DIR`, `AI_SUMMARIES_DIR`, `DATA_DIR`, etc.) never touch this
+   path, so a broken `COPY` line or bake step can go unnoticed until here
+   (a missing `ai_summary_lookup.py` in the final stage's `COPY` line once
+   slipped through exactly this way, caught only by a Dockerfile-parsing
+   test, not by local testing). A clean build alone isn't proof it works -
+   smoke-test it: `podman run -d --rm -p 18000:8000 so-crates:local`,
+   confirm it starts without crashing (`podman logs <container>`), and hit
+   `/socrates.html` plus any endpoint tied to this release's changes before
+   stopping it.
    **A claim about UI structure or behavior - which element renders what,
    what order things appear in, what runs in response to what - is not
    verified by confirming the data it's built from still exists.** Checking

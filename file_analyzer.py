@@ -78,7 +78,12 @@ def analyze_file(file_path):
         )
         if result.returncode == 0:
             metadata['file_type'] = result.stdout.strip()
-    except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
+        # OSError (not just the FileNotFoundError/PermissionError subset)
+        # so a launch failure like ENOMEM/ENOSPC/"Text file busy" degrades
+        # the same way those two already did, consistent with how
+        # yara_analyzer/sigma_analyzer handle the equivalent-risk case of
+        # invoking an external CLI tool.
         pass
 
     try:
@@ -88,7 +93,12 @@ def analyze_file(file_path):
         )
         if result.returncode == 0:
             metadata['mime_type'] = result.stdout.strip()
-    except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
+        # OSError (not just the FileNotFoundError/PermissionError subset)
+        # so a launch failure like ENOMEM/ENOSPC/"Text file busy" degrades
+        # the same way those two already did, consistent with how
+        # yara_analyzer/sigma_analyzer handle the equivalent-risk case of
+        # invoking an external CLI tool.
         pass
 
     # entropy and strings (single read; strings come from the same buffer)

@@ -102,6 +102,21 @@ CREATE TABLE IF NOT EXISTS row_notes (
     updated_at TEXT NOT NULL,
     UNIQUE(source_table, row_id)
 );
+
+-- Presence of a row = acknowledged, same polymorphic (source_table,
+-- row_id) keying as row_notes above (and the same reasoning for why it's
+-- a plain integer with an app-level invariant, not a real FOREIGN KEY) -
+-- no note text needed here, just existence. Every alert-bearing query
+-- (_build_where_conditions/_sigma_alert_where) excludes rows present here
+-- by default, so acknowledging removes a row from every normal view, not
+-- just marks it - see get_acknowledged_alert_ids below.
+CREATE TABLE IF NOT EXISTS acknowledged_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_table TEXT NOT NULL CHECK (source_table IN ('events', 'sigma_alerts')),
+    row_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(source_table, row_id)
+);
 '''
 
 
@@ -229,6 +244,16 @@ def create_sqlite_db(db_path, eve_file):
                     continue
                 try:
                     event = json.loads(line)
+                    if not isinstance(event, dict):
+                        # A line can be syntactically valid JSON (a bare
+                        # number/string/array) without being an event
+                        # object - e.g. a truncated/corrupted eve.json.
+                        # event.get(...) below would raise AttributeError
+                        # for anything non-dict, aborting ingestion of the
+                        # whole file instead of just skipping this one bad
+                        # line, which is what the JSONDecodeError handling
+                        # just below already does for a malformed line.
+                        continue
                     # Suricata's own built-in protocol-command-decode rules
                     # (opt-in via show_protocol_decode_alerts) are noise, not
                     # threat detections - reclassify into a dedicated
@@ -407,14 +432,38 @@ def create_file_analysis_db(db_path, file_path, yara_matches, file_md5, file_sha
         conn.commit()
 
 
-def _build_where_conditions(terms, has_fts, event_type, event_type_col):
+def _build_where_conditions(has_acknowledged_table, terms, has_fts, event_type, event_type_col, acknowledged_only=False):
     """Build WHERE conditions and parameters for event queries.
 
     Args:
+        has_acknowledged_table: Whether acknowledged_alerts actually exists
+            yet - an events.db from before this feature shipped has an
+            events table but no acknowledged_alerts table, and nothing on
+            this read path calls _init_db to lazily create it (that's a
+            write-path-only convention, see get_row_notes). Without this
+            check, every query against such a database would hit "no such
+            table: acknowledged_alerts" and silently return empty results
+            (callers catch sqlite3.OperationalError broadly around the
+            whole query, not just this condition). Callers compute this
+            once on their own already-scoped connection and pass the plain
+            bool through rather than passing conn itself - some callers
+            (get_sankey_data_sqlite, get_aggregation_data_sqlite) build
+            these conditions inside a ThreadPoolExecutor worker, and
+            sqlite3 connections can only be used on the thread that
+            created them, so re-checking via conn.execute() from inside
+            the worker would raise sqlite3.ProgrammingError.
         terms: List of search terms (from _build_search_terms).
         has_fts: Whether FTS5 is available.
         event_type: Optional event_type filter value.
         event_type_col: Column reference ('event_type' or 'e.event_type').
+        acknowledged_only: False (default) excludes acknowledged rows from
+            every normal query - this is what makes acknowledging an alert
+            remove it from view rather than just flag it. True flips the
+            condition to include *only* acknowledged rows - used solely by
+            the Acknowledged Alerts tab's own fetches. Harmless for
+            non-alert event_types either way: nothing but 'alert' rows can
+            ever be in acknowledged_alerts, so this condition simply never
+            matches (and never excludes anything) for e.g. dns/http/tls.
 
     Returns:
         (conditions_list, params_list)
@@ -440,11 +489,40 @@ def _build_where_conditions(terms, has_fts, event_type, event_type_col):
         # since a specific event_type filter never matches it anyway.
         conditions.append(f"{event_type_col} != 'stats'")
 
+    if has_acknowledged_table:
+        # Must be a fully-qualified reference (events.id / e.id), never a
+        # bare 'id' - acknowledged_alerts has its own autoincrement 'id'
+        # column, so an unqualified 'id' inside the subquery below resolves
+        # to THAT column (innermost scope wins) instead of correlating to
+        # the outer events row at all, silently turning this into an
+        # uncorrelated subquery whose result is the same for every outer
+        # row - excluding either everything or nothing depending on data,
+        # not just the acknowledged rows. event_type_col is normally
+        # exactly 'event_type' or 'e.event_type' (see _events_select), so
+        # checking its prefix is enough to know which alias this query
+        # uses - guarded with `or ''` since a test double can hand this a
+        # deliberately-broken None to simulate a malformed query.
+        id_col = 'e.id' if (event_type_col or '').startswith('e.') else 'events.id'
+        exists_or_not = 'EXISTS' if acknowledged_only else 'NOT EXISTS'
+        conditions.append(
+            f"{exists_or_not} (SELECT 1 FROM acknowledged_alerts aa WHERE aa.source_table = 'events' AND aa.row_id = {id_col})"
+        )
+    elif acknowledged_only:
+        # No acknowledged_alerts table yet means nothing has ever been
+        # acknowledged - an "only acknowledged" query must return nothing,
+        # not silently fall back to "every row" by omitting the condition.
+        conditions.append('0')
+
     return conditions, params
 
 
 def _has_events_table(conn):
     cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events'")
+    return cursor.fetchone() is not None
+
+
+def _has_acknowledged_alerts_table(conn):
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='acknowledged_alerts'")
     return cursor.fetchone() is not None
 
 
@@ -472,12 +550,12 @@ def init_empty_db(db_path):
         conn.commit()
 
 
-def _build_events_query(conn, event_type, offset, limit, q, order_by, sort_dir):
+def _build_events_query(conn, event_type, offset, limit, q, order_by, sort_dir, acknowledged_only=False):
     """Shared SQL-building logic for query_events_sqlite / query_events_sqlite_json."""
     terms = _build_search_terms(q)
     has_fts = _has_fts5(conn) if terms else False
     select, event_type_col = _events_select(terms, has_fts, 'id, json_data', 'e.id, e.json_data')
-    conditions, params = _build_where_conditions(terms, has_fts, event_type, event_type_col)
+    conditions, params = _build_where_conditions(_has_acknowledged_alerts_table(conn), terms, has_fts, event_type, event_type_col, acknowledged_only)
     sql = select
     if conditions:
         sql += ' WHERE ' + ' AND '.join(conditions)
@@ -494,37 +572,21 @@ def _build_events_query(conn, event_type, offset, limit, q, order_by, sort_dir):
     return sql, list(params) + [limit, offset]
 
 
-def query_events_sqlite(db_path, event_type=None, offset=0, limit=1000, q=None, order_by=None, sort_dir='asc'):
-    with _db_connection(db_path) as conn:
-        if not _has_events_table(conn):
-            return []
-
-        conn.row_factory = sqlite3.Row
-        sql, params = _build_events_query(conn, event_type, offset, limit, q, order_by, sort_dir)
-
-        try:
-            cursor = conn.execute(sql, params)
-            results = []
-            for row in cursor.fetchall():
-                try:
-                    parsed = json.loads(row['json_data'])
-                except (json.JSONDecodeError, TypeError):
-                    parsed = {}
-                parsed['id'] = row['id']
-                results.append(parsed)
-
-            notes = get_row_notes(db_path, 'events', [r['id'] for r in results])
-            for r in results:
-                note = notes.get(r['id'])
-                if note is not None:
-                    r['row_note'] = note
-
-            return results
-        except sqlite3.OperationalError:
-            return []
+def query_events_sqlite(db_path, event_type=None, offset=0, limit=1000, q=None, order_by=None, sort_dir='asc', acknowledged_only=False):
+    """Same query/results as query_events_sqlite_json, as a ready-to-use
+    list[dict] instead of a pre-serialized JSON string - not used by the
+    running app (socrates.py only ever calls the _json variant, the fast
+    path for real HTTP responses), kept only because a list[dict] is more
+    convenient to assert against directly in tests than a JSON string.
+    A thin wrapper rather than its own hand-rolled row-processing loop, so
+    the id/row_note-merge/malformed-blob-fallback logic only exists in one
+    place and can't drift between the two.
+    """
+    json_str, _ids = query_events_sqlite_json(db_path, event_type, offset, limit, q, order_by, sort_dir, acknowledged_only)
+    return json.loads(json_str)
 
 
-def query_events_sqlite_json(db_path, event_type=None, offset=0, limit=1000, q=None, order_by=None, sort_dir='asc'):
+def query_events_sqlite_json(db_path, event_type=None, offset=0, limit=1000, q=None, order_by=None, sort_dir='asc', acknowledged_only=False):
     """Same query as query_events_sqlite, but returns a ready-to-send JSON
     array string built directly from the stored json_data blobs, skipping
     the parse-then-reserialize round trip. json_data is always produced by
@@ -564,7 +626,7 @@ def query_events_sqlite_json(db_path, event_type=None, offset=0, limit=1000, q=N
     with _db_connection(db_path) as conn:
         if not _has_events_table(conn):
             return '[]', []
-        sql, params = _build_events_query(conn, event_type, offset, limit, q, order_by, sort_dir)
+        sql, params = _build_events_query(conn, event_type, offset, limit, q, order_by, sort_dir, acknowledged_only)
         try:
             cursor = conn.execute(sql, params)
             parts = []
@@ -657,7 +719,51 @@ def set_row_note(db_path, source_table, row_id, note):
         conn.commit()
 
 
-def get_event_count_sqlite(db_path, event_type=None, q=None):
+def set_acknowledged(db_path, source_table, row_id, acknowledged):
+    """Acknowledge or un-acknowledge one row. Unlike set_row_note there's
+    no text to overwrite - insert if acknowledged, delete otherwise (same
+    presence-is-the-signal convention row_notes uses for "has a note",
+    just without ever needing an UPDATE branch).
+    """
+    with _db_connection(db_path) as conn:
+        _init_db(conn)
+        if acknowledged:
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                '''INSERT INTO acknowledged_alerts (source_table, row_id, created_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(source_table, row_id) DO NOTHING''',
+                (source_table, row_id, now)
+            )
+        else:
+            conn.execute(
+                'DELETE FROM acknowledged_alerts WHERE source_table = ? AND row_id = ?',
+                (source_table, row_id)
+            )
+        conn.commit()
+
+
+def set_acknowledged_bulk(db_path, source_table, row_ids):
+    """Acknowledge every id in row_ids in one transaction - the "all
+    instances of this alert" bulk path. INSERT OR IGNORE (not the
+    ON CONFLICT...DO NOTHING set_acknowledged uses) since this is a plain
+    executemany over a list, not a single values tuple - both express the
+    same "skip already-acknowledged rows" intent, this is just the
+    idiomatic form for an executemany batch.
+    """
+    if not row_ids:
+        return
+    with _db_connection(db_path) as conn:
+        _init_db(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        conn.executemany(
+            'INSERT OR IGNORE INTO acknowledged_alerts (source_table, row_id, created_at) VALUES (?, ?, ?)',
+            [(source_table, row_id, now) for row_id in row_ids]
+        )
+        conn.commit()
+
+
+def get_event_count_sqlite(db_path, event_type=None, q=None, acknowledged_only=False):
     with _db_connection(db_path) as conn:
         if not _has_events_table(conn):
             return 0
@@ -666,7 +772,7 @@ def get_event_count_sqlite(db_path, event_type=None, q=None):
         has_fts = _has_fts5(conn) if terms else False
 
         select, event_type_col = _events_select(terms, has_fts, 'COUNT(*)', 'COUNT(*)')
-        conditions, params = _build_where_conditions(terms, has_fts, event_type, event_type_col)
+        conditions, params = _build_where_conditions(_has_acknowledged_alerts_table(conn), terms, has_fts, event_type, event_type_col, acknowledged_only)
 
         sql = select
         if conditions:
@@ -690,7 +796,7 @@ def get_event_types_sqlite(db_path, q=None):
         has_fts = _has_fts5(conn) if terms else False
 
         select, event_type_col = _events_select(terms, has_fts, 'event_type, COUNT(*) as cnt', 'e.event_type, COUNT(*) as cnt')
-        conditions, params = _build_where_conditions(terms, has_fts, None, event_type_col)
+        conditions, params = _build_where_conditions(_has_acknowledged_alerts_table(conn), terms, has_fts, None, event_type_col)
 
         sql = select
         if conditions:
@@ -722,7 +828,7 @@ def get_event_date_range_sqlite(db_path, q=None):
             'MIN(timestamp) as min_ts, MAX(timestamp) as max_ts',
             'MIN(e.timestamp) as min_ts, MAX(e.timestamp) as max_ts',
         )
-        conditions, params = _build_where_conditions(terms, has_fts, None, event_type_col)
+        conditions, params = _build_where_conditions(_has_acknowledged_alerts_table(conn), terms, has_fts, None, event_type_col)
 
         sql = select
         if conditions:
@@ -761,6 +867,10 @@ def get_sankey_data_sqlite(db_path, event_type=None, q=None, max_nodes_per_colum
 
         terms = _build_search_terms(q)
         has_fts = _has_fts5(conn) if terms else False
+        # Computed once here on the main thread, not inside run() below -
+        # run() executes inside a ThreadPoolExecutor worker, and sqlite3
+        # connections can only be used on the thread that created them.
+        has_acknowledged_table = _has_acknowledged_alerts_table(conn)
 
         def norm_ip(col):
             return f"CASE WHEN {col} IS NULL OR {col} = '' THEN '?' ELSE {col} END"
@@ -770,7 +880,7 @@ def get_sankey_data_sqlite(db_path, event_type=None, q=None, max_nodes_per_colum
 
         def run(select_cols_plain, select_cols_fts, group_by):
             select, event_type_col = _events_select(terms, has_fts, select_cols_plain, select_cols_fts)
-            conditions, params = _build_where_conditions(terms, has_fts, event_type, event_type_col)
+            conditions, params = _build_where_conditions(has_acknowledged_table, terms, has_fts, event_type, event_type_col)
             sql = select
             if conditions:
                 sql += ' WHERE ' + ' AND '.join(conditions)
@@ -1374,13 +1484,19 @@ def get_aggregation_data_sqlite(db_path, event_type, q=None, top_n=AGGREGATION_T
                     _aggregation_expr(event_type, label, paths, prefix='e.'),
                 ))
 
+        # Computed once here on the main thread, not inside run_column()
+        # below - run_column() executes inside a ThreadPoolExecutor worker,
+        # and sqlite3 connections can only be used on the thread that
+        # created them.
+        has_acknowledged_table = _has_acknowledged_alerts_table(conn)
+
         def run_column(label, plain_expr, fts_expr):
             select, event_type_col = _events_select(
                 terms, has_fts,
                 f'{plain_expr} AS val, COUNT(*) AS cnt',
                 f'{fts_expr} AS val, COUNT(*) AS cnt',
             )
-            conditions, params = _build_where_conditions(terms, has_fts, event_type, event_type_col)
+            conditions, params = _build_where_conditions(has_acknowledged_table, terms, has_fts, event_type, event_type_col)
             sql = select
             if conditions:
                 sql += ' WHERE ' + ' AND '.join(conditions)
@@ -1413,11 +1529,22 @@ def _has_sigma_alerts_table(conn):
     return cursor.fetchone() is not None
 
 
-def _sigma_alert_where(q, severity):
+def _sigma_alert_where(has_acknowledged_table, q, severity, acknowledged_only=False):
     """Build WHERE conditions and params for sigma_alerts queries.
 
     Returns (conditions_list, params_list). Each search term is matched
     (LIKE, escaped) against rule title, rule id, and both log payloads.
+
+    has_acknowledged_table: same meaning/rationale as
+    _build_where_conditions' own param of the same name - guards against
+    "no such table: acknowledged_alerts" on a sigma_alerts table that
+    predates this feature.
+
+    acknowledged_only: same meaning as _build_where_conditions' own param -
+    False (default) excludes acknowledged alerts from every normal query,
+    True (the Acknowledged Alerts tab's own fetches) includes only them.
+    Every sigma_alerts row is acknowledgeable (unlike events, where this is
+    a no-op for non-alert types), so this always adds a real condition here.
     """
     conditions = []
     params = []
@@ -1432,6 +1559,18 @@ def _sigma_alert_where(q, severity):
         )
         like = _sanitize_like(term)
         params.extend([like, like, like, like])
+
+    # sigma_alerts.id must stay qualified for the same reason as the events
+    # side's own id_col comment above - acknowledged_alerts has its own
+    # 'id' column that a bare 'id' reference here would shadow instead of
+    # correlating to the outer sigma_alerts row.
+    if has_acknowledged_table:
+        exists_or_not = 'EXISTS' if acknowledged_only else 'NOT EXISTS'
+        conditions.append(
+            f"{exists_or_not} (SELECT 1 FROM acknowledged_alerts aa WHERE aa.source_table = 'sigma_alerts' AND aa.row_id = sigma_alerts.id)"
+        )
+    elif acknowledged_only:
+        conditions.append('0')
 
     return conditions, params
 
@@ -1465,13 +1604,13 @@ def insert_sigma_alerts(db_path, alerts):
         conn.commit()
 
 
-def query_sigma_alerts_sqlite(db_path, offset=0, limit=1000, q=None, severity=None):
+def query_sigma_alerts_sqlite(db_path, offset=0, limit=1000, q=None, severity=None, acknowledged_only=False):
     with _db_connection(db_path) as conn:
         if not _has_sigma_alerts_table(conn):
             return []
 
         conn.row_factory = sqlite3.Row
-        conditions, params = _sigma_alert_where(q, severity)
+        conditions, params = _sigma_alert_where(_has_acknowledged_alerts_table(conn), q, severity, acknowledged_only)
 
         sql = 'SELECT * FROM sigma_alerts'
         if conditions:
@@ -1494,12 +1633,12 @@ def query_sigma_alerts_sqlite(db_path, offset=0, limit=1000, q=None, severity=No
         return alerts
 
 
-def get_sigma_alert_count_sqlite(db_path, q=None, severity=None):
+def get_sigma_alert_count_sqlite(db_path, q=None, severity=None, acknowledged_only=False):
     with _db_connection(db_path) as conn:
         if not _has_sigma_alerts_table(conn):
             return 0
 
-        conditions, params = _sigma_alert_where(q, severity)
+        conditions, params = _sigma_alert_where(_has_acknowledged_alerts_table(conn), q, severity, acknowledged_only)
 
         sql = 'SELECT COUNT(*) FROM sigma_alerts'
         if conditions:

@@ -41,6 +41,7 @@ FAVICON_VAPORWAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__))
 FAVICON_LUNA_BLUE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'static', 'favicon-luna-blue.svg')
 FAVICON_AMBER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'static', 'favicon-amber.svg')
 FAVICON_DOS_BLUE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'static', 'favicon-dos-blue.svg')
+FAVICON_MP3_PLAYER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'static', 'favicon-mp3-player.svg')
 
 with open(HTML_PATH, 'r') as f:
     HTML_CONTENT = f.read()
@@ -73,13 +74,18 @@ class TestHTMLStructure(unittest.TestCase):
         'Esc' text - kept as a tooltip instead. Count must match every
         close*Modal() call closeAllModals() makes (the function Escape
         actually invokes), so a new modal added to one but not the other
-        doesn't silently drift."""
+        doesn't silently drift. closeAutocompleteModal() is the one
+        deliberate exception - the command palette is dismissed by typing
+        Escape or picking a result, the same convention every command
+        palette (VS Code's Cmd+Shift+P, Spotlight, ...) uses, and none of
+        them show a visible X button either."""
         close_button_count = HTML_CONTENT.count('class="modal-close" title="Close (Esc)" onclick="')
         close_all_modals_fn = JS_CONTENT.split('function closeAllModals() {')[1].split('\n        }')[0]
         closes_called = len(re.findall(r'close\w*Modal\(\)', close_all_modals_fn))
+        closes_called -= close_all_modals_fn.count('closeAutocompleteModal()')
         self.assertGreater(close_button_count, 0)
         self.assertEqual(close_button_count, closes_called,
-                         'every modal closeAllModals() closes must have a close button with the Esc hint')
+                         'every modal closeAllModals() closes (other than the command palette) must have a close button with the Esc hint')
 
     def test_html_references_css(self):
         self.assertIn('<link rel="stylesheet" href="static/socrates.css">', HTML_CONTENT)
@@ -219,6 +225,10 @@ class TestHTMLStructure(unittest.TestCase):
         """static/favicon-sguil.svg must exist on disk."""
         self.assertTrue(os.path.exists(FAVICON_SGUIL_PATH), 'static/favicon-sguil.svg must exist')
 
+    def test_favicon_mp3_player_file_exists(self):
+        """static/favicon-mp3-player.svg must exist on disk."""
+        self.assertTrue(os.path.exists(FAVICON_MP3_PLAYER_PATH), 'static/favicon-mp3-player.svg must exist')
+
     def test_favicon_link_in_head(self):
         """HTML must link to the SVG favicon in <head>."""
         head = HTML_CONTENT.split('</head>')[0]
@@ -237,7 +247,7 @@ class TestHTMLStructure(unittest.TestCase):
         """updateFavicon() must point faviconLink at the per-theme SVG that
         exists in static/ (plain favicon.svg for the default dark theme)."""
         from tests.jsdom_helper import js_statements
-        themes = ['dark', 'light', 'sguil', 'hacker', 'cga', 'breadbin-blue', 'vaporwave', 'digital-frontier', 'retro-handheld', 'matte-black', 'tokyo-night', 'retro-82', 'ethereal', 'lumon', 'catppuccin', 'ohmydebn', 'catppuccin-latte', 'flexoki-light', 'everforest', 'gruvbox', 'hackerman', 'kanagawa', 'miasma', 'nord', 'osaka-jade', 'ristretto', 'rose-pine', 'vantablack', 'white', 'luna-blue', 'amber', 'dos-blue', 'dracula', 'solarized-dark', 'monokai']
+        themes = ['dark', 'sguil', 'hacker', 'cga', 'breadbin-blue', 'vaporwave', 'digital-frontier', 'retro-handheld', 'matte-black', 'tokyo-night', 'retro-82', 'ethereal', 'lumon', 'catppuccin', 'ohmydebn', 'catppuccin-latte', 'flexoki-light', 'everforest', 'gruvbox', 'hackerman', 'kanagawa', 'miasma', 'nord', 'osaka-jade', 'ristretto', 'rose-pine', 'vantablack', 'white', 'luna-blue', 'amber', 'dos-blue', 'dracula', 'solarized-dark', 'monokai', 'mp3-player']
         result = js_statements(f'''
             var link = document.getElementById('faviconLink');
             var out = {{}};
@@ -252,7 +262,7 @@ class TestHTMLStructure(unittest.TestCase):
         ''')
         static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'static')
         for theme in themes:
-            expected = 'static/favicon.svg' if theme in ('dark', 'light') else f'static/favicon-{theme}.svg'
+            expected = 'static/favicon.svg' if theme == 'dark' else f'static/favicon-{theme}.svg'
             self.assertEqual(result[theme], expected,
                              f'updateFavicon must select {expected} for the {theme} theme')
             svg_file = os.path.basename(expected)
@@ -1086,8 +1096,44 @@ class TestUXFeatures(unittest.TestCase):
         self.assertIn('#58a6ff', JS_CONTENT)
 
     def test_ascii_transcript_direction_grouping(self):
-        self.assertIn("direction === 'src'", JS_CONTENT)
+        self.assertIn("lastDirection === 'src'", JS_CONTENT)
         self.assertIn("line.direction", JS_CONTENT)
+
+    def test_loadAsciiTranscript_groups_consecutive_same_direction_lines(self):
+        """Behavioral: src/dst/src direction changes must produce three
+        separate colored-bar groups, each containing all its own
+        consecutive lines (not one group per line, and not everything
+        merged into one) - covers the mid-loop flush and the final
+        trailing-group flush after the loop ends."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            window.fetch = function() {
+                return Promise.resolve({
+                    text: () => Promise.resolve(JSON.stringify({
+                        lines: [
+                            { direction: 'src', text: 'GET / HTTP/1.1' },
+                            { direction: 'src', text: 'Host: example.com' },
+                            { direction: 'dst', text: 'HTTP/1.1 200 OK' },
+                            { direction: 'src', text: 'trailing request line' },
+                        ]
+                    }))
+                });
+            };
+            var pre = document.createElement('pre');
+            await loadAsciiTranscript('1.1.1.1', 1234, '2.2.2.2', 80, pre);
+            var groups = pre.querySelectorAll('div[style*="display:flex"]');
+            window.__jsdom_result = {
+                groupCount: groups.length,
+                firstGroupText: groups[0].textContent,
+                secondGroupText: groups[1].textContent,
+                thirdGroupText: groups[2].textContent,
+            };
+        ''')
+        self.assertEqual(result['groupCount'], 3, 'src+src, dst, src must produce exactly 3 groups')
+        self.assertIn('GET / HTTP/1.1', result['firstGroupText'])
+        self.assertIn('Host: example.com', result['firstGroupText'])
+        self.assertIn('HTTP/1.1 200 OK', result['secondGroupText'])
+        self.assertIn('trailing request line', result['thirdGroupText'])
 
     def test_table_sorting_ui(self):
         self.assertIn('cursor: pointer', CSS_CONTENT)
@@ -1150,6 +1196,17 @@ class TestUXFeatures(unittest.TestCase):
         self.assertIn('.packet-block.src-dir', CSS_CONTENT)
         self.assertIn('.packet-block.dst-dir', CSS_CONTENT)
         self.assertNotIn('function colorizePacketHeader', JS_CONTENT)
+
+    def test_hexdump_direction_colors_are_theme_aware(self):
+        """REGRESSION: .packet-block.src-dir/.dst-dir hardcoded the default
+        dark theme's own --badge-danger-text (#ff6b6b) and --accent
+        (#58a6ff) values instead of the theme variables themselves, so the
+        left-border color silently stopped following the active theme for
+        every theme whose danger/blue-tag colors differ from the default's
+        (masked because the default theme's literal values happened to
+        match)."""
+        self.assertIn('.packet-block.src-dir { border-left: 3px solid var(--badge-danger-text); }', CSS_CONTENT)
+        self.assertIn('.packet-block.dst-dir { border-left: 3px solid var(--tag-blue-text); }', CSS_CONTENT)
 
     def test_hexdump_direction_detection(self):
         """loadHexdumpData must detect direction by splitting on ' > ' and checking src."""
@@ -1245,15 +1302,16 @@ class TestThemeAndMenu(unittest.TestCase):
 
     def test_themes_modal_has_usage_instructions(self):
         """The interaction model here (hover previews in a small pane,
-        click applies but does NOT close the modal, 't' cycles) is enough
-        of a departure from a typical picker that it needs a hint."""
+        click applies but does NOT close the modal, '<'/'>' cycles) is
+        enough of a departure from a typical picker that it needs a
+        hint."""
         themes_modal_block = HTML_CONTENT.split('id="themesModal"')[1].split('id="themesModalBody"')[0]
         self.assertIn('preview', themes_modal_block.lower(),
                       'Themes modal must explain that hovering previews a theme')
         self.assertIn('click', themes_modal_block.lower(),
                       'Themes modal must explain that clicking applies a theme')
-        self.assertIn('<strong>t</strong>', themes_modal_block,
-                      "Themes modal must mention the 't' cycle hotkey")
+        self.assertIn('&lt;', themes_modal_block,
+                      "Themes modal must mention the '<'/'>' cycle hotkeys")
 
     def test_sync_theme_with_os_moved_to_themes_modal(self):
         """REGRESSION: this toggle used to live in the Settings modal, where
@@ -1444,6 +1502,60 @@ class TestThemeAndMenu(unittest.TestCase):
             window.__jsdom_result = { toastPresent: document.querySelector('.socrates-toast') !== null };
         ''')
         self.assertFalse(result['toastPresent'], 'no filesSkipped must mean no toast')
+
+    def test_notifyIfAdditionalAnalyses_shows_toast_with_action_link(self):
+        """A multi-file ZIP's other files (pcaps or non-pcap extras) are
+        each analyzed in the background as their own independent analysis
+        - notifyIfAdditionalAnalyses must tell the user and offer a link
+        to Recent Analyses (showWelcome)."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            window.__welcomeShown = false;
+            window.showWelcome = function() { window.__welcomeShown = true; };
+            notifyIfAdditionalAnalyses({ status: 'processing', md5: 'a'.repeat(32), additionalMd5s: ['b'.repeat(32), 'c'.repeat(32)] });
+            var toast = document.querySelector('.socrates-toast');
+            var link = document.querySelector('.socrates-toast a');
+            window.__jsdom_result = { text: toast ? toast.textContent : null, linkText: link ? link.textContent : null };
+        ''')
+        self.assertEqual(result['text'], '2 additional files found in the ZIP are also being analyzedView Recent Analyses')
+        self.assertEqual(result['linkText'], 'View Recent Analyses')
+
+    def test_notifyIfAdditionalAnalyses_singular_wording(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            notifyIfAdditionalAnalyses({ status: 'processing', md5: 'a'.repeat(32), additionalMd5s: ['b'.repeat(32)] });
+            var toast = document.querySelector('.socrates-toast');
+            window.__jsdom_result = { text: toast ? toast.textContent : null };
+        ''')
+        self.assertIn('1 additional file found in the ZIP is also being analyzed', result['text'])
+
+    def test_notifyIfAdditionalAnalyses_no_toast_when_absent(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            notifyIfAdditionalAnalyses({ status: 'processing', md5: 'a'.repeat(32) });
+            window.__jsdom_result = { toastPresent: document.querySelector('.socrates-toast') !== null };
+        ''')
+        self.assertFalse(result['toastPresent'], 'no additionalMd5s must mean no toast')
+
+    def test_notifyIfAdditionalAnalyses_action_link_calls_showWelcome(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            window.__welcomeShown = false;
+            window.showWelcome = function() { window.__welcomeShown = true; };
+            notifyIfAdditionalAnalyses({ status: 'processing', md5: 'a'.repeat(32), additionalMd5s: ['b'.repeat(32)] });
+            var link = document.querySelector('.socrates-toast a');
+            link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            window.__jsdom_result = { welcomeShown: window.__welcomeShown };
+        ''')
+        self.assertTrue(result['welcomeShown'], 'clicking the action link must call showWelcome')
+
+    def test_notifyIfAdditionalAnalyses_wired_into_upload_and_load_url(self):
+        upload_section = JS_CONTENT.split('async function uploadPcap(')[1].split('\n        async function ')[0]
+        load_url_section = JS_CONTENT.split('async function loadFromUrl(')[1].split('\n        async function ')[0]
+        self.assertIn('notifyIfAdditionalAnalyses(result)', upload_section,
+                      'uploadPcap must call notifyIfAdditionalAnalyses')
+        self.assertIn('notifyIfAdditionalAnalyses(result)', load_url_section,
+                      'loadFromUrl must call notifyIfAdditionalAnalyses')
 
     def test_checkForMissingRules_shows_sticky_toast_when_all_rulesets_empty(self):
         """A manually-installed (non-Docker/Podman) deployment starts with
@@ -2028,7 +2140,7 @@ class TestThemeAndMenu(unittest.TestCase):
         """renderThemesModalGrid() must generate a tile with preview/commit
         handlers for every theme in the THEMES registry."""
         from tests.jsdom_helper import js_statements
-        themes = ['dark', 'light', 'sguil', 'hacker', 'cga', 'breadbin-blue', 'vaporwave', 'digital-frontier', 'retro-handheld', 'matte-black', 'tokyo-night', 'retro-82', 'ethereal', 'lumon', 'catppuccin', 'ohmydebn', 'catppuccin-latte', 'flexoki-light', 'everforest', 'gruvbox', 'hackerman', 'kanagawa', 'miasma', 'nord', 'osaka-jade', 'ristretto', 'rose-pine', 'vantablack', 'white', 'luna-blue', 'amber', 'dos-blue', 'dracula', 'solarized-dark', 'monokai']
+        themes = ['dark', 'sguil', 'hacker', 'cga', 'breadbin-blue', 'vaporwave', 'digital-frontier', 'retro-handheld', 'matte-black', 'tokyo-night', 'retro-82', 'ethereal', 'lumon', 'catppuccin', 'ohmydebn', 'catppuccin-latte', 'flexoki-light', 'everforest', 'gruvbox', 'hackerman', 'kanagawa', 'miasma', 'nord', 'osaka-jade', 'ristretto', 'rose-pine', 'vantablack', 'white', 'luna-blue', 'amber', 'dos-blue', 'dracula', 'solarized-dark', 'monokai', 'mp3-player']
         result = js_statements(f'''
             var html = renderThemesModalGrid();
             var missing = [];
@@ -2104,26 +2216,42 @@ class TestThemeAndMenu(unittest.TestCase):
         grid_html = js_statements('window.__jsdom_result = renderThemesModalGrid();')
         dark_index = grid_html.find('>Dark Themes</div>')
         light_index = grid_html.find('>Light Themes</div>')
-        light_btn_index = grid_html.find("commitTheme('light')")
+        light_btn_index = grid_html.find("commitTheme('white')")
         self.assertGreater(dark_index, -1, 'Dark Themes header must exist')
         self.assertGreater(light_index, -1, 'Light Themes header must exist')
-        self.assertGreater(light_btn_index, -1, 'Light theme button must exist')
+        self.assertGreater(light_btn_index, -1, 'White theme button must exist')
         self.assertLess(dark_index, light_index,
                         'Dark Themes header must appear before Light Themes header')
         self.assertLess(light_index, light_btn_index,
-                        'Light Themes header must appear before Light theme button')
+                        'Light Themes header must appear before White theme button')
+
+    def test_sguil_is_in_light_themes_section(self):
+        """REGRESSION: Sguil moved from Fun Themes to Light Themes (its
+        black-on-white NSM console look was always closer to a
+        professional light theme than the playful Fun group), so its
+        button must render between the Light Themes and Fun Themes
+        headers, not after Fun Themes."""
+        from tests.jsdom_helper import js_statements
+        grid_html = js_statements('window.__jsdom_result = renderThemesModalGrid();')
+        light_index = grid_html.find('>Light Themes</div>')
+        fun_index = grid_html.find('>Fun Themes</div>')
+        sguil_btn_index = grid_html.find("commitTheme('sguil')")
+        self.assertGreater(sguil_btn_index, light_index,
+                           'Sguil button must appear after the Light Themes header')
+        self.assertLess(sguil_btn_index, fun_index,
+                        'Sguil button must appear before the Fun Themes header (now a Light theme)')
 
     def test_fun_themes_after_light(self):
-        """Fun Themes section (Breadbin Blue, CGA, Hacker, Sguil, Vaporwave,
-        Luna Blue, and others) sits after the Light Themes section, matching
-        THEME_GROUP_ORDER = ['dark', 'light', 'fun'] in static/socrates.js."""
+        """Fun Themes section (Breadbin Blue, CGA, Hacker, Vaporwave, Luna
+        Blue, MP3 Player, and others) sits after the Light Themes section,
+        matching THEME_GROUP_ORDER = ['dark', 'light', 'fun'] in
+        static/socrates.js."""
         from tests.jsdom_helper import js_statements
         grid_html = js_statements('window.__jsdom_result = renderThemesModalGrid();')
         fun_index = grid_html.find('>Fun Themes</div>')
         dark_index = grid_html.find('>Dark Themes</div>')
         light_index = grid_html.find('>Light Themes</div>')
         hacker_btn_index = grid_html.find("commitTheme('hacker')")
-        sguil_btn_index = grid_html.find("commitTheme('sguil')")
         self.assertGreater(fun_index, -1, 'Fun Themes header must exist')
         self.assertLess(dark_index, fun_index,
                         'Fun Themes header must appear after Dark Themes header')
@@ -2131,12 +2259,8 @@ class TestThemeAndMenu(unittest.TestCase):
                         'Fun Themes header must appear after Light Themes header')
         self.assertGreater(hacker_btn_index, fun_index,
                         'Hacker button must appear inside the Fun Themes section')
-        self.assertGreater(sguil_btn_index, fun_index,
-                        'Sguil button must appear inside the Fun Themes section')
         self.assertGreater(hacker_btn_index, light_index,
                         'Hacker button must appear after the Light Themes section')
-        self.assertGreater(sguil_btn_index, light_index,
-                        'Sguil button must appear after the Light Themes section')
 
     def test_theme_group_order_fun_after_light(self):
         self.assertIn("const THEME_GROUP_ORDER = ['dark', 'light', 'fun'];", JS_CONTENT,
@@ -2229,7 +2353,7 @@ class TestThemeAndMenu(unittest.TestCase):
             var realThemeBeforeHover = document.documentElement.getAttribute('data-theme');
             var buttons = document.querySelectorAll('.theme-tile');
             var lightBtn = Array.from(buttons).find(function(b) {
-                return b.textContent.trim() === 'Daylight';
+                return b.textContent.trim() === 'White';
             });
             var frame = document.getElementById('themePreviewFrame');
             lightBtn.onmouseenter();
@@ -2244,27 +2368,21 @@ class TestThemeAndMenu(unittest.TestCase):
                 revertedFrameTheme: revertedFrameTheme
             };
         ''')
-        self.assertEqual(result['previewFrameTheme'], 'light',
+        self.assertEqual(result['previewFrameTheme'], 'white',
                          'hovering a theme tile should preview it in the iframe')
         self.assertEqual(result['revertedFrameTheme'], 'dark',
                          'leaving a theme tile should revert the iframe preview to the baseline')
         self.assertEqual(result['realThemeDuringHover'], result['realThemeBeforeHover'],
                          'REGRESSION: hovering must never change the real document theme (epilepsy/flash risk)')
 
-    def test_theme_cheat_code_hint_skeleton_in_html(self):
-        self.assertIn('id="themeCheatCodeHint"', HTML_CONTENT,
+    def test_theme_preview_hint_skeleton_in_html(self):
+        self.assertIn('id="themePreviewHint"', HTML_CONTENT,
                       'Preview hint container must exist in HTML')
-        hint_block = HTML_CONTENT.split('id="themeCheatCodeHint"')[1].split('</div>')[0]
+        hint_block = HTML_CONTENT.split('id="themePreviewHint"')[1].split('</div>')[0]
         self.assertIn('Previewing', hint_block,
                       'Hint must always announce what is currently being previewed')
         self.assertIn('id="themePreviewingLabel"', hint_block,
                       'Hint must have a dedicated element for the previewed theme\'s label')
-        self.assertIn('id="themeCheatCodePart"', hint_block,
-                      'Hint must have a dedicated element for the optional cheat-code part')
-        self.assertIn('visibility: hidden', hint_block,
-                      'The cheat-code part must reserve its own space (visibility, not display) so the modal does not jump')
-        self.assertIn('<code', hint_block,
-                      'Cheat code part must have a <code> element for the code text')
 
     def test_hovering_any_theme_shows_previewing_label(self):
         """The 'Previewing X' text must always reflect whatever the preview
@@ -2282,42 +2400,7 @@ class TestThemeAndMenu(unittest.TestCase):
         ''')
         self.assertEqual(result, 'Nord', "hovering Nord must show 'Previewing Nord'")
 
-    def test_hovering_fun_theme_shows_its_cheat_code(self):
-        from tests.jsdom_helper import js_statements
-        result = js_statements('''
-            setTheme('dark');
-            showThemesModal();
-            var buttons = document.querySelectorAll('.theme-tile');
-            var cgaBtn = Array.from(buttons).find(function(b) {
-                return b.textContent.trim() === 'CGA';
-            });
-            cgaBtn.onmouseenter();
-            var codePart = document.getElementById('themeCheatCodePart');
-            window.__jsdom_result = {
-                label: document.getElementById('themePreviewingLabel').textContent,
-                visibility: codePart.style.visibility,
-                code: codePart.querySelector('code').textContent
-            };
-        ''')
-        self.assertEqual(result['label'], 'CGA', "hovering CGA must show 'Previewing CGA'")
-        self.assertEqual(result['visibility'], 'visible', 'hovering a Fun theme must reveal its cheat code')
-        self.assertEqual(result['code'], 'cga', "the hint must show CGA's actual cheat code")
-
-    def test_hovering_non_fun_theme_hides_cheat_code_part(self):
-        from tests.jsdom_helper import js_statements
-        result = js_statements('''
-            setTheme('dark');
-            showThemesModal();
-            var buttons = document.querySelectorAll('.theme-tile');
-            var nordBtn = Array.from(buttons).find(function(b) {
-                return b.textContent.trim() === 'Nord';
-            });
-            nordBtn.onmouseenter();
-            window.__jsdom_result = document.getElementById('themeCheatCodePart').style.visibility;
-        ''')
-        self.assertEqual(result, 'hidden', 'Dark/Light themes have no cheat code, so that part must stay hidden')
-
-    def test_leaving_fun_theme_hides_cheat_code_part(self):
+    def test_leaving_theme_tile_reverts_previewing_label(self):
         from tests.jsdom_helper import js_statements
         result = js_statements('''
             setTheme('dark');
@@ -2328,35 +2411,121 @@ class TestThemeAndMenu(unittest.TestCase):
             });
             cgaBtn.onmouseenter();
             cgaBtn.onmouseleave();
+            window.__jsdom_result = document.getElementById('themePreviewingLabel').textContent;
+        ''')
+        self.assertEqual(result, 'Midnight', 'leaving the tile must revert the label to the dark baseline theme')
+
+    def test_theme_tile_typeahead_selects_matching_tile(self):
+        """Typing a theme's name while the Themes modal is open must
+        highlight and live-preview that tile - a native <select>-style
+        typeahead, not the app's separate command-palette overlay (which
+        stays closed the whole time, guarded by its own trigger's
+        !document.querySelector('.modal.active') check)."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            showThemesModal();
+            function press(k) { document.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true})); }
+            'gruv'.split('').forEach(press);
+            var sel = document.querySelector('.theme-tile.keyboard-selected');
             window.__jsdom_result = {
-                label: document.getElementById('themePreviewingLabel').textContent,
-                codeVisibility: document.getElementById('themeCheatCodePart').style.visibility
+                selected: sel ? sel.dataset.themeOption : null,
+                autocompleteModalOpen: document.getElementById('autocompleteModal').classList.contains('active'),
             };
         ''')
-        self.assertEqual(result['label'], 'Midnight', 'leaving the tile must revert the label to the dark baseline theme')
-        self.assertEqual(result['codeVisibility'], 'hidden', 'leaving a Fun theme tile must hide its cheat code part again')
+        self.assertEqual(result['selected'], 'gruvbox', 'Typing "gruv" must select the Gruvbox tile')
+        self.assertFalse(result['autocompleteModalOpen'], 'Typing in the Themes modal must not also open the command palette')
 
-    def test_theme_cheat_codes_match_keydown_easter_eggs(self):
-        """REGRESSION: THEME_CHEAT_CODES is a separate mapping from the
-        keydown handler's literal string checks (kept separate so the
-        keydown handler's own well-tested source text doesn't change) - if
-        they ever drift apart, the hint would show a code that doesn't
-        actually work."""
-        pairs = {
-            'hacker': '31337',
-            'sguil': 'sguil',
-            'cga': 'cga',
-            'breadbin-blue': 'bread',
-            'vaporwave': 'vapor',
-            'luna-blue': 'luna',
-            'amber': 'amber',
-            'dos-blue': 'dos',
-            'digital-frontier': 'digit',
-            'retro-handheld': 'retro',
-        }
-        for theme, code in pairs.items():
-            self.assertIn(f"keyBuffer.endsWith('{code}')", JS_CONTENT,
-                          f'THEME_CHEAT_CODES says {theme} -> {code}, but no matching keydown check exists')
+    def test_theme_tile_typeahead_enter_commits_selection(self):
+        """Enter must commit the typeahead-selected tile, same as the
+        existing arrow-key selection path (activateKeyboardSelection() ->
+        themeTileNavSelection.click())."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            setTheme('dark');
+            showThemesModal();
+            function press(k) { document.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true})); }
+            'nord'.split('').forEach(press);
+            press('Enter');
+            window.__jsdom_result = { theme: getCurrentTheme() };
+        ''')
+        self.assertEqual(result['theme'], 'nord', 'Typing "nord" then Enter must activate the Nord theme')
+
+    def test_theme_tile_typeahead_buffer_resets_after_a_pause(self):
+        """REGRESSION: typing "ret" then pausing then typing "amb" must
+        search for "amb" fresh (finding Amber CRT), not concatenate into
+        "retamb" (which matches nothing, silently leaving the old
+        selection in place) - the buffer must reset after an idle gap, the
+        same convention native <select> typeahead uses. The leading 100ms
+        wait lets the page's own init() (which calls showWelcome(), and so
+        closeAllModals()) settle first - showThemesModal() runs
+        synchronously before init()'s own async startup has necessarily
+        resolved in this jsdom harness, and this test needs a real await
+        for the reset timer, unlike the harness's synchronous-only tests
+        elsewhere in this file that never hit that race at all."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            await new Promise(function(r) { setTimeout(r, 100); });
+            setTheme('dark');
+            showThemesModal();
+            function press(k) { document.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true})); }
+            'ret'.split('').forEach(press);
+            var midSel = document.querySelector('.theme-tile.keyboard-selected');
+            await new Promise(function(r) { setTimeout(r, 900); });
+            'amb'.split('').forEach(press);
+            var finalSel = document.querySelector('.theme-tile.keyboard-selected');
+            window.__jsdom_result = {
+                midSelected: midSel ? midSel.dataset.themeOption : null,
+                finalSelected: finalSel ? finalSel.dataset.themeOption : null,
+            };
+        ''')
+        self.assertEqual(result['midSelected'], 'retro-82', 'Typing "ret" must select Retro 82')
+        self.assertEqual(result['finalSelected'], 'amber', 'Typing "amb" after a pause must select Amber CRT fresh, not search for "retamb"')
+
+    def test_every_theme_is_autocompletable_by_its_own_name(self):
+        """REGRESSION: every entry in THEMES (not just the old hand-picked
+        Fun-group cheat codes) must be reachable by typing its own displayed
+        name into the command palette - AUTOCOMPLETE_COMMANDS is meant to be
+        generated straight from THEMES (see its own comment) specifically so
+        a new theme needs no separate, easy-to-forget autocomplete entry of
+        its own. Behavioral (drives the real trigger -> filter -> select
+        flow via jsdom for every theme in one pass), not a static text scan -
+        the generated entries don't exist as literal source text the way the
+        old hand-written ones did, and a couple of labels are genuine
+        prefixes of each other (e.g. "Catppuccin" of "Catppuccin Latte"),
+        so this selects each candidate by its exact rendered text rather
+        than assuming Enter's sole-match convenience always applies."""
+        themes_block = JS_CONTENT.split('const THEMES = {')[1].split('\n        };')[0]
+        theme_pairs = re.findall(r"'?([\w-]+)'?:\s*\{\s*label:\s*'([^']+)'", themes_block)
+        self.assertGreater(len(theme_pairs), 20, 'sanity check that THEMES was parsed, not just an empty/wrong match')
+
+        commands_block = JS_CONTENT.split('const AUTOCOMPLETE_COMMANDS = [')[1].split('\n        ];')[0]
+        self.assertIn('Object.entries(THEMES)', commands_block,
+                      'AUTOCOMPLETE_COMMANDS must generate its theme entries from THEMES, not a separate hardcoded list')
+
+        from tests.jsdom_helper import js_statements
+        result = js_statements(f'''
+            var expected = {json.dumps(theme_pairs)};
+            var mismatches = [];
+            expected.forEach(function(pair) {{
+                var key = pair[0], label = pair[1];
+                var code = label.toLowerCase();
+                setTheme('dark');
+                document.dispatchEvent(new KeyboardEvent('keydown', {{key: code[0], bubbles: true, cancelable: true}}));
+                var input = document.getElementById('autocompleteInput');
+                code.slice(1).split('').forEach(function(ch) {{
+                    input.value += ch;
+                    input.dispatchEvent(new Event('input', {{bubbles: true}}));
+                }});
+                var items = document.querySelectorAll('#autocompleteResults .autocomplete-item');
+                var target = Array.from(items).find(function(el) {{ return el.textContent.trim() === label + ' theme'; }});
+                if (target) target.click();
+                if (getCurrentTheme() !== key) {{
+                    mismatches.push(label + ' -> expected ' + key + ', got ' + getCurrentTheme());
+                }}
+            }});
+            window.__jsdom_result = mismatches;
+        ''')
+        self.assertEqual(result, [], 'Every theme must be reachable by typing its own name: ' + '; '.join(result))
 
     def test_update_theme_menu_marks_active_theme(self):
         """The active theme checkmark must track setTheme (the real, committed
@@ -2435,7 +2604,7 @@ class TestThemeAndMenu(unittest.TestCase):
             showThemesModal();
             var buttons = document.querySelectorAll('.theme-tile');
             var lightBtn = Array.from(buttons).find(function(b) {
-                return b.textContent.trim() === 'Daylight';
+                return b.textContent.trim() === 'White';
             });
             lightBtn.onclick();
             var committed = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -2447,9 +2616,9 @@ class TestThemeAndMenu(unittest.TestCase):
                 modalOpen: modal.classList.contains('active')
             };
         ''')
-        self.assertEqual(result['committed'], 'light',
+        self.assertEqual(result['committed'], 'white',
                          'clicking a theme tile should commit it visually')
-        self.assertEqual(result['stored'], 'light',
+        self.assertEqual(result['stored'], 'white',
                          'clicking a theme tile should persist it to localStorage')
         self.assertTrue(result['modalOpen'], 'clicking a theme tile must leave the themes modal open')
 
@@ -2481,8 +2650,8 @@ class TestThemeAndMenu(unittest.TestCase):
         self.assertEqual(result['revertedAfterLeave'], 'nord',
                          'leaving the tile must revert to Nord (just committed), not the pre-modal baseline')
 
-    def test_hotkey_t_keeps_preview_in_sync_while_modal_open(self):
-        """Pressing 't' while the themes modal is open changes the real
+    def test_hotkey_cycle_keeps_preview_in_sync_while_modal_open(self):
+        """Pressing '>' while the themes modal is open changes the real
         theme via toggleTheme() -> setTheme(), not via a tile click - the
         preview iframe must still update to match, or it goes stale while
         the real app and the grid's checkmark have already moved on."""
@@ -2498,7 +2667,7 @@ class TestThemeAndMenu(unittest.TestCase):
             };
         ''')
         self.assertEqual(result['previewTheme'], result['realTheme'],
-                         "the 't' hotkey must keep the preview iframe in sync with the real theme while the modal is open")
+                         "the '>' hotkey must keep the preview iframe in sync with the real theme while the modal is open")
 
     def test_escape_closes_themes_modal(self):
         from tests.jsdom_helper import js_statements
@@ -2552,7 +2721,6 @@ class TestThemeAndMenu(unittest.TestCase):
                       'CSS must define --help-icon-color custom property')
         # Verify the variable appears inside each theme block.
         root_block = CSS_CONTENT.split(':root, [data-theme="dark"] {')[1].split('}')[0]
-        light_block = CSS_CONTENT.split('[data-theme="light"] {')[1].split('}')[0]
         sguil_block = CSS_CONTENT.split('[data-theme="sguil"] {')[1].split('}')[0]
         hacker_block = CSS_CONTENT.split('[data-theme="hacker"] {')[1].split('}')[0]
         matte_black_block = CSS_CONTENT.split('[data-theme="matte-black"] {')[1].split('}')[0]
@@ -2577,8 +2745,6 @@ class TestThemeAndMenu(unittest.TestCase):
         white_block = CSS_CONTENT.split('[data-theme="white"] {')[1].split('}')[0]
         self.assertIn('--help-icon-color:', root_block,
                       'Dark theme must define --help-icon-color')
-        self.assertIn('--help-icon-color:', light_block,
-                      'Light theme must define --help-icon-color')
         self.assertIn('--help-icon-color:', sguil_block,
                       'Sguil theme must define --help-icon-color')
         self.assertIn('--help-icon-color:', hacker_block,
@@ -2628,13 +2794,114 @@ class TestThemeAndMenu(unittest.TestCase):
         self.assertIn('var(--accent)', matte_black_block,
                       'Matte Black theme --help-icon-color should map to accent orange')
 
-    def test_light_theme_override_exists(self):
-        self.assertIn('[data-theme="light"]', CSS_CONTENT,
-                      'CSS must have a light theme override block')
+    def test_daylight_theme_removed(self):
+        """REGRESSION: the Daylight theme (key 'light') was removed in
+        favor of White, which covers the same "plain light theme" niche -
+        its CSS block, THEMES entry, and per-theme favicon special-casing
+        must all be gone, not just deregistered from the menu."""
+        self.assertNotIn('[data-theme="light"]', CSS_CONTENT,
+                         'CSS must not have a Daylight theme override block')
+        self.assertNotIn("light: { label: 'Daylight'", JS_CONTENT,
+                         'THEMES must not register the removed Daylight theme')
+
+    def test_mp3_player_theme_override_exists(self):
+        self.assertIn('[data-theme="mp3-player"]', CSS_CONTENT,
+                      'CSS must have an MP3 Player theme override block')
 
     def test_escape_closes_menu(self):
         self.assertIn('closeMenu();', JS_CONTENT,
                       'Escape key handler must call closeMenu()')
+
+    def test_escape_returns_to_welcome_when_nothing_else_open(self):
+        """Escape backs out one level at a time - closes an open
+        modal/dropdown/pivot-menu if there is one, and only once there's
+        nothing left to close does it fall through to leaving the
+        analysis entirely (back to the welcome screen)."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var calls = [];
+            window.showWelcome = function() { calls.push('showWelcome'); };
+            // init()'s own startup flow also calls showWelcome() (there's
+            // no ?file=/?pcap= to load directly) - let that settle and
+            // reset the spy before exercising the Escape handler itself,
+            // or it picks up that unrelated startup call instead.
+            await new Promise(function(r) { setTimeout(r, 50); });
+            calls = [];
+            showAnalysisUI();
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
+            window.__jsdom_result = { calls: calls };
+        ''')
+        self.assertEqual(result['calls'], ['showWelcome'],
+                         'Escape with nothing else open must call showWelcome() while an analysis is showing')
+
+    def test_escape_does_not_return_to_welcome_if_a_modal_was_open(self):
+        """Escape while a modal is open must only close the modal, not
+        also leave the analysis in the same keystroke."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var calls = [];
+            window.showWelcome = function() { calls.push('showWelcome'); };
+            await new Promise(function(r) { setTimeout(r, 50); });
+            calls = [];
+            showAnalysisUI();
+            document.getElementById('helpModal').classList.add('active');
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
+            window.__jsdom_result = { calls: calls, helpModalStillActive: document.getElementById('helpModal').classList.contains('active') };
+        ''')
+        self.assertEqual(result['calls'], [], 'Escape must not call showWelcome() when a modal was open')
+        self.assertFalse(result['helpModalStillActive'], 'Escape must still close the open modal')
+
+    def test_escape_does_not_return_to_welcome_if_gear_menu_was_open(self):
+        """Escape while the gear dropdown menu is open must only close
+        the menu, not also leave the analysis in the same keystroke."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var calls = [];
+            window.showWelcome = function() { calls.push('showWelcome'); };
+            await new Promise(function(r) { setTimeout(r, 50); });
+            calls = [];
+            showAnalysisUI();
+            document.getElementById('appHeaderMenuDropdown').classList.add('active');
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
+            window.__jsdom_result = { calls: calls, menuStillActive: document.getElementById('appHeaderMenuDropdown').classList.contains('active') };
+        ''')
+        self.assertEqual(result['calls'], [], 'Escape must not call showWelcome() when the gear menu was open')
+        self.assertFalse(result['menuStillActive'], 'Escape must still close the open gear menu')
+
+    def test_escape_does_not_return_to_welcome_while_typing(self):
+        """Escape while an input field is focused (e.g. cancelling the
+        inline analysis-rename edit, which has its own Escape handler
+        but doesn't stopPropagation()) must not also leave the analysis -
+        that input's own handler already cancels the edit."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var calls = [];
+            window.showWelcome = function() { calls.push('showWelcome'); };
+            await new Promise(function(r) { setTimeout(r, 50); });
+            calls = [];
+            showAnalysisUI();
+            var input = document.createElement('input');
+            document.body.appendChild(input);
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+            input.remove();
+            window.__jsdom_result = { calls: calls };
+        ''')
+        self.assertEqual(result['calls'], [], 'Escape while typing in an input must not call showWelcome()')
+
+    def test_escape_does_nothing_extra_when_already_on_welcome(self):
+        """Escape while already on the welcome screen (nothing open) must
+        not call showWelcome() again - there's nothing to back out of."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var calls = [];
+            window.showWelcome = function() { calls.push('showWelcome'); };
+            await new Promise(function(r) { setTimeout(r, 50); });
+            calls = [];
+            showWelcomeUI();
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
+            window.__jsdom_result = { calls: calls };
+        ''')
+        self.assertEqual(result['calls'], [], 'Escape while already on the welcome screen must not call showWelcome() again')
 
     def test_localStorage_theme_persistence(self):
         self.assertIn("safeStorageSet(localStorage, 'socrates-theme'", JS_CONTENT,
@@ -2667,6 +2934,26 @@ class TestThemeAndMenu(unittest.TestCase):
                       'FOUC script must guard theme read in try block')
         self.assertIn('catch(e){}', inline_script.replace(' ', ''),
                       'FOUC script must swallow localStorage errors')
+
+    def test_fouc_script_migrates_daylight_to_white(self):
+        """REGRESSION: the removed Daylight theme (key 'light') must not
+        just silently disappear for anyone who had it saved - the
+        FOUC-prevention script (the only code that runs before setTheme's
+        own THEMES validation would otherwise catch it) remaps a saved
+        'light' value to 'white' and persists that migration back to
+        localStorage, so the choice sticks instead of re-migrating (and
+        re-showing a "you're on White now" moment) every single page
+        load."""
+        head = HTML_CONTENT.split('</head>')[0]
+        inline_script_match = re.search(r'<script[^>]*>(.*?)</script>', head, re.DOTALL)
+        self.assertTrue(inline_script_match, 'Inline script must be present in <head>')
+        inline_script = inline_script_match.group(1).replace(' ', '')
+        self.assertIn("t=='light'", inline_script,
+                      "FOUC script must detect the removed Daylight theme's saved value")
+        self.assertIn("t='white'", inline_script,
+                      'FOUC script must remap Daylight to White')
+        self.assertIn("localStorage.setItem('socrates-theme',t='white')", inline_script,
+                      'FOUC script must persist the White migration back to localStorage')
 
     def test_hacker_theme_override_exists(self):
         self.assertIn('[data-theme="hacker"]', CSS_CONTENT,
@@ -2785,6 +3072,113 @@ class TestThemeAndMenu(unittest.TestCase):
     def test_code_rain_canvas_exists(self):
         self.assertIn('id="codeRain"', HTML_CONTENT,
                       'HTML must include a code-rain canvas for Hacker')
+
+    def test_block_rain_canvas_exists(self):
+        self.assertIn('id="blockRain"', HTML_CONTENT,
+                      'HTML must include a falling-block canvas for Retro Handheld')
+
+    def test_vaporwave_grid_canvas_exists(self):
+        self.assertIn('id="vaporwaveGrid"', HTML_CONTENT,
+                      'HTML must include a synthwave-grid canvas for Vaporwave')
+
+    def test_dos_defrag_canvas_exists(self):
+        """The canvas id/class (#dosDefrag / .dos-defrag-canvas) is kept
+        from the original defrag-grid effect (and the blinking-prompt and
+        QBasic-dialog effects that followed it) this now renders a Norton
+        Commander dual-pane file browser on instead - an unrelated
+        HTML/CSS id rename wasn't worth the churn for a pure
+        implementation swap."""
+        self.assertIn('id="dosDefrag"', HTML_CONTENT,
+                      'HTML must include the ambient-background canvas for DOS Blue')
+
+    def test_cga_starfield_canvas_exists(self):
+        self.assertIn('id="cgaStarfield"', HTML_CONTENT,
+                      'HTML must include a twinkling-starfield canvas for CGA')
+
+    def test_breadbin_sprites_canvas_exists(self):
+        self.assertIn('id="breadbinSprites"', HTML_CONTENT,
+                      'HTML must include a blinking-sprite canvas for Breadbin Blue')
+
+    def test_digital_frontier_streaks_canvas_exists(self):
+        self.assertIn('id="digitalFrontierStreaks"', HTML_CONTENT,
+                      'HTML must include a light-cycle-streak canvas for Digital Frontier')
+
+    def test_luna_bliss_canvas_exists(self):
+        self.assertIn('id="lunaBliss"', HTML_CONTENT,
+                      'HTML must include a Bliss-homage hill/sky canvas for Luna Blue')
+
+    def test_amber_boot_log_canvas_exists(self):
+        self.assertIn('id="amberBootLog"', HTML_CONTENT,
+                      'HTML must include a scrolling boot-log canvas for Amber')
+
+    def test_mp3_visualizer_canvas_exists(self):
+        self.assertIn('id="mp3Visualizer"', HTML_CONTENT,
+                      'HTML must include a spectrum-analyzer canvas for MP3 Player')
+
+    def test_block_rain_wired_everywhere_code_rain_is(self):
+        """updateCodeRain, updateBlockRain, updateVaporwaveGrid,
+        updateDosDefrag, updateCgaStarfield, updateBreadbinSprites,
+        updateDigitalFrontier, updateLunaBliss, updateAmberBootLog, and
+        updateMp3Visualizer (the ten ambient per-theme canvas backgrounds)
+        must be started/stopped/resized together everywhere - setTheme,
+        applyCustomTheme, init, the resize listener, and the
+        visibilitychange handler - so a future edit to one path can't
+        silently forget the others, leaving a theme's background stuck
+        on/off after a theme switch, tab backgrounding, or window resize.
+
+        REGRESSION test shape: these all used to be called individually at
+        each of those 5 call sites (10 x 5 = 50 near-identical lines); now
+        each effect is listed once in one of three shared arrays
+        (AMBIENT_THEME_UPDATERS/STOPPERS/RESIZERS) and every call site goes
+        through updateAllAmbientThemes()/stopAllAmbientThemes()/a shared
+        forEach - so "wired everywhere" is now verified as "present in the
+        shared array" plus "the shared helper is actually called from
+        every site", rather than counting individual per-effect calls."""
+        all_ten = ('CodeRain', 'BlockRain', 'VaporwaveGrid', 'DosDefrag', 'CgaStarfield', 'BreadbinSprites', 'DigitalFrontier', 'LunaBliss', 'AmberBootLog', 'Mp3Visualizer')
+
+        updaters_array = JS_CONTENT.split('const AMBIENT_THEME_UPDATERS = [')[1].split(']')[0]
+        for name in all_ten:
+            self.assertIn(f'update{name}', updaters_array, f'update{name} must be in AMBIENT_THEME_UPDATERS')
+
+        stoppers_array = JS_CONTENT.split('const AMBIENT_THEME_STOPPERS = [')[1].split(']')[0]
+        for name in all_ten:
+            self.assertIn(f'stop{name}', stoppers_array, f'stop{name} must be in AMBIENT_THEME_STOPPERS')
+
+        resizers_array = JS_CONTENT.split('const AMBIENT_THEME_RESIZERS = [')[1].split(']')[0]
+        for name in all_ten:
+            self.assertIn(f'resize{name}', resizers_array, f'resize{name} must be in AMBIENT_THEME_RESIZERS')
+
+        self.assertIn("AMBIENT_THEME_RESIZERS.forEach(fn => window.addEventListener('resize', fn));", JS_CONTENT,
+                      'every resizer in the array must be wired to the resize event')
+        self.assertEqual(JS_CONTENT.count('updateAllAmbientThemes();'), 4,
+                         'updateAllAmbientThemes() must be called from setTheme, applyCustomTheme, init, and the visibilitychange handler')
+        self.assertEqual(JS_CONTENT.count('stopAllAmbientThemes();'), 1,
+                         'stopAllAmbientThemes() must be called from the visibilitychange handler')
+
+    def test_header_and_footer_stay_fixed_alongside_ambient_canvases(self):
+        """REGRESSION: the ".code-rain-canvas ~ *" rule that bumps real
+        content in front of the ambient background canvases used to be
+        written as ".code-rain-canvas ~ *:not(.block-rain-canvas)" so it
+        wouldn't also catch #blockRain itself - but a :not() argument
+        counts toward selector specificity, and that extra specificity
+        made the rule beat .app-header's and .footer's own "position:
+        fixed" rules regardless of source order, silently flipping both
+        to "position: relative" (a real bug: header lost its top pin,
+        footer lost its bottom pin and got pushed down the page behind a
+        large empty gap). Must stay pinned regardless of which ambient
+        background canvas (if any) is active."""
+        from tests.jsdom_helper import js_statements
+        for theme in (None, 'hacker', 'retro-handheld', 'vaporwave', 'dos-blue', 'cga', 'breadbin-blue', 'digital-frontier', 'luna-blue', 'amber', 'mp3-player'):
+            setup = f"document.documentElement.setAttribute('data-theme', '{theme}');" if theme else ''
+            result = js_statements(f'''
+                {setup}
+                window.__jsdom_result = {{
+                    header: getComputedStyle(document.querySelector('.app-header')).position,
+                    footer: getComputedStyle(document.querySelector('.footer')).position
+                }};
+            ''')
+            self.assertEqual(result['header'], 'fixed', f'.app-header must stay position: fixed (theme={theme})')
+            self.assertEqual(result['footer'], 'fixed', f'.footer must stay position: fixed (theme={theme})')
 
     def test_setTheme_function_exists(self):
         self.assertIn('function setTheme(', JS_CONTENT,
@@ -2992,6 +3386,23 @@ class TestThemeAndMenu(unittest.TestCase):
             '.search-input:focus',
             '.sample-card:hover',
             '.theme-tile:hover',
+            '.app-logo-text:focus-visible',
+            '.sample-card.keyboard-selected',
+            '.previous-analysis-row.keyboard-selected',
+            'tr[data-id].keyboard-selected',
+            '.theme-tile.keyboard-selected',
+            '.section-toggle-bar.keyboard-selected',
+            '.agg-row[data-agg-pivot].keyboard-selected',
+            '.pivot-menu-item.keyboard-selected',
+            '.filter-chip.keyboard-selected',
+            '.filter-clear-all.keyboard-selected',
+            '.stream-btn.keyboard-selected',
+            '.view-tab.keyboard-selected',
+            '.row-note-edit-link.keyboard-selected',
+            '.packet-header.keyboard-selected',
+            '.packet-control-btn.keyboard-selected',
+            '.detail-value-pivot.keyboard-selected',
+            '.autocomplete-item.keyboard-selected',
         )
         fallback = 'var(--interactive-highlight, var(--accent))'
         for selector in documented_consumers:
@@ -3123,7 +3534,9 @@ class TestThemeAndMenu(unittest.TestCase):
             r'\[data-theme="digital-frontier"\] \.stat-card:hover,\s*'
             r'\[data-theme="digital-frontier"\] \.stat-card\.tab-active,\s*'
             r'\[data-theme="digital-frontier"\] \.sample-card:hover,\s*'
-            r'\[data-theme="digital-frontier"\] \.theme-tile:hover\s*\{([^}]*)\}',
+            r'\[data-theme="digital-frontier"\] \.sample-card\.keyboard-selected,\s*'
+            r'\[data-theme="digital-frontier"\] \.theme-tile:hover,\s*'
+            r'\[data-theme="digital-frontier"\] \.theme-tile\.keyboard-selected\s*\{([^}]*)\}',
             CSS_CONTENT,
         )
         self.assertIsNotNone(hover_match, 'Digital Frontier must flare brighter on hover/active')
@@ -3168,7 +3581,9 @@ class TestThemeAndMenu(unittest.TestCase):
             r'\[data-theme="vaporwave"\] \.stat-card:hover,\s*'
             r'\[data-theme="vaporwave"\] \.stat-card\.tab-active,\s*'
             r'\[data-theme="vaporwave"\] \.sample-card:hover,\s*'
-            r'\[data-theme="vaporwave"\] \.theme-tile:hover\s*\{([^}]*)\}',
+            r'\[data-theme="vaporwave"\] \.sample-card\.keyboard-selected,\s*'
+            r'\[data-theme="vaporwave"\] \.theme-tile:hover,\s*'
+            r'\[data-theme="vaporwave"\] \.theme-tile\.keyboard-selected\s*\{([^}]*)\}',
             CSS_CONTENT,
         )
         self.assertIsNotNone(hover_match, 'Vaporwave must flare brighter on hover/active')
@@ -3214,7 +3629,9 @@ class TestThemeAndMenu(unittest.TestCase):
             r'\[data-theme="amber"\] \.stat-card:hover,\s*'
             r'\[data-theme="amber"\] \.stat-card\.tab-active,\s*'
             r'\[data-theme="amber"\] \.sample-card:hover,\s*'
-            r'\[data-theme="amber"\] \.theme-tile:hover\s*\{([^}]*)\}',
+            r'\[data-theme="amber"\] \.sample-card\.keyboard-selected,\s*'
+            r'\[data-theme="amber"\] \.theme-tile:hover,\s*'
+            r'\[data-theme="amber"\] \.theme-tile\.keyboard-selected\s*\{([^}]*)\}',
             CSS_CONTENT,
         )
         self.assertIsNotNone(hover_match, 'Amber must flare brighter on hover/active')
@@ -3260,7 +3677,9 @@ class TestThemeAndMenu(unittest.TestCase):
             r'\[data-theme="hacker"\] \.stat-card:hover,\s*'
             r'\[data-theme="hacker"\] \.stat-card\.tab-active,\s*'
             r'\[data-theme="hacker"\] \.sample-card:hover,\s*'
-            r'\[data-theme="hacker"\] \.theme-tile:hover\s*\{([^}]*)\}',
+            r'\[data-theme="hacker"\] \.sample-card\.keyboard-selected,\s*'
+            r'\[data-theme="hacker"\] \.theme-tile:hover,\s*'
+            r'\[data-theme="hacker"\] \.theme-tile\.keyboard-selected\s*\{([^}]*)\}',
             CSS_CONTENT,
         )
         self.assertIsNotNone(hover_match, 'Hacker must flare brighter on hover/active')
@@ -3279,11 +3698,69 @@ class TestThemeAndMenu(unittest.TestCase):
         )
         self.assertIsNotNone(button_match, 'Hacker must glow buttons/inputs on hover/focus')
 
-    def test_hacker_previous_analysis_delete_overrides(self):
-        self.assertIn('[data-theme="hacker"] .previous-analysis-delete', CSS_CONTENT,
-                      'Hacker theme must override previous analysis delete color')
-        self.assertIn('[data-theme="hacker"] .previous-analysis-delete-all', CSS_CONTENT,
-                      'Hacker theme must override delete-all button color')
+    def test_all_neon_themes_glow_their_hud_corner_brackets(self):
+        """REGRESSION: Amber had the box-shadow/text-shadow/app-header glow
+        treatment but was missing the matching drop-shadow rule for its own
+        HUD corner brackets (.stat-card/.pivot-menu/.sample-card/
+        .modal-content ::before/::after) that Digital Frontier, Vaporwave,
+        and Hacker all have - its brackets rendered unglowed while
+        everything else on the theme glowed. Every "neon" theme must glow
+        its brackets, with the modal-content variant bumped brighter same
+        as the other three."""
+        for theme in ('digital-frontier', 'vaporwave', 'amber', 'hacker'):
+            bracket_match = re.search(
+                rf'\[data-theme="{theme}"\] \.stat-card::before, \[data-theme="{theme}"\] \.stat-card::after,\s*'
+                rf'\[data-theme="{theme}"\] \.pivot-menu::before, \[data-theme="{theme}"\] \.pivot-menu::after,\s*'
+                rf'\[data-theme="{theme}"\] \.sample-card::before, \[data-theme="{theme}"\] \.sample-card::after,\s*'
+                rf'\[data-theme="{theme}"\] \.modal-content::before, \[data-theme="{theme}"\] \.modal-content::after\s*\{{([^}}]*)\}}',
+                CSS_CONTENT,
+            )
+            self.assertIsNotNone(bracket_match, f'{theme} must glow its HUD corner brackets via drop-shadow')
+            self.assertIn('filter: drop-shadow(', bracket_match.group(1),
+                          f'{theme} bracket glow must use filter: drop-shadow()')
+
+            # .modal-content's glow is bumped brighter still (a bigger
+            # surface needs a more prominent glow to read the same at a
+            # glance) - check that bumped variant immediately follows the
+            # shared bracket rule for this theme.
+            after = CSS_CONTENT[bracket_match.end():bracket_match.end() + 900]
+            self.assertIn(
+                f'[data-theme="{theme}"] .modal-content::before, [data-theme="{theme}"] .modal-content::after {{',
+                after,
+                f'{theme} must bump .modal-content\'s bracket glow brighter, same as its other neon rules'
+            )
+
+    def test_hacker_reanalyze_danger_button_matches_delete_button_greening(self):
+        """REGRESSION: .reanalyze-confirm-btn.danger's own comment says it
+        uses "the same red as delete-modal-confirm-btn" - but its Hacker
+        override hardcoded the default theme's red (#ff6b6b) instead of
+        following .delete-modal-confirm-btn's Hacker override (which
+        correctly turns green via var(--accent)). The two must match, or
+        Hacker users see a red "Re-analyze" button clashing with the
+        theme's monochrome look while the equivalent Delete button doesn't."""
+        hacker_reanalyze_danger = re.search(
+            r'\[data-theme="hacker"\] \.reanalyze-confirm-btn\.danger\s*\{([^}]*)\}',
+            CSS_CONTENT,
+        )
+        self.assertIsNotNone(hacker_reanalyze_danger, 'Hacker must override .reanalyze-confirm-btn.danger')
+        body = hacker_reanalyze_danger.group(1)
+        self.assertIn('var(--accent)', body,
+                      'Hacker .reanalyze-confirm-btn.danger must use var(--accent), not a hardcoded red')
+        self.assertNotIn('#ff6b6b', body,
+                         'Hacker .reanalyze-confirm-btn.danger must not hardcode the default theme\'s red')
+
+    def test_hacker_delete_buttons_use_default_danger_red(self):
+        """REGRESSION: both the single-analysis header delete icon
+        (.app-header-delete-icon) and Delete All (.previous-analysis-
+        delete-all, in Settings' Danger Zone) used to have a Hacker-theme
+        override turning them green to avoid clashing with that theme's
+        monochrome CRT look. Both overrides were dropped - every
+        delete/danger control now consistently just uses the theme's own
+        --badge-danger-text, same as everywhere else danger is signaled."""
+        self.assertNotIn('[data-theme="hacker"] .app-header-delete-icon', CSS_CONTENT,
+                         'Hacker theme must not override the header delete icon color')
+        self.assertNotIn('[data-theme="hacker"] .previous-analysis-delete-all', CSS_CONTENT,
+                         'Hacker theme must not override the delete-all button color')
 
     def test_hacker_reanalyze_button_override(self):
         self.assertIn('[data-theme="hacker"] .reanalyze-confirm-btn', CSS_CONTENT,
@@ -3320,23 +3797,83 @@ class TestThemeAndMenu(unittest.TestCase):
                         'Magnifying glass SVG must use currentColor or var(--accent) for theme adaptability')
 
     def test_theme_cycle_hotkey_exists(self):
-        """Pressing 't' outside input fields must cycle themes."""
-        self.assertIn("e.key === 't'", JS_CONTENT,
-                      'JS must listen for the theme-cycle hotkey')
+        """Pressing '<'/'>' outside input fields must cycle themes.
+        REGRESSION: this used to be the single 't' key, which collided
+        with typing several of the app's own theme cheat codes ("retro",
+        "digit") - every 't' keystroke while typing those also toggled
+        the theme. It was briefly the arrow keys, but those are reserved
+        for real in-app navigation (stat tabs, sample buttons, table
+        rows), so it landed on '<'/'>' instead - same media-player-button
+        convention, and collides with neither typed text nor navigation."""
+        self.assertIn("e.key === '>'", JS_CONTENT,
+                      'JS must listen for the forward theme-cycle hotkey')
+        self.assertIn("e.key === '<'", JS_CONTENT,
+                      'JS must listen for the reverse theme-cycle hotkey')
+        self.assertNotIn("e.key === 't' &&", JS_CONTENT,
+                         "the old single-key 't' hotkey must not still be wired up "
+                         "(it collided with typing 'retro'/'digit' cheat codes)")
         self.assertIn('toggleTheme();', JS_CONTENT,
-                      'Theme hotkey must call toggleTheme()')
+                      'Forward theme hotkey must call toggleTheme()')
+        self.assertIn('toggleThemeReverse();', JS_CONTENT,
+                      'Reverse theme hotkey must call toggleThemeReverse()')
         self.assertIn("showToast('Switched to ' + THEMES[nextTheme].label + ' theme')", JS_CONTENT,
                       'Theme hotkey must show a toast with the new theme name')
-        # Guard against triggering while typing in inputs.
-        self.assertIn("e.target.tagName !== 'INPUT'", JS_CONTENT,
-                      'Theme hotkey must ignore input fields')
-        self.assertIn("e.target.tagName !== 'TEXTAREA'", JS_CONTENT,
-                      'Theme hotkey must ignore textarea fields')
-        self.assertIn('!e.target.isContentEditable', JS_CONTENT,
-                      'Theme hotkey must ignore contenteditable elements')
+        # The input/textarea/contenteditable/modifier-key guard used to be
+        # inlined at every single-key shortcut site (7 near-identical
+        # copies); it's now the shared isNavigableKeyContext(e) helper, so
+        # '>'/'<' just need to call it rather than repeat the clauses.
+        forward_block = JS_CONTENT.split("e.key === '>'")[1].split('}')[0]
+        reverse_block = JS_CONTENT.split("e.key === '<'")[1].split('}')[0]
+        for block, label in ((forward_block, '>'), (reverse_block, '<')):
+            self.assertIn('isNavigableKeyContext(e)', block,
+                          f'{label} theme hotkey must use the shared isNavigableKeyContext(e) guard')
+        guard_body = JS_CONTENT.split('function isNavigableKeyContext(e) {')[1].split('}')[0]
+        self.assertIn("e.target.tagName !== 'INPUT'", guard_body,
+                      'isNavigableKeyContext must ignore input fields')
+        self.assertIn("e.target.tagName !== 'TEXTAREA'", guard_body,
+                      'isNavigableKeyContext must ignore textarea fields')
+        self.assertIn('!e.target.isContentEditable', guard_body,
+                      'isNavigableKeyContext must ignore contenteditable elements')
+
+    def test_app_logo_link_has_themed_focus_style(self):
+        """REGRESSION: the SO-CRATES logo link (a bare <a>, no other focus
+        styling) previously had no custom :focus-visible rule, so
+        clicking it fell back to the browser's native outline: auto ring
+        - a gray/white box matching no theme, and since keyboard focus
+        isn't cleared by the theme-cycle hotkey, it stayed visibly
+        mismatched after switching themes while still focused. Must use
+        the theme's own accent color instead, same pattern as
+        .theme-switch's existing focus-visible ring."""
+        self.assertIn('.app-logo-text:focus-visible', CSS_CONTENT,
+                      'CSS must define a themed :focus-visible rule for .app-logo-text')
+        rule_match = re.search(r'\.app-logo-text:focus-visible\s*\{([^}]*)\}', CSS_CONTENT)
+        self.assertIsNotNone(rule_match, '.app-logo-text:focus-visible rule must exist')
+        body = rule_match.group(1)
+        self.assertIn('outline:', body, 'the rule must set an explicit outline (not rely on the browser default)')
+        self.assertIn('var(--accent)', body,
+                      'the outline color must come from the theme (var(--accent)), not a hardcoded color')
+
+    def test_sample_card_keyboard_selection_shows_reticle_like_hover(self):
+        """REGRESSION: Left/Right arrow-key navigation on the welcome
+        screen adds .keyboard-selected to a .sample-card and it does pick
+        up the shared border-color highlight, but the fun-theme "targeting
+        reticle" HUD corner brackets (.fun-theme .sample-card::before/
+        ::after, opacity 0 unless :hover) and the four per-theme glow
+        boosts (Digital Frontier, Vaporwave, Amber, Hacker) were gated on
+        :hover only - so keyboard navigation looked plain next to mouse
+        hover on fun themes. Every one of those rules must also fire for
+        .keyboard-selected."""
+        self.assertIn('.fun-theme .sample-card.keyboard-selected::before', CSS_CONTENT,
+                      'the corner-bracket opacity rule must also trigger for .keyboard-selected')
+        self.assertIn('.fun-theme .sample-card.keyboard-selected::after', CSS_CONTENT,
+                      'the corner-bracket opacity rule must also trigger for .keyboard-selected')
+        for theme in ('digital-frontier', 'vaporwave', 'amber', 'hacker'):
+            self.assertIn(f'[data-theme="{theme}"] .sample-card.keyboard-selected', CSS_CONTENT,
+                          f'{theme} sample-card glow-boost rule must also trigger for .keyboard-selected')
 
     def test_theme_hotkey_matches_menu_order(self):
-        """The 't' hotkey must cycle themes in the same order they appear in the menu."""
+        """The '>' hotkey must cycle themes forward in the same order
+        they appear in the menu."""
         from tests.jsdom_helper import js_statements
         result = js_statements('''
             var order = [];
@@ -3347,258 +3884,1192 @@ class TestThemeAndMenu(unittest.TestCase):
             }
             window.__jsdom_result = { order: order };
         ''')
-        self.assertEqual(result['order'], ['monokai', 'nord', 'ohmydebn', 'osaka-jade', 'retro-82', 'ristretto', 'solarized-dark', 'tokyo-night', 'vantablack', 'catppuccin-latte', 'light', 'flexoki-light', 'rose-pine', 'white', 'amber', 'breadbin-blue', 'cga', 'digital-frontier', 'dos-blue', 'hacker', 'luna-blue', 'retro-handheld', 'sguil', 'vaporwave', 'catppuccin', 'dracula', 'ethereal', 'everforest', 'gruvbox', 'hackerman', 'kanagawa', 'lumon', 'matte-black', 'miasma', 'dark'],
-                         't hotkey cycle order must match menu order')
+        self.assertEqual(result['order'], ['monokai', 'nord', 'ohmydebn', 'osaka-jade', 'retro-82', 'ristretto', 'solarized-dark', 'tokyo-night', 'vantablack', 'catppuccin-latte', 'flexoki-light', 'rose-pine', 'sguil', 'white', 'amber', 'breadbin-blue', 'cga', 'digital-frontier', 'dos-blue', 'hacker', 'luna-blue', 'mp3-player', 'retro-handheld', 'vaporwave', 'catppuccin', 'dracula', 'ethereal', 'everforest', 'gruvbox', 'hackerman', 'kanagawa', 'lumon', 'matte-black', 'miasma', 'dark'],
+                         "'>' hotkey cycle order must match menu order")
 
-    def test_hacker_mode_easter_egg_exists(self):
-        """Typing 31337 outside of input fields must activate Hacker."""
-        self.assertIn("keyBuffer.endsWith('31337')", JS_CONTENT,
-                      'JS must check for the 31337 easter egg sequence')
-        self.assertIn("setTheme('hacker')", JS_CONTENT,
-                      'Easter egg must activate Hacker')
-        self.assertIn('Switched to Hacker theme', JS_CONTENT,
-                      'Easter egg activation message must reference Hacker theme')
-        self.assertIn('showToast(', JS_CONTENT,
-                      'Easter egg must show an activation message')
+    def test_theme_hotkey_reverse_matches_menu_order_backwards(self):
+        """The '<' hotkey must cycle themes in exactly the reverse order
+        '>' does - i.e. toggleThemeReverse() undoes toggleTheme()."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var order = [];
+            setTheme('dark');
+            for (var i = 0; i < 35; i++) {
+                toggleThemeReverse();
+                order.push(document.documentElement.getAttribute('data-theme') || 'dark');
+            }
+            window.__jsdom_result = { order: order };
+        ''')
+        expected_reverse = ['miasma', 'matte-black', 'lumon', 'kanagawa', 'hackerman', 'gruvbox', 'everforest', 'ethereal', 'dracula', 'catppuccin', 'vaporwave', 'retro-handheld', 'mp3-player', 'luna-blue', 'hacker', 'dos-blue', 'digital-frontier', 'cga', 'breadbin-blue', 'amber', 'white', 'sguil', 'rose-pine', 'flexoki-light', 'catppuccin-latte', 'vantablack', 'tokyo-night', 'solarized-dark', 'ristretto', 'retro-82', 'osaka-jade', 'ohmydebn', 'nord', 'monokai', 'dark']
+        self.assertEqual(result['order'], expected_reverse,
+                         "'<' hotkey cycle order must be the exact reverse of '>'")
 
-    def test_cga_easter_egg_exists(self):
-        """Typing cga outside of input fields must activate the CGA theme."""
-        self.assertIn("keyBuffer.endsWith('cga')", JS_CONTENT,
-                      'JS must check for the cga easter egg sequence')
-        self.assertIn("setTheme('cga')", JS_CONTENT,
-                      'Easter egg must activate CGA')
-        self.assertIn('Switched to CGA theme', JS_CONTENT,
-                      'Easter egg activation message must reference CGA theme')
-
-    def test_easter_egg_short_code_triggers_via_endswith(self):
-        """REGRESSION: a code shorter than the 5-char keyBuffer (like "cga")
-        must actually trigger after other keystrokes, not just in the first
-        few keystrokes after page load - this is exactly what endsWith()
-        (rather than ===) on the buffer is for."""
+    def test_theme_hotkey_real_keydown_events(self):
+        """Behavioral check: real '>'/'<'  keydown events (not just calling
+        toggleTheme()/toggleThemeReverse() directly) must change the
+        theme, and must be ignored while typing in an input field."""
         from tests.jsdom_helper import js_statements
         result = js_statements('''
             setTheme('dark');
-            function press(k) {
-                document.dispatchEvent(new KeyboardEvent('keydown', {key: k}));
-            }
-            'xyz'.split('').forEach(press);
-            'cga'.split('').forEach(press);
-            window.__jsdom_result = { theme: getCurrentTheme() };
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: '>'}));
+            var afterRight = getCurrentTheme();
+
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: '<'}));
+            var afterLeft = getCurrentTheme();
+
+            var input = document.createElement('input');
+            document.body.appendChild(input);
+            input.focus();
+            var beforeInputEvent = getCurrentTheme();
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: '>', bubbles: true}));
+            var afterInputEvent = getCurrentTheme();
+            input.remove();
+
+            window.__jsdom_result = {
+                afterRight: afterRight,
+                afterLeft: afterLeft,
+                beforeInputEvent: beforeInputEvent,
+                afterInputEvent: afterInputEvent
+            };
         ''')
-        self.assertEqual(result['theme'], 'cga',
-                         'Typing cga after other keystrokes must still activate CGA theme')
+        self.assertEqual(result['afterRight'], 'monokai', "a real '>' keydown must advance the theme")
+        self.assertEqual(result['afterLeft'], 'dark', "a real '<' keydown must undo the '>' advance")
+        self.assertEqual(result['afterInputEvent'], result['beforeInputEvent'],
+                         "'>' must be ignored while an input field is focused")
 
-    def test_breadbin_blue_easter_egg_exists(self):
-        """Typing bread outside of input fields must activate the Breadbin Blue theme."""
-        self.assertIn("keyBuffer.endsWith('bread')", JS_CONTENT,
-                      'JS must check for the bread easter egg sequence')
-        self.assertIn("setTheme('breadbin-blue')", JS_CONTENT,
-                      'Easter egg must activate Breadbin Blue')
-        self.assertIn('Switched to Breadbin Blue theme', JS_CONTENT,
-                      'Easter egg activation message must reference Breadbin Blue theme')
+    def test_arrow_key_navigation_stat_tabs(self):
+        """Left/Right must move the tab-active stat-card and switch tabs
+        (via a real click(), reusing showTab's own logic) immediately -
+        like a native tab strip, not requiring a separate Enter to
+        activate, since switching a cached tab is cheap."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('statsGrid').innerHTML = `
+                <div class="stat-card tab-active" onclick="showTab('section-alert', this)"><div class="stat-number">1</div></div>
+                <div class="stat-card" onclick="showTab('section-all', this)"><div class="stat-number">2</div></div>
+                <div class="stat-card" onclick="showTab('section-dns', this)"><div class="stat-number">3</div></div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', '<div class="section" id="section-alert"></div><div class="section section-hidden" id="section-all"></div><div class="section section-hidden" id="section-dns"></div>');
+            var cards = document.querySelectorAll('#statsGrid .stat-card');
+            function press(key) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: key}));
+            }
+            press('ArrowRight');
+            var afterRight = Array.from(cards).map(c => c.classList.contains('tab-active'));
+            press('ArrowRight');
+            var afterRight2 = Array.from(cards).map(c => c.classList.contains('tab-active'));
+            press('ArrowLeft');
+            var afterLeft = Array.from(cards).map(c => c.classList.contains('tab-active'));
+            window.__jsdom_result = { afterRight: afterRight, afterRight2: afterRight2, afterLeft: afterLeft };
+        ''')
+        self.assertEqual(result['afterRight'], [False, True, False], 'ArrowRight must move tab-active to the next card')
+        self.assertEqual(result['afterRight2'], [False, False, True], 'ArrowRight again must move to the third card')
+        self.assertEqual(result['afterLeft'], [False, True, False], 'ArrowLeft must move back to the second card')
 
-    def test_breadbin_blue_easter_egg_short_code_triggers_via_endswith(self):
-        """REGRESSION: same class of bug as the cga easter egg - a code
-        shorter than the 5-char keyBuffer (like "bread") must actually
-        trigger after other keystrokes, not just in the first few
-        keystrokes after page load."""
+    def test_arrow_key_navigation_sample_cards(self):
+        """Left/Right must move a 'keyboard-selected' highlight among the
+        welcome screen's sample cards without activating any of them (no
+        fetch/network side effect just from moving past one) - Enter then
+        activates whichever one is highlighted."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var calls = [];
+            window.loadSampleUrl = function(url) { calls.push(url); };
+            document.getElementById('inputBoxes').innerHTML = `
+                <div class="sample-card" onclick="loadSampleUrl('pcap-url')"><span>Sample pcap file</span></div>
+                <div class="sample-card" onclick="loadSampleUrl('log-url')"><span>Sample log file</span></div>
+                <div class="sample-card" onclick="loadSampleUrl('binary-url')"><span>Sample binary file</span></div>
+            `;
+            document.getElementById('inputBoxes').style.display = 'block';
+            var cards = document.querySelectorAll('.sample-card');
+            function press(key) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: key}));
+            }
+            press('ArrowRight');
+            var selectedAfterFirst = Array.from(cards).map(c => c.classList.contains('keyboard-selected'));
+            press('Enter');
+            window.__jsdom_result = { selectedAfterFirst: selectedAfterFirst, calls: calls };
+        ''')
+        self.assertEqual(result['selectedAfterFirst'], [True, False, False],
+                         'first ArrowRight must select (not activate) the first sample card')
+        self.assertEqual(result['calls'], ['pcap-url'], 'Enter must activate the keyboard-selected sample card')
+
+    def test_arrow_key_navigation_theme_tiles(self):
+        """When the Themes modal is open, all four arrow keys must move a
+        'keyboard-selected' highlight through the tile list (Right/Down
+        forward, Left/Up backward, wrapping at both ends) and call
+        previewTheme() on each move - mirroring onmouseenter's live-preview
+        behavior so keyboard navigation feels like hovering with the
+        keyboard. Enter then commits whichever tile is highlighted, same
+        as clicking it."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var previewCalls = [];
+            window.previewTheme = function(name) { previewCalls.push(name); };
+            var commitCalls = [];
+            window.commitTheme = function(name) { commitCalls.push(name); };
+            document.getElementById('themesModalBody').innerHTML = `
+                <button class="theme-tile" data-theme-option="dark" onclick="commitTheme('dark')"><span>Midnight</span></button>
+                <button class="theme-tile" data-theme-option="hacker" onclick="commitTheme('hacker')"><span>Hacker</span></button>
+                <button class="theme-tile" data-theme-option="cga" onclick="commitTheme('cga')"><span>CGA</span></button>
+            `;
+            document.getElementById('themesModal').classList.add('active');
+            function press(key) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: key}));
+            }
+            var tiles = document.querySelectorAll('.theme-tile');
+            press('ArrowRight');
+            var selectedAfterFirst = Array.from(tiles).map(t => t.classList.contains('keyboard-selected'));
+            press('ArrowRight');
+            var selectedAfterSecond = Array.from(tiles).map(t => t.classList.contains('keyboard-selected'));
+            press('ArrowLeft');
+            var selectedAfterBack = Array.from(tiles).map(t => t.classList.contains('keyboard-selected'));
+            press('Enter');
+            window.__jsdom_result = {
+                selectedAfterFirst: selectedAfterFirst,
+                selectedAfterSecond: selectedAfterSecond,
+                selectedAfterBack: selectedAfterBack,
+                previewCalls: previewCalls,
+                commitCalls: commitCalls,
+            };
+        ''')
+        self.assertEqual(result['selectedAfterFirst'], [True, False, False],
+                         'first ArrowRight must select the first theme tile')
+        self.assertEqual(result['selectedAfterSecond'], [False, True, False],
+                         'second ArrowRight must move to the second theme tile')
+        self.assertEqual(result['selectedAfterBack'], [True, False, False],
+                         'ArrowLeft must move back to the first theme tile')
+        self.assertEqual(result['previewCalls'], ['dark', 'hacker', 'dark'],
+                         'each move must call previewTheme() for the newly-selected tile')
+        self.assertEqual(result['commitCalls'], ['dark'],
+                         'Enter must commit whichever tile is highlighted')
+
+    def test_arrow_key_navigation_theme_tiles_wraps_and_takes_priority_over_sample_cards(self):
+        """REGRESSION: navigateThemeTiles() must be checked before
+        navigateStatTabs/navigateSampleCards/navigateVertical in the
+        keydown handler's || chains, or arrow keys would fall through to
+        moving the welcome screen's selection underneath the modal instead
+        of the Themes modal's own tile grid. Also covers wrap-around at
+        the end of the list."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var sampleCalls = [];
+            window.loadSampleUrl = function(url) { sampleCalls.push(url); };
+            document.getElementById('inputBoxes').innerHTML = `
+                <div class="sample-card" onclick="loadSampleUrl('pcap-url')"><span>Sample pcap file</span></div>
+            `;
+            document.getElementById('inputBoxes').style.display = 'block';
+            document.getElementById('themesModalBody').innerHTML = `
+                <button class="theme-tile" data-theme-option="dark"><span>Midnight</span></button>
+                <button class="theme-tile" data-theme-option="hacker"><span>Hacker</span></button>
+            `;
+            document.getElementById('themesModal').classList.add('active');
+            function press(key) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: key}));
+            }
+            var tiles = document.querySelectorAll('.theme-tile');
+            press('ArrowRight');
+            press('ArrowRight');
+            press('ArrowRight');
+            var wrappedToFirst = tiles[0].classList.contains('keyboard-selected');
+            var sampleCardSelected = document.querySelector('.sample-card.keyboard-selected') !== null;
+            window.__jsdom_result = {
+                wrappedToFirst: wrappedToFirst,
+                sampleCardSelected: sampleCardSelected,
+                sampleCalls: sampleCalls,
+            };
+        ''')
+        self.assertTrue(result['wrappedToFirst'], 'ArrowRight past the last tile must wrap back to the first')
+        self.assertFalse(result['sampleCardSelected'],
+                         'arrow keys must not fall through to the welcome screen\'s sample cards while the Themes modal is open')
+        self.assertEqual(result['sampleCalls'], [])
+
+    def test_arrow_key_navigation_theme_tiles_up_down_move_by_row(self):
+        """REGRESSION: Up/Down initially acted exactly like Left/Right
+        (moving by 1 tile) even though the tiles are laid out in a grid,
+        which felt like Down/Up did nothing useful in a multi-row grid -
+        they must instead jump by a full row (themeTileGridColumnCount()),
+        wrapping at both ends like every other axis. Stubs
+        themeTileGridColumnCount() to a known value (3) since jsdom does
+        no real layout, so the real getComputedStyle-based column count
+        can't be exercised here - see test plan notes for the
+        Playwright-based live check of the real column detection."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            window.themeTileGridColumnCount = function() { return 3; };
+            document.getElementById('themesModalBody').innerHTML =
+                [0, 1, 2, 3, 4, 5, 6].map(function(i) {
+                    return '<button class="theme-tile" data-theme-option="t' + i + '"><span>t' + i + '</span></button>';
+                }).join('');
+            document.getElementById('themesModal').classList.add('active');
+            function press(key) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: key}));
+            }
+            var tiles = document.querySelectorAll('.theme-tile');
+            function selectedIndex() {
+                return Array.from(tiles).findIndex(function(t) { return t.classList.contains('keyboard-selected'); });
+            }
+            var indices = [];
+            press('ArrowDown'); indices.push(selectedIndex());  // first press: just selects index 0
+            press('ArrowDown'); indices.push(selectedIndex());  // +3 -> 3
+            press('ArrowDown'); indices.push(selectedIndex());  // +3 -> 6
+            press('ArrowDown'); indices.push(selectedIndex());  // +3 -> wraps to 2
+            press('ArrowUp');   indices.push(selectedIndex());  // -3 -> wraps to 6
+            window.__jsdom_result = { indices: indices };
+        ''')
+        self.assertEqual(result['indices'], [0, 3, 6, 2, 6],
+                         'ArrowDown/ArrowUp must move by a full row (3), wrapping at both ends, not by 1 tile like Left/Right')
+
+    def test_arrow_key_navigation_theme_tiles_starts_relative_to_current_theme(self):
+        """REGRESSION: the very first arrow press after opening the Themes
+        modal used to always jump to the first (Right/Down) or last
+        (Left/Up) tile in the whole grid, regardless of which theme was
+        actually active - navigation now starts from the currently active
+        theme's own tile (menuBaseTheme, set by the real showThemesModal())
+        instead, so the first press moves one step away from where the
+        user already is rather than restarting from a corner of the grid."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            setTheme('cga');
+            await showThemesModal();
+            var tiles = Array.from(document.querySelectorAll('.theme-tile[data-theme-option]'));
+            var cgaIndex = tiles.findIndex(function(t) { return t.dataset.themeOption === 'cga'; });
+            function press(key) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: key}));
+            }
+            function selectedIndex() {
+                return tiles.findIndex(function(t) { return t.classList.contains('keyboard-selected'); });
+            }
+            press('ArrowRight');
+            var afterRight = selectedIndex();
+            window.__jsdom_result = {
+                cgaIndex: cgaIndex,
+                total: tiles.length,
+                afterRight: afterRight,
+            };
+        ''')
+        self.assertNotEqual(result['cgaIndex'], -1, 'cga must be a real rendered tile')
+        expected = (result['cgaIndex'] + 1) % result['total']
+        self.assertEqual(result['afterRight'], expected,
+                         'first ArrowRight must move one step after the currently active theme (cga), not jump to the grid\'s first tile')
+
+    def test_theme_tile_grid_column_count_falls_back_to_one_when_grid_missing(self):
+        """themeTileGridColumnCount() must not throw if .theme-tile-grid
+        can't be found for any reason - falls back to 1 (Up/Down then
+        behaves like Left/Right) rather than crashing the keydown handler."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            window.__jsdom_result = { columns: themeTileGridColumnCount() };
+        ''')
+        self.assertEqual(result['columns'], 1)
+
+    def test_arrow_key_navigation_previous_analysis_rows(self):
+        """Up/Down must move a 'keyboard-selected' highlight among
+        previous-analysis rows without activating any of them - Enter
+        then opens whichever row's analysis is highlighted (via its
+        inner link)."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var calls = [];
+            window.loadAnalysis = function(md5) { calls.push(md5); };
+            document.getElementById('inputBoxes').innerHTML = `
+                <div class="previous-analysis-row"><a href="?file=aaa" onclick="event.preventDefault(); loadAnalysis('aaa');">A</a></div>
+                <div class="previous-analysis-row"><a href="?file=bbb" onclick="event.preventDefault(); loadAnalysis('bbb');">B</a></div>
+            `;
+            document.getElementById('inputBoxes').style.display = 'block';
+            var rows = document.querySelectorAll('.previous-analysis-row');
+            function press(key) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: key}));
+            }
+            press('ArrowDown');
+            var selectedAfterFirst = Array.from(rows).map(r => r.classList.contains('keyboard-selected'));
+            press('ArrowDown');
+            var selectedAfterSecond = Array.from(rows).map(r => r.classList.contains('keyboard-selected'));
+            press('Enter');
+            window.__jsdom_result = { selectedAfterFirst: selectedAfterFirst, selectedAfterSecond: selectedAfterSecond, calls: calls };
+        ''')
+        self.assertEqual(result['selectedAfterFirst'], [True, False], 'first ArrowDown must select the first row')
+        self.assertEqual(result['selectedAfterSecond'], [False, True], 'second ArrowDown must move to the second row')
+        self.assertEqual(result['calls'], ['bbb'], "Enter must open the keyboard-selected row's analysis")
+
+    def test_arrow_key_navigation_data_table_rows(self):
+        """Up/Down must move a 'keyboard-selected' highlight among the
+        currently visible section's data-table rows (not a hidden tab's
+        rows), without expanding any of them - Enter then toggles
+        whichever row is highlighted, same as clicking it."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.body.insertAdjacentHTML('beforeend', `
+                <div class="section" id="section-alert">
+                    <table><tbody>
+                        <tr data-id="1" onclick="toggleRow(this, event)"><td>row1</td></tr>
+                        <tr class="detail-row"><td>detail1</td></tr>
+                        <tr data-id="2" onclick="toggleRow(this, event)"><td>row2</td></tr>
+                        <tr class="detail-row"><td>detail2</td></tr>
+                    </tbody></table>
+                </div>
+                <div class="section section-hidden" id="section-all">
+                    <table><tbody>
+                        <tr data-id="99" onclick="toggleRow(this, event)"><td>hidden-row</td></tr>
+                    </tbody></table>
+                </div>
+            `);
+            function press(key) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: key}));
+            }
+            press('ArrowDown');
+            var row1 = document.querySelector('tr[data-id="1"]');
+            var row2 = document.querySelector('tr[data-id="2"]');
+            var selectedAfterFirst = [row1.classList.contains('keyboard-selected'), row2.classList.contains('keyboard-selected')];
+            var expandedAfterFirst = row1.classList.contains('expanded-row');
+            press('Enter');
+            var expandedAfterEnter = row1.classList.contains('expanded-row');
+            window.__jsdom_result = { selectedAfterFirst: selectedAfterFirst, expandedAfterFirst: expandedAfterFirst, expandedAfterEnter: expandedAfterEnter };
+        ''')
+        self.assertEqual(result['selectedAfterFirst'], [True, False],
+                         'ArrowDown must select the first visible row (only from the currently visible section)')
+        self.assertFalse(result['expandedAfterFirst'], 'ArrowDown alone must not expand the row')
+        self.assertTrue(result['expandedAfterEnter'], 'Enter must expand the keyboard-selected row')
+
+    def test_arrow_key_navigation_data_table_rows_binary_analysis(self):
+        """REGRESSION: a binary-only analysis has no stat-card tabs, and
+        buildBinaryAnalysisView() renders its YARA-match table directly
+        into #sections with no .section wrapper around it (unlike every
+        pcap/log tab's own .section block) - Up/Down must still work by
+        falling back to querying #sections directly when no .section
+        matches."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('sections').innerHTML = `
+                <div class="section-content"><table><tbody>
+                    <tr data-id="1" onclick="toggleRow(this, event)"><td>rule1</td></tr>
+                    <tr class="detail-row"><td>detail1</td></tr>
+                    <tr data-id="2" onclick="toggleRow(this, event)"><td>rule2</td></tr>
+                    <tr class="detail-row"><td>detail2</td></tr>
+                </tbody></table></div>
+            `;
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown'}));
+            var row1 = document.querySelector('tr[data-id="1"]');
+            window.__jsdom_result = { selected: row1.classList.contains('keyboard-selected') };
+        ''')
+        self.assertTrue(result['selected'],
+                        'ArrowDown must select the first row of a binary analysis\'s YARA table (no .section wrapper)')
+
+    def test_enter_on_data_table_row_does_not_reactivate_stale_sample_card(self):
+        """REGRESSION: showAnalysisUI() only hides #inputBoxes (display:none)
+        without clearing its innerHTML, so a .sample-card the user arrow-selected
+        on the welcome screen (e.g. 'Sample binary file') keeps its
+        keyboard-selected class after the user navigates into that analysis.
+        activateKeyboardSelection() must not click that stale, invisible sample
+        card when the user later presses Enter on a data-table row - it must
+        activate the row instead. (Previously this re-triggered the sample's
+        loadSampleUrl() and looked like the app was re-analyzing the file.)"""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').innerHTML = '<div class="sample-card">Sample binary file</div>';
+            var card = document.querySelector('.sample-card');
+            card.classList.add('keyboard-selected');
+            var clicked = [];
+            card.addEventListener('click', function() { clicked.push('sample-card'); });
+
+            document.getElementById('inputBoxes').style.display = 'none';
+            document.getElementById('sections').innerHTML = `
+                <div class="section-content"><table><tbody>
+                    <tr data-id="1" onclick="toggleRow(this, event)"><td>rule1</td></tr>
+                    <tr class="detail-row"><td>detail1</td></tr>
+                </tbody></table></div>
+            `;
+            var row = document.querySelector('tr[data-id="1"]');
+            row.addEventListener('click', function() { clicked.push('row'); });
+
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown'}));
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
+
+            window.__jsdom_result = { clicked: clicked };
+        ''')
+        self.assertEqual(result['clicked'], ['row'],
+                         'Enter must activate the selected data-table row, not a stale hidden sample card')
+
+    def test_left_right_then_up_down_clears_sample_card_selection(self):
+        """REGRESSION: on the welcome screen, Left/Right (sample cards) and
+        Up/Down (previous-analysis rows) are two independent selection
+        tracks. Selecting a sample card with Left/Right and then moving with
+        Up/Down must clear the sample card's keyboard-selected highlight, so
+        Enter activates the highlighted previous-analysis row instead of the
+        stale sample card."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = '';
+            document.getElementById('inputBoxes').insertAdjacentHTML('beforeend', `
+                <div class="sample-card">Sample pcap file</div>
+                <div class="sample-card">Sample log file</div>
+                <div class="previous-analysis-row"><a href="?file=abc">abc</a></div>
+                <div class="previous-analysis-row"><a href="?file=def">def</a></div>
+            `);
+            var sampleClicked = [];
+            document.querySelectorAll('.sample-card').forEach(c => c.addEventListener('click', () => sampleClicked.push('sample')));
+            var linkClicked = [];
+            document.querySelectorAll('.previous-analysis-row a').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); linkClicked.push(a.getAttribute('href')); }));
+
+            function press(key) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: key}));
+            }
+            press('ArrowRight');
+            press('ArrowDown');
+            var sampleStillSelected = document.querySelector('.sample-card.keyboard-selected') !== null;
+            var rowSelected = document.querySelector('.previous-analysis-row.keyboard-selected') !== null;
+            press('Enter');
+
+            window.__jsdom_result = {
+                sampleStillSelected: sampleStillSelected,
+                rowSelected: rowSelected,
+                sampleClicked: sampleClicked,
+                linkClicked: linkClicked
+            };
+        ''')
+        self.assertFalse(result['sampleStillSelected'],
+                         'ArrowDown must clear a sample card selected via ArrowRight/ArrowLeft')
+        self.assertTrue(result['rowSelected'], 'ArrowDown must select a previous-analysis row')
+        self.assertEqual(result['sampleClicked'], [], 'Enter must not click the stale sample card')
+        self.assertEqual(result['linkClicked'], ['?file=abc'], 'Enter must activate the highlighted previous-analysis row')
+
+    def test_up_down_then_left_right_clears_previous_analysis_row_selection(self):
+        """REGRESSION (inverse of the above): selecting a previous-analysis
+        row with Up/Down and then moving with Left/Right must clear the
+        row's keyboard-selected highlight, so Enter activates the
+        highlighted sample card instead of the stale row."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = '';
+            document.getElementById('inputBoxes').insertAdjacentHTML('beforeend', `
+                <div class="sample-card">Sample pcap file</div>
+                <div class="sample-card">Sample log file</div>
+                <div class="previous-analysis-row"><a href="?file=abc">abc</a></div>
+                <div class="previous-analysis-row"><a href="?file=def">def</a></div>
+            `);
+            var sampleClicked = [];
+            document.querySelectorAll('.sample-card').forEach(c => c.addEventListener('click', () => sampleClicked.push('sample')));
+            var linkClicked = [];
+            document.querySelectorAll('.previous-analysis-row a').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); linkClicked.push(a.getAttribute('href')); }));
+
+            function press(key) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: key}));
+            }
+            press('ArrowDown');
+            press('ArrowRight');
+            var rowStillSelected = document.querySelector('.previous-analysis-row.keyboard-selected') !== null;
+            var sampleSelected = document.querySelector('.sample-card.keyboard-selected') !== null;
+            press('Enter');
+
+            window.__jsdom_result = {
+                rowStillSelected: rowStillSelected,
+                sampleSelected: sampleSelected,
+                sampleClicked: sampleClicked,
+                linkClicked: linkClicked
+            };
+        ''')
+        self.assertFalse(result['rowStillSelected'],
+                         'ArrowRight must clear a previous-analysis row selected via ArrowDown/ArrowUp')
+        self.assertTrue(result['sampleSelected'], 'ArrowRight must select a sample card')
+        self.assertEqual(result['linkClicked'], [], 'Enter must not activate the stale previous-analysis row')
+        self.assertEqual(result['sampleClicked'], ['sample'], 'Enter must click the highlighted sample card')
+
+    def test_autocomplete_commands_cover_every_shortcut(self):
+        """AUTOCOMPLETE_COMMANDS is the single source of truth for the
+        themes/rules/settings/notes modal-openers (every theme's own entry
+        is covered separately by test_every_theme_is_autocompletable_by_its_own_name,
+        since those are generated rather than listed by hand here) - each
+        entry must wire its code to the right action."""
+        commands_block = JS_CONTENT.split('const AUTOCOMPLETE_COMMANDS = [')[1].split('\n        ];')[0]
+
+        def entry_for(code):
+            entry_match = re.search(re.escape(f"{{ code: '{code}'") + r'.*\}\s*,', commands_block)
+            self.assertIsNotNone(entry_match, f"AUTOCOMPLETE_COMMANDS has no entry for code '{code}'")
+            return entry_match.group(0)
+
+        modal_openers = {
+            'help': 'showHelpModal();',
+            'about': 'showAboutModal();',
+            'themes': 'showThemesModal();',
+            'rules': 'showRulesModal();',
+            'settings': 'showSettingsModal();',
+            'notes': 'showNotesModal();',
+        }
+        for code, call in modal_openers.items():
+            self.assertIn(call, entry_for(code), f"AUTOCOMPLETE_COMMANDS' '{code}' entry must call {call}")
+        self.assertIn('analysisOnly: true', entry_for('notes'),
+                      "'notes' must stay analysis-only, same as the old keyBuffer guard - "
+                      "showNotesModal() with no args has nothing meaningful to attach to before an analysis is loaded")
+
+        delete_entry = entry_for('delete')
+        self.assertIn('openDeleteAnalysis(currentMd5, currentFileName)', delete_entry,
+                      "'delete' must call openDeleteAnalysis() with the current analysis, same as the header's delete icon")
+        self.assertIn('analysisOnly: true', delete_entry,
+                      "'delete' must stay analysis-only - there's no current analysis to delete on the welcome screen")
+
+        reanalyze_entry = entry_for('re-analyze')
+        self.assertIn('openReanalyzeModal(currentMd5, currentFileName)', reanalyze_entry,
+                      "'re-analyze' must call openReanalyzeModal() with the current analysis, same as the header's re-analyze icon")
+        self.assertIn('analysisOnly: true', reanalyze_entry,
+                      "'re-analyze' must stay analysis-only - there's no current analysis to re-analyze on the welcome screen")
+
+        search_entry = entry_for('search')
+        self.assertIn("getElementById('searchInput').focus()", search_entry,
+                      "'search' must focus #searchInput rather than open a modal")
+        self.assertIn('analysisOnly: true', search_entry,
+                      "'search' must stay analysis-only - #searchBarContainer is display:none on the welcome screen")
+
+        clear_entry = entry_for('clear')
+        self.assertIn('clearAllFilters()', clear_entry,
+                      "'clear' must call clearAllFilters(), same as the filter bar's own Clear All button")
+        self.assertIn('analysisOnly: true', clear_entry,
+                      "'clear' must stay analysis-only - there are no search/filters to clear on the welcome screen")
+
+        sankey_entry = entry_for('sankey')
+        self.assertIn('toggleDiagram()', sankey_entry,
+                      "'sankey' must call toggleDiagram(), same as clicking the Sankey Diagram section's own toggle bar")
+        self.assertIn('analysisOnly: true', sankey_entry,
+                      "'sankey' must stay analysis-only - there's no Sankey Diagram section on the welcome screen")
+
+        aggregation_entry = entry_for('aggregation')
+        self.assertIn('toggleAggregations()', aggregation_entry,
+                      "'aggregation' must call toggleAggregations(), same as clicking the Aggregation Tables section's own toggle bar")
+        self.assertIn('analysisOnly: true', aggregation_entry,
+                      "'aggregation' must stay analysis-only - there's no Aggregation Tables section on the welcome screen")
+
+        self.assertIn('showSecurityOnionModal()', entry_for('advanced features'),
+                      "'advanced features' must call showSecurityOnionModal()")
+
+        external_links = {
+            'documentation': 'https://so-crates.org',
+            'security onion': 'https://securityonion.net',
+            'github repo': 'https://github.com/dougburks/so-crates',
+            'pcap samples': 'https://malware-traffic-analysis.net',
+            'log samples': 'https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES',
+            'binary samples': 'https://www.eicar.org/',
+        }
+        for code, url in external_links.items():
+            entry = entry_for(code)
+            self.assertIn(f"window.open('{url}', '_blank', 'noopener,noreferrer')", entry,
+                          f"'{code}' must open {url} in a new, non-opener tab")
+
+        for code in ('upload', 'import', 'previous analyses'):
+            entry = entry_for(code)
+            self.assertIn('showWelcome()', entry, f"'{code}' must call showWelcome()")
+            self.assertIn('analysisOnly: true', entry,
+                          f"'{code}' must be hidden while already on the welcome screen it navigates to")
+
+        copy_md5_entry = entry_for('copy md5 hash to clipboard')
+        self.assertIn('copyMd5ToClipboard(currentMd5)', copy_md5_entry,
+                      "'copy md5 hash to clipboard' must call copyMd5ToClipboard(currentMd5), same as clicking the header's own MD5 field")
+        self.assertIn('analysisOnly: true', copy_md5_entry,
+                      "'copy md5 hash to clipboard' must stay analysis-only - there's no MD5 to copy on the welcome screen")
+
+        rename_entry = entry_for('rename analysis')
+        self.assertIn('startRenameAnalysis()', rename_entry,
+                      "'rename analysis' must call startRenameAnalysis()")
+        self.assertIn('analysisOnly: true', rename_entry,
+                      "'rename analysis' must stay analysis-only - there's no analysis to rename on the welcome screen")
+
+        filter_fn_block = JS_CONTENT.split('function filterAutocomplete()')[1].split('\n        }')[0]
+        self.assertIn('getDataTypeAutocompleteCommands()', filter_fn_block,
+                      'filterAutocomplete() must fold in the data-type stat-card tabs, not just the static AUTOCOMPLETE_COMMANDS list')
+
+    def test_autocomplete_trigger_key_opens_modal_prefilled(self):
+        """Behavioral: a bare letter/digit outside of input fields opens the
+        command palette pre-seeded with that character, rather than
+        silently starting an invisible buffer match the way the old
+        keyBuffer-based easter eggs did."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'r', bubbles: true, cancelable: true}));
+            window.__jsdom_result = {
+                modalOpen: document.getElementById('autocompleteModal').classList.contains('active'),
+                inputValue: document.getElementById('autocompleteInput').value,
+                hasRulesResult: document.getElementById('autocompleteResults').textContent.includes('Rules'),
+            };
+        ''')
+        self.assertTrue(result['modalOpen'], 'A bare letter keypress must open the command palette')
+        self.assertEqual(result['inputValue'], 'r', 'The palette input must be pre-seeded with the triggering character')
+        self.assertTrue(result['hasRulesResult'], '"r" must show Rules (and anything else starting with r) as a candidate')
+
+    def test_autocomplete_full_flow_opens_help_modal(self):
+        """Behavioral: typing h-e-l-p then Enter must open the Help modal -
+        available on both the welcome screen and the analysis page (unlike
+        notes/delete/re-analyze), same as the '?' shortcut it mirrors."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'h', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'elp'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { helpOpen: document.getElementById('helpModal').classList.contains('active') };
+        ''')
+        self.assertTrue(result['helpOpen'], 'Typing "help" then Enter must open the Help modal')
+
+    def test_autocomplete_full_flow_opens_about_modal(self):
+        """Behavioral: typing a-b-o-u-t then Enter must open the About
+        modal - available on both the welcome screen and the analysis
+        page, same as 'help'."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'a', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'bout'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { aboutOpen: document.getElementById('aboutModal').classList.contains('active') };
+        ''')
+        self.assertTrue(result['aboutOpen'], 'Typing "about" then Enter must open the About modal')
+
+    def test_autocomplete_full_flow_opens_rules_modal(self):
+        """Behavioral: typing r-u-l-e-s then Enter must open the Rules
+        modal, exercising the whole trigger -> live filter (via real input
+        events, not calling filterAutocomplete() directly) -> Enter chain."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'r', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'ules'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { rulesOpen: document.getElementById('rulesModal').classList.contains('active') };
+        ''')
+        self.assertTrue(result['rulesOpen'], 'Typing "rules" then Enter must open the Rules modal')
+
+    def test_autocomplete_full_flow_activates_theme_code(self):
+        """Behavioral: same flow as test_autocomplete_full_flow_opens_rules_modal
+        but for a theme name (CGA) instead of a modal-opener, since
+        AUTOCOMPLETE_COMMANDS wires the two kinds of entries to different
+        actions (setTheme()+showToast() vs. a show*Modal() call)."""
         from tests.jsdom_helper import js_statements
         result = js_statements('''
             setTheme('dark');
-            function press(k) {
-                document.dispatchEvent(new KeyboardEvent('keydown', {key: k}));
-            }
-            'xyz'.split('').forEach(press);
-            'bread'.split('').forEach(press);
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'c', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'ga'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
             window.__jsdom_result = { theme: getCurrentTheme() };
         ''')
-        self.assertEqual(result['theme'], 'breadbin-blue',
-                         'Typing bread after other keystrokes must still activate Breadbin Blue theme')
+        self.assertEqual(result['theme'], 'cga', 'Typing "cga" then Enter must activate the CGA theme')
 
-    def test_vaporwave_easter_egg_exists(self):
-        """Typing vapor outside of input fields must activate the Vaporwave theme."""
-        self.assertIn("keyBuffer.endsWith('vapor')", JS_CONTENT,
-                      'JS must check for the vapor easter egg sequence')
-        self.assertIn("setTheme('vaporwave')", JS_CONTENT,
-                      'Easter egg must activate Vaporwave')
-        self.assertIn('Switched to Vaporwave theme', JS_CONTENT,
-                      'Easter egg activation message must reference Vaporwave theme')
-
-    def test_vaporwave_easter_egg_short_code_triggers_via_endswith(self):
-        """REGRESSION: same class of bug as the cga/bread easter eggs - "vapor"
-        is exactly 5 characters (the buffer's full capacity), so this also
-        verifies the buffer-fill edge case works via endsWith(), not just
-        codes shorter than 5 characters."""
+    def test_autocomplete_ignores_input_fields(self):
+        """Typing while a real input field is focused must not open the
+        command palette - the trigger's own isNavigableKeyContext() guard,
+        same as every other single-key shortcut in this app."""
         from tests.jsdom_helper import js_statements
         result = js_statements('''
-            setTheme('dark');
-            function press(k) {
-                document.dispatchEvent(new KeyboardEvent('keydown', {key: k}));
-            }
-            'xyz'.split('').forEach(press);
-            'vapor'.split('').forEach(press);
-            window.__jsdom_result = { theme: getCurrentTheme() };
+            var input = document.createElement('input');
+            document.body.appendChild(input);
+            input.focus();
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'r', bubbles: true, cancelable: true}));
+            input.remove();
+            window.__jsdom_result = { modalOpen: document.getElementById('autocompleteModal').classList.contains('active') };
         ''')
-        self.assertEqual(result['theme'], 'vaporwave',
-                         'Typing vapor after other keystrokes must still activate Vaporwave theme')
+        self.assertFalse(result['modalOpen'], 'Typing in a real input field must not open the command palette')
 
-    def test_luna_blue_easter_egg_exists(self):
-        """Typing luna outside of input fields must activate the Luna Blue theme."""
-        self.assertIn("keyBuffer.endsWith('luna')", JS_CONTENT,
-                      'JS must check for the luna easter egg sequence')
-        self.assertIn("setTheme('luna-blue')", JS_CONTENT,
-                      'Easter egg must activate Luna Blue')
-        self.assertIn('Switched to Luna Blue theme', JS_CONTENT,
-                      'Easter egg activation message must reference Luna Blue theme')
-
-    def test_luna_blue_easter_egg_short_code_triggers_via_endswith(self):
-        """REGRESSION: same class of bug as the cga/bread/vapor easter eggs -
-        a code shorter than the 5-char keyBuffer (like "luna") must actually
-        trigger after other keystrokes, not just in the first few
-        keystrokes after page load."""
+    def test_autocomplete_hides_notes_on_welcome_screen(self):
+        """REGRESSION: 'notes' must not appear as a candidate before an
+        analysis is loaded - same as the old keyBuffer guard, but now it
+        needs to disappear from the live results instead of merely not
+        firing."""
         from tests.jsdom_helper import js_statements
         result = js_statements('''
-            setTheme('dark');
-            function press(k) {
-                document.dispatchEvent(new KeyboardEvent('keydown', {key: k}));
-            }
-            'xyz'.split('').forEach(press);
-            'luna'.split('').forEach(press);
-            window.__jsdom_result = { theme: getCurrentTheme() };
+            document.getElementById('inputBoxes').style.display = 'block';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'n', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { hasNotes: document.getElementById('autocompleteResults').textContent.includes('Notes') };
         ''')
-        self.assertEqual(result['theme'], 'luna-blue',
-                         'Typing luna after other keystrokes must still activate Luna Blue theme')
+        self.assertFalse(result['hasNotes'], '"n" must not offer Notes as a candidate on the welcome screen')
 
-    def test_amber_easter_egg_exists(self):
-        """Typing amber outside of input fields must activate the Amber CRT theme."""
-        self.assertIn("keyBuffer.endsWith('amber')", JS_CONTENT,
-                      'JS must check for the amber easter egg sequence')
-        self.assertIn("setTheme('amber')", JS_CONTENT,
-                      'Easter egg must activate Amber CRT')
-        self.assertIn('Switched to Amber CRT theme', JS_CONTENT,
-                      'Easter egg activation message must reference Amber CRT theme')
-
-    def test_amber_easter_egg_short_code_triggers_via_endswith(self):
-        """REGRESSION: same class of bug as the cga/bread/vapor/luna easter
-        eggs - "amber" is exactly 5 characters (the buffer's full
-        capacity), so this also verifies the buffer-fill edge case works
-        via endsWith(), not just codes shorter than 5 characters."""
+    def test_autocomplete_full_flow_opens_delete_modal(self):
+        """Behavioral: typing d-e-l-e-t-e then Enter must open the delete-
+        analysis confirmation modal, pre-filled with the current analysis's
+        name - same flow as test_autocomplete_full_flow_opens_rules_modal."""
         from tests.jsdom_helper import js_statements
         result = js_statements('''
-            setTheme('dark');
-            function press(k) {
-                document.dispatchEvent(new KeyboardEvent('keydown', {key: k}));
-            }
-            'xyz'.split('').forEach(press);
-            'amber'.split('').forEach(press);
-            window.__jsdom_result = { theme: getCurrentTheme() };
+            window.currentMd5 = 'abc123';
+            window.currentFileName = 'test.pcap';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'd', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'elete'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = {
+                modalOpen: document.getElementById('deleteConfirmModal').classList.contains('active'),
+                fileName: document.getElementById('deleteFileName').textContent,
+            };
         ''')
-        self.assertEqual(result['theme'], 'amber',
-                         'Typing amber after other keystrokes must still activate Amber CRT theme')
+        self.assertTrue(result['modalOpen'], 'Typing "delete" then Enter must open the delete confirmation modal')
+        self.assertEqual(result['fileName'], 'test.pcap', 'The delete confirmation must reference the current analysis')
 
-    def test_dos_blue_easter_egg_exists(self):
-        """Typing dos outside of input fields must activate the DOS Blue theme."""
-        self.assertIn("keyBuffer.endsWith('dos')", JS_CONTENT,
-                      'JS must check for the dos easter egg sequence')
-        self.assertIn("setTheme('dos-blue')", JS_CONTENT,
-                      'Easter egg must activate DOS Blue')
-        self.assertIn('Switched to DOS Blue theme', JS_CONTENT,
-                      'Easter egg activation message must reference DOS Blue theme')
-
-    def test_dos_blue_easter_egg_short_code_triggers_via_endswith(self):
-        """REGRESSION: same class of bug as the cga/bread easter eggs - a
-        code shorter than the 5-char keyBuffer (like "dos") must actually
-        trigger after other keystrokes, not just in the first few
-        keystrokes after page load."""
+    def test_autocomplete_hides_delete_on_welcome_screen(self):
+        """REGRESSION: 'delete' must not appear as a candidate before an
+        analysis is loaded - there's no current analysis to delete."""
         from tests.jsdom_helper import js_statements
         result = js_statements('''
-            setTheme('dark');
-            function press(k) {
-                document.dispatchEvent(new KeyboardEvent('keydown', {key: k}));
-            }
-            'xyz'.split('').forEach(press);
-            'dos'.split('').forEach(press);
-            window.__jsdom_result = { theme: getCurrentTheme() };
+            document.getElementById('inputBoxes').style.display = 'block';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'd', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { hasDelete: document.getElementById('autocompleteResults').textContent.includes('Delete') };
         ''')
-        self.assertEqual(result['theme'], 'dos-blue',
-                         'Typing dos after other keystrokes must still activate DOS Blue theme')
+        self.assertFalse(result['hasDelete'], '"d" must not offer Delete as a candidate on the welcome screen')
 
-    def test_digital_frontier_easter_egg_exists(self):
-        """Typing digit outside of input fields must activate the Digital Frontier theme."""
-        self.assertIn("keyBuffer.endsWith('digit')", JS_CONTENT,
-                      'JS must check for the digit easter egg sequence')
-        self.assertIn("setTheme('digital-frontier')", JS_CONTENT,
-                      'Easter egg must activate Digital Frontier')
-        self.assertIn('Switched to Digital Frontier theme', JS_CONTENT,
-                      'Easter egg activation message must reference Digital Frontier theme')
-
-    def test_digital_frontier_easter_egg_short_code_triggers_via_endswith(self):
-        """REGRESSION: same class of bug as the cga/bread/dos easter eggs -
-        a code shorter than the 5-char keyBuffer (like "digit") must
-        actually trigger after other keystrokes, not just in the first few
-        keystrokes after page load."""
+    def test_autocomplete_full_flow_opens_reanalyze_modal(self):
+        """Behavioral: typing r-e - a-n-a-l-y-z-e then Enter must open the
+        re-analyze confirmation modal, pre-filled with the current
+        analysis's name - same flow as test_autocomplete_full_flow_opens_rules_modal.
+        openReanalyzeModal() itself awaits a status fetch before setting
+        .active (see its own definition), so this must wait a tick for that
+        to resolve before checking the modal state, unlike the other
+        full-flow tests whose actions are all synchronous."""
         from tests.jsdom_helper import js_statements
         result = js_statements('''
-            setTheme('dark');
-            function press(k) {
-                document.dispatchEvent(new KeyboardEvent('keydown', {key: k}));
-            }
-            'xyz'.split('').forEach(press);
-            'digit'.split('').forEach(press);
-            window.__jsdom_result = { theme: getCurrentTheme() };
+            window.currentMd5 = 'abc123';
+            window.currentFileName = 'test.pcap';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'r', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'e-analyze'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            await new Promise(function(r) { setTimeout(r, 20); });
+            window.__jsdom_result = {
+                modalOpen: document.getElementById('reanalyzeConfirmModal').classList.contains('active'),
+                fileName: document.getElementById('reanalyzeFileName').textContent,
+            };
         ''')
-        self.assertEqual(result['theme'], 'digital-frontier',
-                         'Typing digit after other keystrokes must still activate Digital Frontier theme')
+        self.assertTrue(result['modalOpen'], 'Typing "re-analyze" then Enter must open the re-analyze confirmation modal')
+        self.assertEqual(result['fileName'], 'test.pcap', 'The re-analyze confirmation must reference the current analysis')
 
-    def test_retro_handheld_easter_egg_exists(self):
-        """Typing retro outside of input fields must activate the Retro Handheld theme."""
-        self.assertIn("keyBuffer.endsWith('retro')", JS_CONTENT,
-                      'JS must check for the retro easter egg sequence')
-        self.assertIn("setTheme('retro-handheld')", JS_CONTENT,
-                      'Easter egg must activate Retro Handheld')
-        self.assertIn('Switched to Retro Handheld theme', JS_CONTENT,
-                      'Easter egg activation message must reference Retro Handheld theme')
-
-    def test_retro_handheld_easter_egg_short_code_triggers_via_endswith(self):
-        """REGRESSION: same class of bug as the cga/bread/dos/digit easter
-        eggs - a code shorter than the 5-char keyBuffer (like "retro") must
-        actually trigger after other keystrokes, not just in the first few
-        keystrokes after page load."""
+    def test_autocomplete_hides_reanalyze_on_welcome_screen(self):
+        """REGRESSION: 're-analyze' must not appear as a candidate before an
+        analysis is loaded - there's no current analysis to re-analyze."""
         from tests.jsdom_helper import js_statements
         result = js_statements('''
-            setTheme('dark');
-            function press(k) {
-                document.dispatchEvent(new KeyboardEvent('keydown', {key: k}));
-            }
-            'xyz'.split('').forEach(press);
-            'retro'.split('').forEach(press);
-            window.__jsdom_result = { theme: getCurrentTheme() };
+            document.getElementById('inputBoxes').style.display = 'block';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'r', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { hasReanalyze: document.getElementById('autocompleteResults').textContent.includes('Re-analyze') };
         ''')
-        self.assertEqual(result['theme'], 'retro-handheld',
-                         'Typing retro after other keystrokes must still activate Retro Handheld theme')
+        self.assertFalse(result['hasReanalyze'], '"r" must not offer Re-analyze as a candidate on the welcome screen')
 
-    def test_hacker_mode_easter_egg_ignores_input_fields(self):
-        """Easter egg must not trigger while typing in form controls."""
-        listener_match = re.search(r'document\.addEventListener\(\'keydown\',\s*function\(e\)\s*\{', JS_CONTENT)
-        self.assertIsNotNone(listener_match, 'keydown listener must exist')
-        start = listener_match.end()
-        brace_count = 1
-        pos = start
-        while pos < len(JS_CONTENT) and brace_count > 0:
-            if JS_CONTENT[pos] == '{':
-                brace_count += 1
-            elif JS_CONTENT[pos] == '}':
-                brace_count -= 1
-            pos += 1
-        listener_body = JS_CONTENT[start:pos]
-        self.assertIn("tag === 'INPUT'", listener_body,
-                      'Easter egg must ignore INPUT elements')
-        self.assertIn("tag === 'TEXTAREA'", listener_body,
-                      'Easter egg must ignore TEXTAREA elements')
-        self.assertIn("tag === 'SELECT'", listener_body,
-                      'Easter egg must ignore SELECT elements')
-        self.assertIn('isContentEditable', listener_body,
-                      'Easter egg must ignore contenteditable elements')
+    def test_autocomplete_full_flow_focuses_search_bar(self):
+        """Behavioral: typing s-e-a-r-c-h then Enter must close the palette
+        and focus #searchInput - unlike every other command, this one
+        doesn't open a modal at all."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            document.getElementById('searchBarContainer').style.display = 'block';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 's', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'earch'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = {
+                modalOpen: document.getElementById('autocompleteModal').classList.contains('active'),
+                searchFocused: document.activeElement === document.getElementById('searchInput'),
+            };
+        ''')
+        self.assertFalse(result['modalOpen'], 'Typing "search" then Enter must close the command palette')
+        self.assertTrue(result['searchFocused'], 'Typing "search" then Enter must focus the search bar')
+
+    def test_autocomplete_hides_search_on_welcome_screen(self):
+        """REGRESSION: 'search' must not appear as a candidate before an
+        analysis is loaded - #searchBarContainer is display:none there, so
+        focusing it would silently do nothing visible."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'block';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 's', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { hasSearch: document.getElementById('autocompleteResults').textContent.includes('Search bar') };
+        ''')
+        self.assertFalse(result['hasSearch'], '"s" must not offer Go to Search bar as a candidate on the welcome screen')
+
+    def test_autocomplete_full_flow_clears_filter_bar(self):
+        """Behavioral: typing c-l-e-a-r then Enter must close the palette
+        and clear the active filter bar - same effect as clicking its own
+        Clear All button."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            var fb = document.getElementById('filterBarContainer');
+            fb.style.display = 'block';
+            fb.innerHTML = '<div class="filter-bar"><span class="filter-chip">dest_ip: 1.2.3.4</span><button class="filter-clear-all">Clear All</button></div>';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'c', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'lear'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = {
+                modalOpen: document.getElementById('autocompleteModal').classList.contains('active'),
+                filterBarDisplay: document.getElementById('filterBarContainer').style.display,
+            };
+        ''')
+        self.assertFalse(result['modalOpen'], 'Typing "clear" then Enter must close the command palette')
+        self.assertEqual(result['filterBarDisplay'], 'none', 'Typing "clear" then Enter must clear the active filters')
+
+    def test_autocomplete_hides_clear_on_welcome_screen(self):
+        """REGRESSION: 'clear' must not appear as a candidate before an
+        analysis is loaded - there are no search/filters to clear."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'block';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'c', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { hasClear: document.getElementById('autocompleteResults').textContent.includes('Clear all search filters') };
+        ''')
+        self.assertFalse(result['hasClear'], '"c" must not offer Clear all search filters as a candidate on the welcome screen')
+
+    def test_autocomplete_full_flow_toggles_sankey_diagram(self):
+        """Behavioral: typing s-a-n-k-e-y then Enter must close the palette
+        and call toggleDiagram(), same as clicking the Sankey Diagram
+        section's own toggle bar."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            var sankeyPanel = document.getElementById('sankeyPanel');
+            sankeyPanel.style.display = 'block';
+            sankeyPanel.innerHTML = '<div class="section-toggle-bar" onclick="toggleDiagram()">\\u25b8 Sankey Diagram</div>';
+            window.__diagramToggled = 0;
+            window.toggleDiagram = function() { window.__diagramToggled++; };
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 's', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'ankey'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = {
+                calls: window.__diagramToggled,
+                modalOpen: document.getElementById('autocompleteModal').classList.contains('active'),
+            };
+        ''')
+        self.assertEqual(result['calls'], 1, 'Typing "sankey" then Enter must call toggleDiagram() exactly once')
+        self.assertFalse(result['modalOpen'], 'Typing "sankey" then Enter must close the command palette')
+
+    def test_autocomplete_full_flow_toggles_aggregation_tables(self):
+        """Behavioral: typing a-g-g-r-e-g-a-t-i-o-n then Enter must close
+        the palette and call toggleAggregations(), same as clicking the
+        Aggregation Tables section's own toggle bar."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            var aggContainer = document.getElementById('aggregations');
+            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">\\u25b8 Aggregation Tables</div></div>';
+            window.__aggToggled = 0;
+            window.toggleAggregations = function() { window.__aggToggled++; };
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'a', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'ggregation'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = {
+                calls: window.__aggToggled,
+                modalOpen: document.getElementById('autocompleteModal').classList.contains('active'),
+            };
+        ''')
+        self.assertEqual(result['calls'], 1, 'Typing "aggregation" then Enter must call toggleAggregations() exactly once')
+        self.assertFalse(result['modalOpen'], 'Typing "aggregation" then Enter must close the command palette')
+
+    def test_autocomplete_hides_sankey_and_aggregation_on_welcome_screen(self):
+        """REGRESSION: 'sankey'/'aggregation' must not appear as candidates
+        before an analysis is loaded - neither section exists there."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'block';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 's', bubbles: true, cancelable: true}));
+            var hasSankey = document.getElementById('autocompleteResults').textContent.includes('Sankey');
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'a', bubbles: true, cancelable: true}));
+            var hasAggregation = document.getElementById('autocompleteResults').textContent.includes('Aggregation');
+            window.__jsdom_result = { hasSankey: hasSankey, hasAggregation: hasAggregation };
+        ''')
+        self.assertFalse(result['hasSankey'], '"s" must not offer Toggle Sankey Diagram as a candidate on the welcome screen')
+        self.assertFalse(result['hasAggregation'], '"a" must not offer Toggle Aggregation Tables as a candidate on the welcome screen')
+
+    def test_autocomplete_full_flow_opens_advanced_features_modal(self):
+        """Behavioral: typing "advanced features" then Enter must open the
+        Security Onion feature-comparison modal."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'a', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'dvanced features'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { modalOpen: document.getElementById('securityOnionModal').classList.contains('active') };
+        ''')
+        self.assertTrue(result['modalOpen'], 'Typing "advanced features" then Enter must open the feature comparison modal')
+
+    def test_autocomplete_full_flow_opens_external_links(self):
+        """Behavioral: each external-link command must open its own URL in
+        a new tab and close the palette - checked in one pass since they're
+        all the same shape (window.open + closeAutocompleteModal)."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            window.__opened = [];
+            window.open = function(url) { window.__opened.push(url); };
+            function type(firstChar, rest) {
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: firstChar, bubbles: true, cancelable: true}));
+                var input = document.getElementById('autocompleteInput');
+                rest.split('').forEach(function(ch) {
+                    input.value += ch;
+                    input.dispatchEvent(new Event('input', {bubbles: true}));
+                });
+                input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            }
+            var opened = {};
+            type('d', 'ocumentation'); opened.documentation = window.__opened.slice(); window.__opened = [];
+            type('s', 'ecurity onion'); opened.securityOnion = window.__opened.slice(); window.__opened = [];
+            type('g', 'ithub repo'); opened.github = window.__opened.slice(); window.__opened = [];
+            type('p', 'cap samples'); opened.pcap = window.__opened.slice(); window.__opened = [];
+            type('l', 'og samples'); opened.log = window.__opened.slice(); window.__opened = [];
+            type('b', 'inary samples'); opened.binary = window.__opened.slice(); window.__opened = [];
+            window.__jsdom_result = opened;
+        ''')
+        self.assertEqual(result['documentation'], ['https://so-crates.org'])
+        self.assertEqual(result['securityOnion'], ['https://securityonion.net'])
+        self.assertEqual(result['github'], ['https://github.com/dougburks/so-crates'])
+        self.assertEqual(result['pcap'], ['https://malware-traffic-analysis.net'])
+        self.assertEqual(result['log'], ['https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES'])
+        self.assertEqual(result['binary'], ['https://www.eicar.org/'])
+
+    def test_autocomplete_full_flow_upload_import_previous_analyses_go_to_welcome(self):
+        """Behavioral: 'upload'/'import'/'previous analyses' all call
+        showWelcome() - three different mental models for the same
+        destination, not three different screens."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            window.__welcomeCalls = 0;
+            window.showWelcome = function() { window.__welcomeCalls++; };
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'u', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'pload'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { calls: window.__welcomeCalls };
+        ''')
+        self.assertEqual(result['calls'], 1, 'Typing "upload" then Enter must call showWelcome() exactly once')
+
+    def test_autocomplete_hides_go_to_welcome_commands_while_on_welcome_screen(self):
+        """REGRESSION: 'upload'/'import'/'previous analyses' must not
+        appear as candidates while already on the welcome screen they'd
+        navigate to."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'block';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'u', bubbles: true, cancelable: true}));
+            var hasUpload = document.getElementById('autocompleteResults').textContent.includes('Upload');
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'i', bubbles: true, cancelable: true}));
+            var hasImport = document.getElementById('autocompleteResults').textContent.includes('Import');
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'p', bubbles: true, cancelable: true}));
+            var hasPrevious = document.getElementById('autocompleteResults').textContent.includes('Previous Analyses');
+            window.__jsdom_result = { hasUpload: hasUpload, hasImport: hasImport, hasPrevious: hasPrevious };
+        ''')
+        self.assertFalse(result['hasUpload'], '"u" must not offer Upload as a candidate on the welcome screen')
+        self.assertFalse(result['hasImport'], '"i" must not offer Import as a candidate on the welcome screen')
+        self.assertFalse(result['hasPrevious'], '"p" must not offer Previous Analyses as a candidate on the welcome screen')
+
+    def test_autocomplete_full_flow_copies_md5_to_clipboard(self):
+        """Behavioral: typing "md5" (a word-boundary match, not the code's
+        own first word) then Enter must copy currentMd5 via
+        navigator.clipboard.writeText, same as clicking the header's own
+        MD5 field."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            window.currentMd5 = 'abc123';
+            window.__copyCalls = [];
+            window.navigator.clipboard = { writeText: function(t) { window.__copyCalls.push(t); return Promise.resolve(); } };
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'm', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'd5'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            await new Promise(function(r) { setTimeout(r, 20); });
+            window.__jsdom_result = { copyCalls: window.__copyCalls };
+        ''')
+        self.assertEqual(result['copyCalls'], ['abc123'], 'Typing "md5" then Enter must copy currentMd5 to the clipboard')
+
+    def test_autocomplete_full_flow_starts_rename_analysis(self):
+        """Behavioral: typing "rename analysis" then Enter must call
+        startRenameAnalysis(), which swaps the header filename for an
+        editable input."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            var el = document.createElement('div');
+            el.id = 'appHeaderFilename';
+            document.body.appendChild(el);
+            window.currentFileName = 'test.pcap';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'r', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'ename analysis'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { hasRenameInput: !!document.querySelector('.app-header-filename-input') };
+        ''')
+        self.assertTrue(result['hasRenameInput'], 'Typing "rename analysis" then Enter must activate the inline rename input')
+
+    def test_autocomplete_hides_copy_md5_and_rename_on_welcome_screen(self):
+        """REGRESSION: 'copy md5 hash to clipboard'/'rename analysis' must
+        not appear as candidates before an analysis is loaded."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'block';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'm', bubbles: true, cancelable: true}));
+            var hasMd5 = document.getElementById('autocompleteResults').textContent.includes('MD5');
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'r', bubbles: true, cancelable: true}));
+            var hasRename = document.getElementById('autocompleteResults').textContent.includes('Rename Analysis');
+            window.__jsdom_result = { hasMd5: hasMd5, hasRename: hasRename };
+        ''')
+        self.assertFalse(result['hasMd5'], '"m" must not offer Copy MD5 hash to clipboard as a candidate on the welcome screen')
+        self.assertFalse(result['hasRename'], '"r" must not offer Rename Analysis as a candidate on the welcome screen')
+
+    def test_autocomplete_full_flow_switches_data_type_tab(self):
+        """Behavioral: data-type stat-card tabs (DNS, HTTP, All Events, ...)
+        are read fresh from #statsGrid, not a fixed list - which tabs exist
+        varies per analysis, so this builds a small fake #statsGrid and
+        confirms typing a tab's own label switches to it via the card's
+        real onclick (same as clicking it directly)."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            var grid = document.getElementById('statsGrid');
+            grid.innerHTML = '<div class="stat-card tab-active" onclick="showTab(\\'section-all\\', this)"><div class="stat-label">All Events</div></div>' +
+                              '<div class="stat-card" onclick="showTab(\\'section-dns\\', this)"><div class="stat-label">DNS</div></div>';
+            window.__calls = [];
+            window.showTab = function(id) { window.__calls.push(id); };
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'd', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'ns'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { calls: window.__calls, modalOpen: document.getElementById('autocompleteModal').classList.contains('active') };
+        ''')
+        self.assertEqual(result['calls'], ['section-dns'], 'Typing "dns" then Enter must switch to the DNS tab')
+        self.assertFalse(result['modalOpen'], 'Typing "dns" then Enter must close the command palette')
+
+    def test_autocomplete_data_type_tabs_absent_on_welcome_screen(self):
+        """REGRESSION: with no #statsGrid tabs rendered yet (welcome
+        screen), no data-type candidates should appear - only the static
+        commands/theme names."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'block';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'd', bubbles: true, cancelable: true}));
+            window.__jsdom_result = { hasGoTo: document.getElementById('autocompleteResults').textContent.includes('Go to') };
+        ''')
+        self.assertFalse(result['hasGoTo'], 'No "Go to <tab>" candidates should appear on the welcome screen (no #statsGrid tabs exist yet)')
+
+    def test_autocomplete_matches_a_second_word(self):
+        """REGRESSION: typing "alerts" must find both "Network Alerts" and
+        "File Alerts" - code.startsWith() alone can't do this (neither
+        label starts with "alerts"), so filterAutocomplete() must also
+        match a query against the start of any individual word in a
+        candidate's code, not just the code's own beginning."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            var grid = document.getElementById('statsGrid');
+            grid.innerHTML = '<div class="stat-card" onclick="showTab(\\'section-alert\\', this)"><div class="stat-label">Network Alerts</div></div>' +
+                              '<div class="stat-card" onclick="showTab(\\'section-filealerts\\', this)"><div class="stat-label">File Alerts</div></div>' +
+                              '<div class="stat-card tab-active" onclick="showTab(\\'section-dns\\', this)"><div class="stat-label">DNS</div></div>';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'a', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'lerts'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            window.__jsdom_result = Array.from(document.querySelectorAll('.autocomplete-item')).map(function(b) { return b.textContent.trim(); });
+        ''')
+        self.assertEqual(sorted(result), ['Go to File Alerts', 'Go to Network Alerts'],
+                         'Typing "alerts" must offer both Network Alerts and File Alerts as candidates')
+
+    def test_autocomplete_match_score_ranks_prefix_above_word_boundary_above_substring(self):
+        """autocompleteMatchScore() is what filterAutocomplete() sorts
+        results by - a whole-code prefix match ("dos" -> "dos blue") must
+        outrank a word-boundary-only match ("alerts" -> "network alerts"),
+        which must in turn outrank a bare mid-word substring match ("eme"
+        -> "themes") - it's what the user almost always means for a short
+        query, and shouldn't get buried under mid-word noise."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            window.__jsdom_result = {
+                wholePrefix: autocompleteMatchScore('dos blue', 'dos'),
+                wordBoundary: autocompleteMatchScore('network alerts', 'alerts'),
+                substringOnly: autocompleteMatchScore('themes', 'eme'),
+            };
+        ''')
+        self.assertGreater(result['wholePrefix'], result['wordBoundary'])
+        self.assertGreater(result['wordBoundary'], result['substringOnly'])
+
+    def test_autocomplete_matches_a_bare_mid_word_substring(self):
+        """Typing "eme" must find "Themes" - matching isn't limited to a
+        prefix of the whole code or of one of its words; any substring
+        anywhere in the code counts, so a query doesn't have to line up
+        with a word boundary the user may not remember."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'e', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'me'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            window.__jsdom_result = Array.from(document.querySelectorAll('.autocomplete-item')).map(function(b) { return b.textContent.trim(); });
+        ''')
+        self.assertIn('Open Themes', result, 'Typing "eme" must find "Open Themes" via a bare mid-word substring match')
+
+    def test_autocomplete_matches_hyphenated_code_by_its_second_word(self):
+        """REGRESSION: 're-analyze' is a hyphenated code - typing "analyze"
+        alone (not the full "re-analyze") must still find it, same
+        word-boundary matching as the multi-word "alerts" case, but split
+        on the hyphen instead of a space."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'a', bubbles: true, cancelable: true}));
+            var input = document.getElementById('autocompleteInput');
+            'nalyze'.split('').forEach(function(ch) {
+                input.value += ch;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            });
+            window.__jsdom_result = Array.from(document.querySelectorAll('.autocomplete-item')).map(function(b) { return b.textContent.trim(); });
+        ''')
+        self.assertEqual(result, ['Re-analyze'], 'Typing "analyze" must find "Re-analyze" via its hyphen-split second word')
 
     def test_opening_settings_closes_already_open_themes_modal(self):
         """REGRESSION: Help/Settings/Themes are all full-viewport overlays
@@ -3660,6 +5131,168 @@ class TestThemeAndMenu(unittest.TestCase):
             window.__jsdom_result = localStorage.getItem('socrates_hideHelp');
         ''')
         self.assertIsNone(result, 'opening Settings must not touch the Help "show again" preference when Help was never open')
+
+
+class TestThemedLoadingMessages(unittest.TestCase):
+    """Every theme in THEMES's 'fun' group gets its own fun, on-brand pool
+    of checkStatus() loading phrases (getPhaseMessages()) - every non-fun
+    theme gets the plain factual defaults."""
+
+    # One flat pool per theme now (not a separate curated set per
+    # checkStatus() phase - see getPhaseMessages()'s own comment for why),
+    # randomized independently per phase slot on each getPhaseMessages()
+    # call. These assert pool membership across many draws (never an
+    # unexpected value) and that more than one distinct value actually
+    # turns up (proving the pool is really being drawn from, not just
+    # always returning its first entry). 60 draws x 4 phase slots from a
+    # 12-item pool makes a false failure (240 identical picks in a row)
+    # astronomically unlikely: (1/12)^239.
+    THEMED_LOADING_PHRASES = {
+        'hacker': [
+            'Bypassing the firewall...', 'Rerouting through the mainframe...', 'Tracing the IP address...',
+            'Decrypting the stolen files...', 'Cracking the encryption...', 'Brute-forcing the login...',
+            'Uploading to the mainframe...', 'Injecting the payload...', 'Compiling the exploit...',
+            'Erasing the security footage...', 'Wiping the access logs...', 'Looping the security cameras...',
+        ],
+        'dos-blue': [
+            'Formatting C:\\ ...', 'Running CHKDSK...', 'Loading MS-DOS...',
+            'Defragging...', 'Scanning for viruses...', 'Compressing with DoubleSpace...',
+            'Editing config.sys...', 'Setting up device drivers...', 'Expanding the memory manager...',
+            'Editing autoexec.bat...', 'Writing to LPT1...', 'Buffering keyboard input...',
+        ],
+        'vaporwave': [
+            'Riding the information superhighway...', 'Connecting to the cyber sea...', 'Dialing into the grid...',
+            'Rewinding the VHS tape...', 'Polishing the marble bust...', 'Adjusting the chrome...',
+            'Downloading more RAM...', 'Loading the Windows 95 startup sound...', 'Rendering the sunset grid...',
+            'Achieving aesthetic...', 'Applying the VHS filter...', 'Syncing the neon palm trees...',
+        ],
+        'cga': [
+            'Loading CGA graphics driver...', 'Dialing the BBS...', 'Initializing the modem...',
+            'Reading from floppy disk...', 'Verifying the diskette...', 'Seeking track 0...',
+            'Swapping diskette 2 of 5...', 'Loading interrupt handlers...', 'Copying to expanded memory...',
+            'Beeping the PC speaker...', 'Writing to the printer buffer...', 'Flushing the keyboard buffer...',
+        ],
+        'amber': [
+            'Establishing terminal session...', 'Negotiating baud rate...', 'Connecting to the mainframe...',
+            'Paging through the file system...', 'Reading tape drive 0...', 'Listing directory contents...',
+            'Compiling FORTRAN...', 'Writing to core memory...', 'Running the batch job...',
+            'Printing to the line printer...', 'Scrolling the CRT buffer...', 'Archiving to magnetic tape...',
+        ],
+        'breadbin-blue': [
+            'LOAD "*",8,1...', 'Searching for tape...', 'Connecting the modem...',
+            'PEEKing and POKEing...', 'Reading from disk drive 8...', 'Verifying the floppy...',
+            'Running the BASIC program...', 'Loading from datasette...', 'Waiting for SYS 64738...',
+            'Writing to the 1541 drive...', 'Printing to the dot matrix...', 'Saving before the power flickers...',
+        ],
+        'digital-frontier': [
+            'Entering the Grid...', 'Riding the light cycle...', 'Scanning for the MCP...',
+            'Derezzing corrupted programs...', 'Searching the data streams...', 'Decoding the identity disc...',
+            'Compiling for the Grid...', 'Broadcasting across the network grid...', 'Rendering the light cycle trail...',
+            'Reviewing the game grid...', 'Contacting Tron...', 'Bypassing the MCP...',
+        ],
+        'luna-blue': [
+            'Connecting to the network...', 'Detecting new hardware...', 'Establishing dial-up connection...',
+            'Emptying the Recycle Bin...', 'Indexing for Windows Search...', 'Cleaning up temporary files...',
+            'Installing Windows updates...', 'Loading the Start menu...', 'Playing the startup chime...',
+            'Writing to the Event Viewer...', 'Checking for updates...', 'Saving your preferences...',
+        ],
+        'retro-handheld': [
+            'Linking up the Game Link cable...', 'Searching for a signal...', 'Syncing with the cartridge...',
+            'Reading the save cartridge...', 'Checking the battery save...', 'Blowing on the cartridge...',
+            'Loading level data...', 'Saving your progress...', 'Compressing sprite data...',
+            'Showing the low battery warning...', 'Writing to save slot 1...', 'Pausing the game...',
+        ],
+        'mp3-player': [
+            'Loading playlist...', 'Buffering...', 'Ripping the CD...',
+            'Encoding to MP3...', 'Skinning the interface...', 'Scanning ID3 tags...',
+            'Equalizing...', 'Crossfading...', 'Building the playlist...',
+            'Visualizing...', 'Normalizing volume levels...', 'Updating the Now Playing display...',
+        ],
+    }
+
+    def _assert_themed_pool_drawn_from(self, theme):
+        from tests.jsdom_helper import js_statements
+        pool = self.THEMED_LOADING_PHRASES[theme]
+        result = js_statements(f'''
+            document.documentElement.setAttribute('data-theme', '{theme}');
+            var seen = [];
+            for (var i = 0; i < 60; i++) {{
+                var m = getPhaseMessages();
+                seen.push(m.network, m.files, m.importing, m.logs);
+            }}
+            window.__jsdom_result = seen;
+        ''')
+        self.assertTrue(all(v in pool for v in result),
+                         f'{theme}: drew a value outside its pool: {set(result) - set(pool)}')
+        self.assertGreater(len(set(result)), 1,
+                            f'{theme}: draws never varied - pool is not actually being randomized')
+
+    def test_hacker_gets_themed_messages(self):
+        self._assert_themed_pool_drawn_from('hacker')
+
+    def test_dos_blue_gets_themed_messages(self):
+        self._assert_themed_pool_drawn_from('dos-blue')
+
+    def test_vaporwave_gets_themed_messages(self):
+        self._assert_themed_pool_drawn_from('vaporwave')
+
+    def test_cga_gets_themed_messages(self):
+        self._assert_themed_pool_drawn_from('cga')
+
+    def test_amber_gets_themed_messages(self):
+        self._assert_themed_pool_drawn_from('amber')
+
+    def test_breadbin_blue_gets_themed_messages(self):
+        self._assert_themed_pool_drawn_from('breadbin-blue')
+
+    def test_digital_frontier_gets_themed_messages(self):
+        self._assert_themed_pool_drawn_from('digital-frontier')
+
+    def test_luna_blue_gets_themed_messages(self):
+        self._assert_themed_pool_drawn_from('luna-blue')
+
+    def test_retro_handheld_gets_themed_messages(self):
+        self._assert_themed_pool_drawn_from('retro-handheld')
+
+    def test_mp3_player_gets_themed_messages(self):
+        self._assert_themed_pool_drawn_from('mp3-player')
+
+    def test_every_fun_theme_has_a_joke_set(self):
+        """Every theme in THEMES's 'fun' group must have an entry in
+        THEMED_LOADING_PHRASES - catches a new fun theme being added
+        without anyone remembering to give it its own pool."""
+        fun_theme_keys = re.findall(r"[\'\"]?([\w-]+)[\'\"]?:\s*\{\s*label:[^}]*group:\s*'fun'", JS_CONTENT)
+        self.assertGreaterEqual(len(fun_theme_keys), 10, 'sanity check: must have found the fun themes in THEMES')
+        themed_section = JS_CONTENT.split('const THEMED_LOADING_PHRASES = {')[1].split('\n        };')[0]
+        for key in fun_theme_keys:
+            self.assertIn(key, themed_section,
+                          f'fun theme "{key}" has no entry in THEMED_LOADING_PHRASES')
+
+    def test_other_themes_get_plain_default_messages(self):
+        """Every non-fun theme (dark or light group) must fall back to
+        the plain factual defaults - a serious/professional theme
+        shouldn't suddenly start joking mid-analysis. Sguil included here
+        since its move from Fun to Light Themes - see
+        test_sguil_is_in_light_themes_section - should have also dropped
+        its playful loading-phrase pool."""
+        from tests.jsdom_helper import js_statements
+        for theme in ('dark', 'white', 'nord', 'catppuccin-latte', 'sguil'):
+            result = js_statements(f'''
+                document.documentElement.setAttribute('data-theme', '{theme}');
+                var m = getPhaseMessages();
+                window.__jsdom_result = {{ network: m.network, files: m.files, importing: m.importing, logs: m.logs }};
+            ''')
+            self.assertEqual(result, {
+                'network': 'Analyzing network traffic...',
+                'files': 'Analyzing files...',
+                'importing': 'Importing data...',
+                'logs': 'Analyzing log file...'
+            }, f'{theme} must use the plain default messages')
+
+    def test_checkStatus_uses_getPhaseMessages(self):
+        func = JS_CONTENT.split('async function checkStatus(')[1].split('\n        async function ')[0]
+        self.assertIn('const phaseMessages = getPhaseMessages();', func,
+                      'checkStatus must source its phase messages from getPhaseMessages()')
 
 
 class TestAggregationTables(unittest.TestCase):
@@ -4894,6 +6527,113 @@ class TestAdvancedModeFilterBar(unittest.TestCase):
                          'isClickable is dead now that every rendered card is guaranteed count > 0')
         self.assertNotIn('.stat-card.stat-disabled', CSS_CONTENT,
                          'the now-unused disabled-card CSS should be removed, not left dangling')
+
+    def test_buildStats_renders_zero_and_carries_final_value_in_aria_label(self):
+        """buildStats must render each .stat-number starting at 0 (animated
+        up to the real count by animateStatNumber(), tested separately),
+        with the real final value carried in aria-label so assistive tech
+        isn't stuck reading "0" or a mid-animation number regardless of
+        timing."""
+        func = JS_CONTENT.split('function buildStats(')[1].split('function buildSections(')[0]
+        self.assertIn('aria-label="${countDisplay}">0<', func,
+                      'stat-number must start at 0 with the real value in aria-label')
+        self.assertIn('stats.filter(s => s.count > 0).forEach((s, i) => animateStatNumber(numberEls[i], s.count));', func,
+                      'buildStats must animate each rendered stat-number up to its real count')
+
+    def test_animateStatNumber_counts_up_to_target(self):
+        """animateStatNumber must not snap straight to the target on a fun
+        theme - a mid-animation read should show a comma-formatted value
+        strictly between 0 and the target, then settle on the exact final
+        value."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.documentElement.setAttribute('data-theme', 'hacker');
+            window.matchMedia = function() { return { matches: false }; };
+            var el = document.createElement('div');
+            animateStatNumber(el, 1000);
+            await new Promise(function(r) { setTimeout(r, 150); });
+            var midValue = parseInt(el.textContent.replace(/,/g, ''), 10);
+            await new Promise(function(r) { setTimeout(r, 600); });
+            window.__jsdom_result = { midValue: midValue, finalText: el.textContent };
+        ''')
+        self.assertGreater(result['midValue'], 0, 'must have started counting up before the animation finished')
+        self.assertLess(result['midValue'], 1000, 'must not jump straight to the target')
+        self.assertEqual(result['finalText'], '1,000', 'must settle on the exact, comma-formatted final value')
+
+    def test_animateStatNumber_skips_animation_under_reduced_motion(self):
+        """prefers-reduced-motion: reduce must jump straight to the final
+        value - this is pure decoration, not information the animation
+        itself conveys, so there's nothing lost by skipping it."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.documentElement.setAttribute('data-theme', 'hacker');
+            window.matchMedia = function(query) { return { matches: query.indexOf('reduce') !== -1 }; };
+            var el = document.createElement('div');
+            animateStatNumber(el, 4321);
+            window.__jsdom_result = { text: el.textContent };
+        ''')
+        self.assertEqual(result['text'], '4,321')
+
+    def test_animateStatNumber_skips_animation_for_standard_themes(self):
+        """The count-up is a playful flourish reserved for the fun themes
+        (the same set THEMED_LOADING_PHRASES defines) - a standard theme
+        like the default dark theme must jump straight to the final value,
+        not animate."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            window.matchMedia = function() { return { matches: false }; };
+            var el = document.createElement('div');
+            animateStatNumber(el, 4321);
+            window.__jsdom_result = { text: el.textContent };
+        ''')
+        self.assertEqual(result['text'], '4,321', 'standard themes must not animate the count-up')
+
+    def test_updateFunThemeClass_toggles_class_for_fun_vs_standard_themes(self):
+        """updateFunThemeClass() must add .fun-theme to <html> for a fun
+        theme (the same set THEMED_LOADING_PHRASES defines) and remove it
+        for a standard/professional theme, since the CSS corner-bracket
+        reticle (.fun-theme .stat-card::before etc.) is gated on this
+        class rather than a long per-theme attribute-selector list."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.documentElement.setAttribute('data-theme', 'hacker');
+            updateFunThemeClass();
+            var funThemeHasClass = document.documentElement.classList.contains('fun-theme');
+            document.documentElement.removeAttribute('data-theme');
+            updateFunThemeClass();
+            var standardThemeHasClass = document.documentElement.classList.contains('fun-theme');
+            window.__jsdom_result = { funThemeHasClass: funThemeHasClass, standardThemeHasClass: standardThemeHasClass };
+        ''')
+        self.assertTrue(result['funThemeHasClass'], 'a fun theme (hacker) must get the .fun-theme class')
+        self.assertFalse(result['standardThemeHasClass'], 'the default/standard theme must not have the .fun-theme class')
+
+    def test_updateFunThemeClass_wired_into_theme_change_paths(self):
+        """updateFunThemeClass() must run on every path that can change the
+        active theme - setTheme, applyCustomTheme, and init - so the
+        .fun-theme class (and therefore the reticle) never goes stale
+        after a theme switch, OhMyDebn sync, or page load."""
+        self.assertEqual(JS_CONTENT.count('updateFunThemeClass()'), 4,
+                         'updateFunThemeClass must be defined once and called from setTheme, applyCustomTheme, and init')
+
+    def test_corner_bracket_reticle_scoped_to_fun_theme(self):
+        """The HUD corner-bracket reticle on .stat-card/.pivot-menu/
+        .modal-content/.sample-card must be scoped under .fun-theme so it
+        never appears on standard/professional themes - a bare, unscoped
+        selector would apply it everywhere."""
+        for selector in (
+            '.fun-theme .stat-card::before, .fun-theme .stat-card::after {',
+            '.fun-theme .pivot-menu::before, .fun-theme .pivot-menu::after {',
+            '.fun-theme .modal-content::before, .fun-theme .modal-content::after {',
+            '.fun-theme .sample-card::before, .fun-theme .sample-card::after {',
+        ):
+            self.assertIn(selector, CSS_CONTENT, f'{selector} must be scoped under .fun-theme')
+        for stray in (
+            '.stat-card::before, .stat-card::after {',
+            '.pivot-menu::before, .pivot-menu::after {',
+            '.modal-content::before, .modal-content::after {',
+            '.sample-card::before, .sample-card::after {',
+        ):
+            self.assertNotIn(stray, CSS_CONTENT, f'{stray} must not exist unscoped (would apply to every theme)')
 
     def test_buildBinaryAnalysisView_preserves_file_info_on_search(self):
         """REGRESSION: buildBinaryAnalysisView must use unfiltered baseAllEvents
@@ -6774,10 +8514,13 @@ class TestInlineHtmlEscaping(unittest.TestCase):
                       'previous analysis md5 must be escaped in inline onclick handler')
 
     def test_previous_analysis_md5_escaped_in_data_attrs(self):
+        """The notes button is the only per-row action left on the welcome
+        screen (Re-analyze/Delete moved to the analysis page header), so
+        just one data-md5 attribute remains here now - it must still be
+        escaped."""
         show_welcome = JS_CONTENT.split('async function showWelcome')[1].split('async function')[0]
-        # Both re-analyze and delete buttons should have data-md5 escaped.
         data_md5_count = show_welcome.count('data-md5="${escapeHtml(a.md5)}"')
-        self.assertGreaterEqual(data_md5_count, 2,
+        self.assertGreaterEqual(data_md5_count, 1,
                                 'data-md5 attributes must escape the md5 value')
 
     def test_appHeaderMeta_escapes_md5_and_date(self):
@@ -7313,6 +9056,95 @@ class TestHeaderReanalyzeIcon(unittest.TestCase):
         self.assertTrue(result['modalOpen'], 'clicking the header reanalyze icon must open the confirm modal')
         self.assertEqual(result['fileName'], 'evidence.pcap')
 
+    def test_delete_button_removed_from_welcome_screen(self):
+        """REGRESSION: the old per-row Delete button (with data-action=
+        "delete") must not still exist alongside the header icon -
+        otherwise there'd be two independent code paths for the same
+        action, same reasoning as the Delete All / Re-analyze buttons'
+        own removal tests."""
+        self.assertNotIn('data-action="delete"', JS_CONTENT,
+                         'the old welcome-screen per-row Delete button must be removed')
+        self.assertNotIn("class=\"previous-analysis-delete\"", JS_CONTENT,
+                         'the welcome-screen delete button styling class must be removed')
+
+    def test_deleteIconHtml_wires_current_md5_and_filename(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            currentMd5 = 'a'.repeat(32);
+            currentFileName = 'sample.pcap';
+            window.__jsdom_result = { html: deleteIconHtml() };
+        ''')
+        self.assertIn("onclick=\"openDeleteAnalysis(currentMd5, currentFileName)\"", result['html'])
+        self.assertIn('title="Delete"', result['html'])
+        self.assertIn('class="app-header-delete-icon"', result['html'],
+                      'must carry the themed danger-red class, same as .previous-analysis-delete on the main screen')
+
+    def test_app_header_delete_icon_uses_danger_red(self):
+        """The header delete icon should read as visually dangerous via
+        var(--badge-danger-text), same base treatment .previous-analysis-
+        delete used to have - see test_hacker_delete_buttons_use_default_danger_red
+        for the Hacker-theme angle (no green override, here or on Delete All)."""
+        self.assertIn('.app-header-delete-icon { color: var(--badge-danger-text); }', CSS_CONTENT)
+
+    def test_delete_icon_renders_in_header_after_loading_an_analysis(self):
+        """The header Delete icon must render after the Re-analyze icon
+        (same left-to-right reading order as the underlying actions:
+        rename the filename, view/add notes, re-analyze, then delete -
+        the most destructive action last)."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements(self._load() + '''
+            var meta = document.getElementById('appHeaderMeta');
+            window.__jsdom_result = {
+                reanalyzeIndex: meta.innerHTML.indexOf('openReanalyzeModal(currentMd5, currentFileName)'),
+                deleteIndex: meta.innerHTML.indexOf('openDeleteAnalysis(currentMd5, currentFileName)')
+            };
+        ''')
+        self.assertNotEqual(result['deleteIndex'], -1, 'the delete icon must render in the header after loading an analysis')
+        self.assertGreater(result['deleteIndex'], result['reanalyzeIndex'], 'the delete icon must render after the reanalyze icon')
+
+    def test_clicking_delete_icon_opens_confirm_modal_for_current_analysis(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements(self._load(md5='b' * 32, file_name='evidence.pcap') + '''
+            var icon = Array.from(document.querySelectorAll('#appHeaderMeta span')).find(function(s) {
+                return s.getAttribute('onclick') === 'openDeleteAnalysis(currentMd5, currentFileName)';
+            });
+            icon.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            await new Promise(function(r) { setTimeout(r, 10); });
+            window.__jsdom_result = {
+                modalOpen: document.getElementById('deleteConfirmModal').classList.contains('active'),
+                fileName: document.getElementById('deleteFileName').textContent
+            };
+        ''')
+        self.assertTrue(result['modalOpen'], 'clicking the header delete icon must open the confirm modal')
+        self.assertEqual(result['fileName'], 'evidence.pcap')
+
+    def test_confirming_delete_from_header_returns_to_welcome_screen(self):
+        """confirmDelete() already resets currentMd5/eventStats/tabDataCache
+        and calls showWelcome() when the analysis being deleted is the one
+        currently open - this just confirms that existing behavior is what
+        actually fires when the delete is triggered from the new header
+        icon (not just from the welcome screen's previous-analyses list)."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements(self._load(md5='c' * 32, file_name='evidence.pcap') + '''
+            window.fetch = function(url, opts) {
+                if (url === '/api/delete-analysis') {
+                    return Promise.resolve({ json: () => Promise.resolve({ success: true }) });
+                }
+                return Promise.resolve({ json: () => Promise.resolve([]) });
+            };
+            var welcomeCalls = 0;
+            var realShowWelcome = window.showWelcome;
+            window.showWelcome = function() { welcomeCalls++; return realShowWelcome ? realShowWelcome.apply(this, arguments) : undefined; };
+            openDeleteAnalysis(currentMd5, currentFileName);
+            await confirmDelete();
+            window.__jsdom_result = {
+                welcomeCalls: welcomeCalls,
+                currentMd5AfterDelete: currentMd5
+            };
+        ''')
+        self.assertEqual(result['welcomeCalls'], 1, 'deleting the currently-open analysis must return to the welcome screen')
+        self.assertEqual(result['currentMd5AfterDelete'], '', 'currentMd5 must be reset after deleting the currently-open analysis')
+
 
 class TestCopyMd5ToClipboard(unittest.TestCase):
     """Clicking the MD5 hash in the header copies it to the clipboard."""
@@ -7458,17 +9290,16 @@ class TestPreviousAnalysesShowNotesIndicator(unittest.TestCase):
         self.assertTrue(result['found'], 'a row with has_notes=true must show a notes button')
         self.assertEqual(result['md5'], 'a' * 32)
 
-    def test_notes_button_css_matches_reanalyze_button_styling(self):
+    def test_notes_button_has_dedicated_css_styling(self):
         """REGRESSION: the notes button initially had no dedicated CSS rule,
         so it fell back to the browser's default white button background -
-        it must match .previous-analysis-reanalyze's background/color
-        treatment (including per-theme overrides), not set color inline
-        (which would override the CSS class and break those per-theme
-        overrides). The two classes now literally share one combined
-        selector rather than two separate rules with identical values, so
-        this is enforced structurally, not just by coincidentally-matching
-        values."""
-        self.assertIn('.previous-analysis-reanalyze, .previous-analysis-notes { background: var(--bg-hover); color: var(--accent); }', CSS_CONTENT)
+        it must have its own background/color treatment (including
+        per-theme overrides), not set color inline (which would override
+        the CSS class and break those per-theme overrides). (Formerly
+        shared one combined selector with .previous-analysis-reanalyze,
+        which was removed along with the rest of the per-row Re-analyze/
+        Delete buttons when those moved to the analysis page header.)"""
+        self.assertIn('.previous-analysis-notes { background: var(--bg-hover); color: var(--accent); }', CSS_CONTENT)
         self.assertNotIn('color: var(--accent);" title="View/edit notes"', JS_CONTENT,
                          'the notes button must not set color inline - that would override the CSS class'
                          ' theme-specific rules below')
@@ -8964,6 +10795,12 @@ class TestSearchUI(unittest.TestCase):
         self.assertNotIn("buildAggregationsSectionAll()", func,
                       'refreshAnalysisData must not override aggregations with allEvents after restore')
 
+    def test_loadAnalysis_does_not_override_aggregations_with_all_events(self):
+        """REGRESSION: loadAnalysis's pcap branch must not unconditionally call buildAggregationsSectionAll() after loadTabData(eventTypes[0]), because that already builds aggregations scoped to the default tab (e.g. Alerts) - the unconditional call clobbered it with the All Events aggregation instead."""
+        func = JS_CONTENT.split('async function loadAnalysis(')[1].split('\n        async function ')[0]
+        self.assertNotIn("buildAggregationsSectionAll()", func,
+                      'loadAnalysis must not override aggregations with All Events after loadTabData(eventTypes[0])')
+
     def test_buildSections_does_not_call_loadTabData(self):
         """REGRESSION: buildSections must not call loadTabData to prevent a race with refreshAnalysisData."""
         func = JS_CONTENT.split('function buildSections(')[1].split('function ')[0]
@@ -8972,12 +10809,29 @@ class TestSearchUI(unittest.TestCase):
 
 
 class TestReanalyzeUI(unittest.TestCase):
-    def test_reanalyze_button_on_welcome(self):
-        """Welcome screen must show a re-analyze button next to each previous analysis."""
+    def test_reanalyze_button_in_header(self):
+        """REGRESSION: Re-analyze moved from a per-row button on the
+        welcome screen's Previous Analyses list into the analysis page
+        header (reanalyzeIconHtml(), alongside the notes/delete icons),
+        same move as Delete - must still wire to the same handler and
+        icon."""
         self.assertIn('openReanalyzeModal', JS_CONTENT,
-                      'showWelcome must include re-analyze button')
+                      'the header reanalyze icon must call openReanalyzeModal')
         self.assertIn('REFRESH_ICON_SVG', JS_CONTENT,
-                      'Re-analyze button must use refresh icon')
+                      'Re-analyze icon must use refresh icon')
+        self.assertIn('function reanalyzeIconHtml()', JS_CONTENT,
+                      'reanalyzeIconHtml must still be defined')
+
+    def test_reanalyze_button_removed_from_welcome_screen(self):
+        """REGRESSION: the old per-row Re-analyze button (with data-action=
+        "reanalyze") must not still exist alongside the header icon -
+        otherwise there'd be two independent code paths for the same
+        action, same reasoning as the Delete All button's own removal
+        test."""
+        self.assertNotIn('data-action="reanalyze"', JS_CONTENT,
+                         'the old welcome-screen per-row Re-analyze button must be removed')
+        self.assertNotIn('previous-analysis-reanalyze', JS_CONTENT,
+                         'the welcome-screen reanalyze button styling class must be removed')
 
     def test_reanalyze_modal_exists(self):
         """Re-analyze confirmation modal must exist in HTML."""
@@ -9200,12 +11054,90 @@ class TestReanalyzeUI(unittest.TestCase):
 
 
 class TestDeleteAllAnalysesUI(unittest.TestCase):
-    def test_delete_all_button_on_welcome(self):
-        """Welcome screen must show a Delete All button when previous analyses exist."""
-        self.assertIn('openDeleteAllAnalyses', JS_CONTENT,
-                      'showWelcome must include Delete All button handler')
-        self.assertIn('previous-analysis-delete-all', JS_CONTENT,
+    def test_delete_all_button_in_settings_danger_zone(self):
+        """REGRESSION: Delete All moved from the welcome screen's Previous
+        Analyses list into the Settings modal's Danger Zone section (a
+        rare, irreversible bulk action fits there better than sitting next
+        to the list it wipes out) - must still wire to the same handler
+        and carry the same danger-red styling class."""
+        self.assertIn('id="settingsDangerZoneSection"', HTML_CONTENT,
+                      'Settings modal must have a Danger Zone section')
+        self.assertIn('id="settingsDeleteAllBtn"', HTML_CONTENT,
+                      'Settings modal must have a Delete All button')
+        danger_zone = HTML_CONTENT.split('id="settingsDangerZoneSection"')[1][:600]
+        self.assertIn('openDeleteAllAnalyses(settingsAnalysisCount)', danger_zone,
+                      'Settings Delete All button must call openDeleteAllAnalyses with the fetched count')
+        self.assertIn('previous-analysis-delete-all', danger_zone,
                       'Delete All button must have styling class')
+
+    def test_delete_all_button_removed_from_welcome_screen(self):
+        """REGRESSION: the old per-render Delete All button (baked in with
+        a literal count at showWelcome()-render time) must not still exist
+        alongside the new Settings modal one - otherwise there'd be two
+        independent code paths for the same action."""
+        self.assertNotIn('openDeleteAllAnalyses(${previousAnalysisCount})', JS_CONTENT,
+                         'the old welcome-screen Delete All button template must be removed')
+        self.assertNotIn('previousAnalysisCount', JS_CONTENT,
+                         'the welcome-screen previousAnalysisCount variable must be removed along with its only consumer')
+
+    def test_settings_delete_all_count_fetched_and_disabled_when_empty(self):
+        """renderSettingsDeleteAllSection() must fetch the live count on
+        every Settings open (Settings can be opened from anywhere, unlike
+        the old welcome-screen button which had the count handed to it
+        from an already-rendered list) and disable the button when there's
+        nothing to delete."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            window.fetch = function(url) {
+                if (url === '/api/analyses') {
+                    return Promise.resolve({ json: () => Promise.resolve([{md5: 'a'}, {md5: 'b'}]) });
+                }
+                return Promise.resolve({ json: () => Promise.resolve({}) });
+            };
+            renderSettingsDeleteAllSection();
+            await new Promise(function(r) { setTimeout(r, 10); });
+            window.__jsdom_result = {
+                disabled: document.getElementById('settingsDeleteAllBtn').disabled,
+                hint: document.getElementById('settingsDeleteAllHint').textContent
+            };
+        ''')
+        self.assertFalse(result['disabled'], 'button must be enabled when there are analyses to delete')
+        self.assertIn('2', result['hint'])
+
+        result_empty = js_statements('''
+            window.fetch = function(url) {
+                if (url === '/api/analyses') {
+                    return Promise.resolve({ json: () => Promise.resolve([]) });
+                }
+                return Promise.resolve({ json: () => Promise.resolve({}) });
+            };
+            renderSettingsDeleteAllSection();
+            await new Promise(function(r) { setTimeout(r, 10); });
+            window.__jsdom_result = {
+                disabled: document.getElementById('settingsDeleteAllBtn').disabled
+            };
+        ''')
+        self.assertTrue(result_empty['disabled'], 'button must be disabled when there are no analyses to delete')
+
+    def test_openDeleteAllAnalyses_closes_settings_modal(self):
+        """REGRESSION: .modal all shares one z-index (socrates.css), so with
+        both Settings and the Delete All confirm modal active at once, DOM
+        order (Settings comes after deleteAllConfirmModal in the HTML)
+        would paint Settings on top and visually hide the confirmation -
+        confirmed live in the browser (jsdom has no layout/paint to catch
+        this). openDeleteAllAnalyses() must close Settings first so only
+        the confirmation is left on screen."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('settingsModal').classList.add('active');
+            openDeleteAllAnalyses(5);
+            window.__jsdom_result = {
+                settingsActive: document.getElementById('settingsModal').classList.contains('active'),
+                confirmActive: document.getElementById('deleteAllConfirmModal').classList.contains('active')
+            };
+        ''')
+        self.assertFalse(result['settingsActive'], 'opening the Delete All confirmation must close the Settings modal')
+        self.assertTrue(result['confirmActive'], 'the Delete All confirmation modal must still open')
 
     def test_delete_all_modal_exists(self):
         """Delete All confirmation modal must exist in HTML."""
@@ -14520,6 +16452,494 @@ class TestAlertRulesetClassification(unittest.TestCase):
         ''')
         self.assertIn('Ruleset', result['html'])
         self.assertIn('Emerging Threats Open', result['html'])
+
+
+class TestAcknowledgeAlerts(unittest.TestCase):
+    """Pivot-menu Acknowledge/Acknowledge all/Un-acknowledge options and the
+    Acknowledged Alerts tab (buildAcknowledgedAlertsSection/
+    renderAcknowledgedAlertsGroups). acknowledgeableRowInfo() needs the
+    clicked row's full object (for alert.signature_id/rule_id, not present
+    on the <tr>'s own data-pivot attribute) looked up via findEventRowById()
+    in tabDataCache - populated here through a real ensureCappedBatch() call
+    against a mocked fetch, not a direct tabDataCache[...] assignment (see
+    TestPivotFilterLogic._setup_js's own comment: tabDataCache is one of
+    this file's `let`-declared top-level bindings, invisible by bare name
+    from test code, which runs in its own separate window.eval())."""
+
+    def _alert_row_setup(self, rows=None):
+        rows = rows or [{
+            'id': 42, 'event_type': 'alert', 'timestamp': 't', 'src_ip': '1.1.1.1',
+            'dest_ip': '2.2.2.2', 'dest_port': 80, 'proto': 'TCP',
+            'alert': {'signature': 'ET SCAN', 'signature_id': 100, 'category': 'c', 'severity': 1},
+        }]
+        return '''
+            await new Promise(function(r) { setTimeout(r, 100); });
+            document.getElementById('inputBoxes').style.display = 'none';
+            currentMd5 = 'a'.repeat(32);
+            currentFilters = {};
+            var rows = ''' + json.dumps(rows) + ''';
+            var e = rows[0];
+            window.fetch = function(url) {
+                var u = String(url);
+                if (u.indexOf('/api/count') >= 0) {
+                    return Promise.resolve({ json: function() { return Promise.resolve({ count: rows.length }); } });
+                }
+                return Promise.resolve({ json: function() { return Promise.resolve(rows); } });
+            };
+            await ensureCappedBatch('alert');
+            var table = document.createElement('table');
+            table.innerHTML = buildRowForEvent(e);
+            document.body.appendChild(table);
+            var tr = table.querySelector('tr[data-pivot]');
+            var pairs = JSON.parse(decodeURIComponent(tr.dataset.pivot));
+            var cellIdx = pairs.findIndex(function(p) { return p; });
+            var target = tr.children[cellIdx];
+        '''
+
+    def _sigma_row_setup(self):
+        return '''
+            await new Promise(function(r) { setTimeout(r, 100); });
+            document.getElementById('inputBoxes').style.display = 'none';
+            currentMd5 = 'a'.repeat(32);
+            currentFilters = {};
+            var e = { id: 5, rule_title: 'Suspicious PowerShell', rule_id: 'rid5', severity: 'high', timestamp: 't', mitre_techniques: [] };
+            window.fetch = function(url) {
+                var u = String(url);
+                if (u.indexOf('/api/sigma-count') >= 0) {
+                    return Promise.resolve({ json: function() { return Promise.resolve({ count: 1 }); } });
+                }
+                return Promise.resolve({ json: function() { return Promise.resolve([e]); } });
+            };
+            await ensureCappedBatch('sigmaalert');
+            var table = document.createElement('table');
+            table.innerHTML = buildSigmaAlertRow(e);
+            document.body.appendChild(table);
+            var tr = table.querySelector('tr[data-pivot]');
+            var pairs = JSON.parse(decodeURIComponent(tr.dataset.pivot));
+            var cellIdx = pairs.findIndex(function(p) { return p; });
+            var target = tr.children[cellIdx];
+        '''
+
+    def test_unacknowledged_alert_row_shows_acknowledge_and_acknowledge_all(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements(self._alert_row_setup() + '''
+            target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            var menu = document.querySelector('.pivot-menu');
+            window.__jsdom_result = {
+                hasAck: !!(menu && menu.querySelector('[data-pivot-action="acknowledge"]')),
+                hasAckAll: !!(menu && menu.querySelector('[data-pivot-action="acknowledge-all"]')),
+                hasUnack: !!(menu && menu.querySelector('[data-pivot-action="unacknowledge"]')),
+            };
+        ''')
+        self.assertTrue(result['hasAck'])
+        self.assertTrue(result['hasAckAll'])
+        self.assertFalse(result['hasUnack'])
+
+    def test_acknowledge_shows_without_tabDataCache_populated(self):
+        """REGRESSION: acknowledgeableRowInfo originally looked the clicked
+        row up in tabDataCache[eventType] (via a since-removed
+        findEventRowById) to read alert.signature_id - but the default (no
+        active filter/sort) view of a per-type tab renders rows through
+        buildSection()'s own server-paginated fetchEventsPage(), whose
+        `items` never touch tabDataCache at all (see
+        canUseScalableFetchForSort). tabDataCache[eventType] being empty
+        made the lookup fail for every alert row a real user would
+        normally see, silently hiding Acknowledge/Acknowledge all entirely
+        - reported directly by the user testing the feature. Fixed by
+        baking the row's own signature_id/rule_id into a data-alert-identity
+        attribute at render time (rowPrefixCells/buildSigmaAlertRow)
+        instead of looking it up in a cache that may never be populated.
+        This test deliberately never calls ensureCappedBatch, unlike
+        _alert_row_setup()/_sigma_row_setup() above, to actually exercise
+        the code path that broke."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            await new Promise(function(r) { setTimeout(r, 100); });
+            document.getElementById('inputBoxes').style.display = 'none';
+            currentMd5 = 'a'.repeat(32);
+            currentFilters = {};
+            var e = { id: 42, event_type: 'alert', timestamp: 't', src_ip: '1.1.1.1',
+                      dest_ip: '2.2.2.2', dest_port: 80, proto: 'TCP',
+                      alert: { signature: 'ET SCAN', signature_id: 100, category: 'c', severity: 1 } };
+            var table = document.createElement('table');
+            table.innerHTML = buildRowForEvent(e);
+            document.body.appendChild(table);
+            var tr = table.querySelector('tr[data-pivot]');
+            var pairs = JSON.parse(decodeURIComponent(tr.dataset.pivot));
+            var cellIdx = pairs.findIndex(function(p) { return p; });
+            tr.children[cellIdx].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            var menu = document.querySelector('.pivot-menu');
+            window.__jsdom_result = {
+                hasAck: !!(menu && menu.querySelector('[data-pivot-action="acknowledge"]')),
+                hasAckAll: !!(menu && menu.querySelector('[data-pivot-action="acknowledge-all"]')),
+            };
+        ''')
+        self.assertTrue(result['hasAck'])
+        self.assertTrue(result['hasAckAll'])
+
+    def test_unacknowledged_sigma_row_shows_acknowledge_and_acknowledge_all(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements(self._sigma_row_setup() + '''
+            target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            var menu = document.querySelector('.pivot-menu');
+            window.__jsdom_result = {
+                hasAck: !!(menu && menu.querySelector('[data-pivot-action="acknowledge"]')),
+                hasAckAll: !!(menu && menu.querySelector('[data-pivot-action="acknowledge-all"]')),
+            };
+        ''')
+        self.assertTrue(result['hasAck'])
+        self.assertTrue(result['hasAckAll'])
+
+    def test_non_alert_row_has_no_acknowledge_options(self):
+        """A dns row's data-event-type is 'dns' - acknowledgeableRowInfo
+        must return null for anything but 'alert'/'sigmaalert', same as
+        production rows never offering Acknowledge on non-alert types."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var e = { id: 1, event_type: 'dns', timestamp: 't', proto: 'UDP',
+                      src_ip: '1.1.1.1', src_port: 111, dest_ip: '2.2.2.2', dest_port: 53,
+                      dns: { rrname: 'example.com', rrtype: 'A' } };
+            var table = document.createElement('table');
+            table.innerHTML = buildRowForEvent(e);
+            document.body.appendChild(table);
+            var tr = table.querySelector('tr[data-pivot]');
+            var srcIpCell = tr.children[2];
+            srcIpCell.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            var menu = document.querySelector('.pivot-menu');
+            window.__jsdom_result = {
+                hasAck: !!(menu && menu.querySelector('[data-pivot-action="acknowledge"]')),
+                hasAckAll: !!(menu && menu.querySelector('[data-pivot-action="acknowledge-all"]')),
+            };
+        ''')
+        self.assertFalse(result['hasAck'])
+        self.assertFalse(result['hasAckAll'])
+
+    def test_clicking_acknowledge_posts_correct_body(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements(self._alert_row_setup() + '''
+            var postedUrls = [];
+            var postedBodies = [];
+            window.fetch = function(url, opts) {
+                var u = String(url);
+                if (opts && opts.method === 'POST') {
+                    postedUrls.push(u);
+                    postedBodies.push(JSON.parse(opts.body));
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ success: true }); } });
+                }
+                if (u.indexOf('/api/count') >= 0 || u.indexOf('/api/sigma-count') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ count: 0 }); } });
+                }
+                return Promise.resolve({ ok: true, json: function() { return Promise.resolve([]); } });
+            };
+            target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            document.querySelector('.pivot-menu [data-pivot-action="acknowledge"]').click();
+            await new Promise(function(r) { setTimeout(r, 20); });
+            window.__jsdom_result = { postedUrls: postedUrls, postedBodies: postedBodies };
+        ''')
+        self.assertEqual(result['postedUrls'], ['/api/acknowledge-alert'])
+        self.assertEqual(result['postedBodies'], [{
+            'md5': 'a' * 32, 'table': 'events', 'rowId': 42, 'acknowledged': True,
+        }])
+
+    def test_clicking_acknowledge_all_matches_by_signature_id_only(self):
+        """The bulk path must match every row sharing this alert's
+        signature_id - and only those, not an unrelated signature_id that
+        happens to also be present in the same tabDataCache."""
+        from tests.jsdom_helper import js_statements
+        rows = [
+            {'id': 42, 'event_type': 'alert', 'timestamp': 't1', 'src_ip': '1.1.1.1', 'dest_ip': '2.2.2.2',
+             'dest_port': 80, 'proto': 'TCP', 'alert': {'signature': 'ET SCAN', 'signature_id': 100, 'category': 'c', 'severity': 1}},
+            {'id': 43, 'event_type': 'alert', 'timestamp': 't2', 'src_ip': '3.3.3.3', 'dest_ip': '4.4.4.4',
+             'dest_port': 80, 'proto': 'TCP', 'alert': {'signature': 'ET SCAN', 'signature_id': 100, 'category': 'c', 'severity': 1}},
+            {'id': 44, 'event_type': 'alert', 'timestamp': 't3', 'src_ip': '5.5.5.5', 'dest_ip': '6.6.6.6',
+             'dest_port': 80, 'proto': 'TCP', 'alert': {'signature': 'Other Sig', 'signature_id': 200, 'category': 'c', 'severity': 1}},
+        ]
+        result = js_statements(self._alert_row_setup(rows) + '''
+            var postedBodies = [];
+            window.fetch = function(url, opts) {
+                var u = String(url);
+                if (opts && opts.method === 'POST') {
+                    postedBodies.push(JSON.parse(opts.body));
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ success: true }); } });
+                }
+                if (u.indexOf('/api/count') >= 0 || u.indexOf('/api/sigma-count') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ count: 0 }); } });
+                }
+                return Promise.resolve({ ok: true, json: function() { return Promise.resolve([]); } });
+            };
+            target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            document.querySelector('.pivot-menu [data-pivot-action="acknowledge-all"]').click();
+            await new Promise(function(r) { setTimeout(r, 20); });
+            window.__jsdom_result = { postedBodies: postedBodies };
+        ''')
+        self.assertEqual(result['postedBodies'], [{
+            'md5': 'a' * 32, 'table': 'events', 'rowIds': [42, 43],
+        }])
+
+    def test_acknowledged_alerts_tab_renders_both_groups(self):
+        """buildStats()'s 'Acknowledged Alerts' card and loadTabData('acknowledged')
+        together drive #section-acknowledged - reusing buildRowForEvent/
+        buildSigmaAlertRow (the same renderers the real Network Alerts/
+        Sigma Alerts tabs use) under two labeled sub-sections, filtered to
+        acknowledged-only server-side via acknowledged=only."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            await new Promise(function(r) { setTimeout(r, 100); });
+            document.getElementById('inputBoxes').style.display = 'none';
+            currentMd5 = 'abc123';
+            advancedMode = true;
+            window.fetch = function(url) {
+                var u = String(url);
+                if (u.indexOf('/api/events') >= 0 && u.indexOf('acknowledged=only') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve([
+                        { id: 1, event_type: 'alert', timestamp: 't', alert: { signature: 'ET SCAN', signature_id: 1 } }
+                    ]); } });
+                }
+                if (u.indexOf('/api/sigma-alerts') >= 0 && u.indexOf('acknowledged=only') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve([
+                        { id: 5, rule_title: 'Suspicious PowerShell', rule_id: 'rid5', timestamp: 't' }
+                    ]); } });
+                }
+                return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ count: 0 }); } });
+            };
+            buildSections();
+            await loadTabData('acknowledged');
+            var sectionEl = document.getElementById('section-acknowledged');
+            var networkRow = sectionEl.querySelector('tr[data-id="1"]');
+            window.__jsdom_result = {
+                sectionFound: !!sectionEl,
+                hasNetworkGroup: sectionEl.innerHTML.indexOf('Network Alerts') >= 0 && sectionEl.innerHTML.indexOf('ET SCAN') >= 0,
+                hasSigmaGroup: sectionEl.innerHTML.indexOf('Sigma Alerts') >= 0 && sectionEl.innerHTML.indexOf('Suspicious PowerShell') >= 0,
+                networkRowEventType: networkRow ? networkRow.dataset.eventType : null,
+            };
+        ''')
+        self.assertTrue(result['sectionFound'])
+        self.assertTrue(result['hasNetworkGroup'])
+        self.assertTrue(result['hasSigmaGroup'])
+        # REGRESSION: this group must be built via buildRowForEvent (the
+        # real per-type renderer, data-event-type="alert") not
+        # buildAllEventRow (the "All Events" renderer, data-event-type=
+        # "all") - the latter both mismatches getColumnsForType('alert')'s
+        # own header cells and breaks acknowledgeableRowInfo's event-type
+        # check, silently hiding the Un-acknowledge option.
+        self.assertEqual(result['networkRowEventType'], 'alert')
+
+    def test_acknowledged_alerts_tab_collapses_to_single_plain_table_when_only_one_type_present(self):
+        """When only Network Alerts (or only Sigma Alerts) have anything
+        acknowledged, the tab must skip the two-group layout entirely and
+        render a single sortable/paginated table via renderPaginatedTable -
+        the same renderer/columns the real Network Alerts tab itself uses -
+        rather than pairing real rows with an empty, headered "No
+        acknowledged Sigma alerts" group for no reason."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            await new Promise(function(r) { setTimeout(r, 100); });
+            document.getElementById('inputBoxes').style.display = 'none';
+            currentMd5 = 'abc123';
+            advancedMode = true;
+            window.fetch = function(url) {
+                var u = String(url);
+                if (u.indexOf('/api/events') >= 0 && u.indexOf('acknowledged=only') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve([
+                        { id: 1, event_type: 'alert', timestamp: 't1', alert: { signature: 'ET SCAN', signature_id: 1 } },
+                        { id: 2, event_type: 'alert', timestamp: 't2', alert: { signature: 'ET SCAN2', signature_id: 2 } }
+                    ]); } });
+                }
+                if (u.indexOf('/api/sigma-alerts') >= 0 && u.indexOf('acknowledged=only') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve([]); } });
+                }
+                return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ count: 0 }); } });
+            };
+            buildSections();
+            await loadTabData('acknowledged');
+            var sectionEl = document.getElementById('section-acknowledged');
+            window.__jsdom_result = {
+                hasNetworkHeader: sectionEl.innerHTML.indexOf('Network Alerts') >= 0,
+                hasSigmaHeader: sectionEl.innerHTML.indexOf('Sigma Alerts') >= 0,
+                rowCount: sectionEl.querySelectorAll('tr[data-id]').length,
+                headerLabels: Array.from(sectionEl.querySelectorAll('th')).map(function(th) { return th.textContent; }),
+            };
+        ''')
+        self.assertFalse(result['hasNetworkHeader'], 'must not show the "Network Alerts" sub-heading when it is the only group')
+        self.assertFalse(result['hasSigmaHeader'])
+        self.assertEqual(result['rowCount'], 2)
+        # getColumnsForType('alert') - same header cells the real Network
+        # Alerts tab shows, proving this is buildSection's own layout, not
+        # a bespoke one.
+        self.assertEqual(result['headerLabels'][:6], ['Time', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port'])
+
+    def test_acknowledged_alerts_tab_empty_states(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            await new Promise(function(r) { setTimeout(r, 100); });
+            document.getElementById('inputBoxes').style.display = 'none';
+            currentMd5 = 'abc123';
+            advancedMode = true;
+            window.fetch = function(url) {
+                return Promise.resolve({ ok: true, json: function() { return Promise.resolve([]); } });
+            };
+            buildSections();
+            await loadTabData('acknowledged');
+            var sectionEl = document.getElementById('section-acknowledged');
+            window.__jsdom_result = { html: sectionEl.innerHTML };
+        ''')
+        self.assertIn('No acknowledged network alerts', result['html'])
+        self.assertIn('No acknowledged Sigma alerts', result['html'])
+
+    def test_unacknowledging_from_the_acknowledged_tab_posts_correct_body(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            await new Promise(function(r) { setTimeout(r, 100); });
+            document.getElementById('inputBoxes').style.display = 'none';
+            currentMd5 = 'abc123';
+            advancedMode = true;
+            window.fetch = function(url) {
+                var u = String(url);
+                if (u.indexOf('/api/events') >= 0 && u.indexOf('acknowledged=only') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve([
+                        { id: 1, event_type: 'alert', timestamp: 't', alert: { signature: 'ET SCAN', signature_id: 1 } }
+                    ]); } });
+                }
+                if (u.indexOf('/api/sigma-alerts') >= 0 && u.indexOf('acknowledged=only') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve([]); } });
+                }
+                return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ count: 0 }); } });
+            };
+            buildSections();
+            await loadTabData('acknowledged');
+            var row = document.getElementById('section-acknowledged').querySelector('tr[data-id="1"]');
+            var pairs = JSON.parse(decodeURIComponent(row.dataset.pivot));
+            var cellIdx = pairs.findIndex(function(p) { return p; });
+
+            var postedUrls = [];
+            var postedBodies = [];
+            window.fetch = function(url, opts) {
+                var u = String(url);
+                if (opts && opts.method === 'POST') {
+                    postedUrls.push(u);
+                    postedBodies.push(JSON.parse(opts.body));
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ success: true }); } });
+                }
+                return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ count: 0 }); } });
+            };
+            row.children[cellIdx].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            var menu = document.querySelector('.pivot-menu');
+            var hasAck = !!menu.querySelector('[data-pivot-action="acknowledge"]');
+            menu.querySelector('[data-pivot-action="unacknowledge"]').click();
+            await new Promise(function(r) { setTimeout(r, 20); });
+            window.__jsdom_result = { hasAck: hasAck, postedUrls: postedUrls, postedBodies: postedBodies };
+        ''')
+        self.assertFalse(result['hasAck'], 'a row inside the Acknowledged Alerts tab must only offer Un-acknowledge')
+        self.assertEqual(result['postedUrls'], ['/api/acknowledge-alert'])
+        self.assertEqual(result['postedBodies'], [{
+            'md5': 'abc123', 'table': 'events', 'rowId': 1, 'acknowledged': False,
+        }])
+
+    def test_unacknowledging_the_last_remaining_alert_switches_to_network_alerts_tab(self):
+        """Un-acknowledging the only row left in the Acknowledged Alerts tab
+        (across both types) must land the user back on Network Alerts
+        instead of leaving them staring at the tab's own empty state -
+        landing on Network Alerts and seeing the row reappear reads as a
+        clear confirmation the un-acknowledge worked."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            await new Promise(function(r) { setTimeout(r, 100); });
+            document.getElementById('inputBoxes').style.display = 'none';
+            currentMd5 = 'abc123';
+            advancedMode = true;
+            currentSearch = '';
+
+            var acknowledged = true;
+            window.fetch = function(url, opts) {
+                var u = String(url);
+                if (opts && opts.method === 'POST') {
+                    acknowledged = false;
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ success: true }); } });
+                }
+                if (u.indexOf('/api/stats') >= 0) {
+                    var counts = acknowledged ? { dns: 1 } : { dns: 1, alert: 1 };
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ counts: counts }); } });
+                }
+                if (u.indexOf('/api/events') >= 0 && u.indexOf('acknowledged=only') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve(
+                        acknowledged ? [{ id: 1, event_type: 'alert', timestamp: 't', alert: { signature: 'ET SCAN', signature_id: 1 } }] : []
+                    ); } });
+                }
+                if (u.indexOf('/api/sigma-alerts') >= 0 && u.indexOf('acknowledged=only') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve([]); } });
+                }
+                if (u.indexOf('/api/events') >= 0 && u.indexOf('type=alert') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve(
+                        acknowledged ? [] : [{ id: 1, event_type: 'alert', timestamp: 't', alert: { signature: 'ET SCAN', signature_id: 1 } }]
+                    ); } });
+                }
+                if (u.indexOf('/api/count') >= 0 || u.indexOf('/api/sigma-count') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ count: acknowledged ? 0 : 1 }); } });
+                }
+                if (u.indexOf('/api/sankey-data') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ nodes: [], links: [] }); } });
+                }
+                return Promise.resolve({ ok: true, json: function() { return Promise.resolve([]); } });
+            };
+
+            eventTypes = ['dns'];
+            buildSections();
+            await loadTabData('acknowledged');
+            var row = document.getElementById('section-acknowledged').querySelector('tr[data-id="1"]');
+            var pairs = JSON.parse(decodeURIComponent(row.dataset.pivot));
+            var cellIdx = pairs.findIndex(function(p) { return p; });
+            row.children[cellIdx].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            var menu = document.querySelector('.pivot-menu');
+            menu.querySelector('[data-pivot-action="unacknowledge"]').click();
+            await new Promise(function(r) { setTimeout(r, 50); });
+
+            var alertSection = document.getElementById('section-alert');
+            var ackSection = document.getElementById('section-acknowledged');
+            window.__jsdom_result = {
+                alertSectionExists: !!alertSection,
+                alertSectionVisible: alertSection ? !alertSection.classList.contains('section-hidden') : null,
+                ackSectionHidden: ackSection ? ackSection.classList.contains('section-hidden') : null,
+            };
+        ''')
+        self.assertTrue(result['alertSectionExists'])
+        self.assertTrue(result['alertSectionVisible'], 'must land on Network Alerts once the Acknowledged Alerts tab is empty')
+        self.assertTrue(result['ackSectionHidden'])
+
+    def test_buildStats_includes_acknowledged_alerts_card_in_advanced_mode(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            await new Promise(function(r) { setTimeout(r, 100); });
+            document.getElementById('inputBoxes').style.display = 'none';
+            currentMd5 = 'abc123';
+            currentFilters = {};
+            advancedMode = true;
+            isLogAnalysisMode = false;
+            window.fetch = function(url) {
+                var u = String(url);
+                if (u.indexOf('/api/count') >= 0 && u.indexOf('acknowledged=only') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ count: 2 }); } });
+                }
+                if (u.indexOf('/api/sigma-count') >= 0 && u.indexOf('acknowledged=only') >= 0) {
+                    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ count: 1 }); } });
+                }
+                return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ count: 0 }); } });
+            };
+            buildStats({});
+            // The card starts filtered out (count is still 0 on the first,
+            // synchronous render) until refreshAcknowledgedAlertsCount()'s
+            // own chain of awaited fetches + computeFilteredStats() + a
+            // second buildStats() call finishes - several microtask/macrotask
+            // hops deep, hence the longer wait than this file's usual 20ms.
+            await new Promise(function(r) { setTimeout(r, 100); });
+            var card = document.querySelector('.stat-card[onclick*="acknowledged"]');
+            window.__jsdom_result = {
+                hasCard: !!card,
+                label: card ? card.textContent : null,
+            };
+        ''')
+        self.assertTrue(result['hasCard'])
+        self.assertIn('Acknowledged Alerts', result['label'])
+        self.assertIn('3', result['label'])
 
 
 if __name__ == '__main__':
