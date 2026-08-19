@@ -178,6 +178,12 @@ def setup_sigma_rules(data_dir=None, on_progress=print, network_allowed=True, fo
             try:
                 with gzip.open(baked_in, 'rb') as f_in, open(rules_file, 'wb') as f_out:
                     shutil.copyfileobj(f_in, f_out)
+                # Decompressing writes a brand-new file, so its mtime would
+                # otherwise be "now" (container start) rather than when the
+                # ruleset was actually baked into the image at build time -
+                # carry the compressed source's mtime over so the Rules
+                # modal's "updated" date reflects reality, not uptime.
+                shutil.copystat(baked_in, rules_file)
                 result[ruleset_name] = rules_file
                 continue
             except OSError as e:

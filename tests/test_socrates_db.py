@@ -34,7 +34,30 @@ class TestSQLite(unittest.TestCase):
     def test_create_sqlite_db(self):
         db.create_sqlite_db(self.db_file, self.eve_file)
         self.assertTrue(os.path.exists(self.db_file))
-    
+
+    def test_create_sqlite_db_skips_non_dict_json_lines(self):
+        """REGRESSION: a line can be syntactically valid JSON (a bare
+        number/string/array) without being an event object - plausible
+        with a truncated/corrupted eve.json. The ingest loop's try/except
+        only caught json.JSONDecodeError; event.get(...) on a non-dict
+        raised AttributeError instead, which wasn't caught, aborting
+        ingestion of the whole file instead of just skipping the one bad
+        line (which is what the same try/except already does for a
+        malformed line)."""
+        eve_file = os.path.join(self.tmpdir, 'eve_non_dict_lines.json')
+        with open(eve_file, 'w') as f:
+            f.write('{"event_type": "alert", "timestamp": "2026-01-01T00:00:00", "src_ip": "1.2.3.4", "src_port": 1234, "dest_ip": "5.6.7.8", "dest_port": 80, "proto": "TCP"}\n')
+            f.write('42\n')  # bare number - valid JSON, not an object
+            f.write('"just a string"\n')  # bare string
+            f.write('[1, 2, 3]\n')  # bare array
+            f.write('null\n')  # bare null
+            f.write('{"event_type": "dns", "timestamp": "2026-01-01T00:00:01", "src_ip": "1.2.3.4", "src_port": 1235, "dest_ip": "5.6.7.8", "dest_port": 53, "proto": "UDP"}\n')
+
+        db.create_sqlite_db(self.db_file, eve_file)  # must not raise
+        events = db.query_events_sqlite(self.db_file)
+        self.assertEqual(len(events), 2, 'both real events must still be ingested, non-dict lines just skipped')
+        self.assertEqual({e['event_type'] for e in events}, {'alert', 'dns'})
+
     def test_query_events_sqlite_all(self):
         db.create_sqlite_db(self.db_file, self.eve_file)
         events = db.query_events_sqlite(self.db_file)
@@ -446,6 +469,96 @@ class TestSQLite(unittest.TestCase):
         db.set_row_note(self.db_file, 'events', event_id, '')
         self.assertFalse(db.has_row_notes(self.db_file))
 
+    def test_set_acknowledged_true_then_events_query_excludes_it(self):
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        alert_id = db.query_events_sqlite(self.db_file, event_type='alert')[0]['id']
+        db.set_acknowledged(self.db_file, 'events', alert_id, True)
+        remaining_ids = [e['id'] for e in db.query_events_sqlite(self.db_file, event_type='alert')]
+        self.assertNotIn(alert_id, remaining_ids)
+
+    def test_set_acknowledged_false_reincludes_it(self):
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        alert_id = db.query_events_sqlite(self.db_file, event_type='alert')[0]['id']
+        db.set_acknowledged(self.db_file, 'events', alert_id, True)
+        db.set_acknowledged(self.db_file, 'events', alert_id, False)
+        remaining_ids = [e['id'] for e in db.query_events_sqlite(self.db_file, event_type='alert')]
+        self.assertIn(alert_id, remaining_ids)
+
+    def test_acknowledging_one_row_does_not_affect_unrelated_rows(self):
+        """REGRESSION: the acknowledged-exclusion subquery originally used
+        a bare `id` column inside its correlated EXISTS/NOT EXISTS clause,
+        which SQL resolved to acknowledged_alerts.id (the innermost table
+        in scope) instead of the outer events.id - as soon as any row was
+        acknowledged, every row (including unrelated dns rows) vanished
+        from every query. Fixed by fully qualifying to events.id/e.id."""
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        events = db.query_events_sqlite(self.db_file)
+        alert_ids = [e['id'] for e in events if e['event_type'] == 'alert']
+        dns_ids = [e['id'] for e in events if e['event_type'] == 'dns']
+        db.set_acknowledged(self.db_file, 'events', alert_ids[0], True)
+        remaining_ids = {e['id'] for e in db.query_events_sqlite(self.db_file)}
+        self.assertNotIn(alert_ids[0], remaining_ids)
+        self.assertIn(alert_ids[1], remaining_ids)
+        self.assertIn(dns_ids[0], remaining_ids)
+
+    def test_get_event_count_sqlite_drops_after_acknowledge(self):
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        alert_id = db.query_events_sqlite(self.db_file, event_type='alert')[0]['id']
+        self.assertEqual(db.get_event_count_sqlite(self.db_file), 3)
+        db.set_acknowledged(self.db_file, 'events', alert_id, True)
+        self.assertEqual(db.get_event_count_sqlite(self.db_file), 2)
+
+    def test_query_events_sqlite_acknowledged_only_returns_just_that_row(self):
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        alert_id = db.query_events_sqlite(self.db_file, event_type='alert')[0]['id']
+        db.set_acknowledged(self.db_file, 'events', alert_id, True)
+        only_ids = [e['id'] for e in db.query_events_sqlite(self.db_file, acknowledged_only=True)]
+        self.assertEqual(only_ids, [alert_id])
+
+    def test_get_event_count_sqlite_acknowledged_only(self):
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        alert_id = db.query_events_sqlite(self.db_file, event_type='alert')[0]['id']
+        db.set_acknowledged(self.db_file, 'events', alert_id, True)
+        self.assertEqual(db.get_event_count_sqlite(self.db_file, acknowledged_only=True), 1)
+
+    def test_set_acknowledged_bulk_acknowledges_every_id(self):
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        alert_ids = [e['id'] for e in db.query_events_sqlite(self.db_file, event_type='alert')]
+        db.set_acknowledged_bulk(self.db_file, 'events', alert_ids)
+        remaining = db.query_events_sqlite(self.db_file, event_type='alert')
+        self.assertEqual(remaining, [])
+
+    def test_set_acknowledged_bulk_empty_list_is_a_no_op(self):
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        db.set_acknowledged_bulk(self.db_file, 'events', [])
+        self.assertEqual(db.get_event_count_sqlite(self.db_file), 3)
+
+    def test_acknowledged_alerts_discriminate_by_source_table(self):
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        db.insert_sigma_alerts(self.db_file, [{
+            'timestamp': '2026-01-01T00:00:00', 'rule_title': 'r', 'rule_id': 'r1',
+            'severity': 'high', 'level': 'high',
+        }])
+        event_id = db.query_events_sqlite(self.db_file, event_type='alert')[0]['id']
+        sigma_id = db.query_sigma_alerts_sqlite(self.db_file)[0]['id']
+        db.set_acknowledged(self.db_file, 'events', event_id, True)
+        sigma_remaining = db.query_sigma_alerts_sqlite(self.db_file)
+        self.assertEqual([a['id'] for a in sigma_remaining], [sigma_id])
+
+    def test_sigma_alert_acknowledged_excludes_from_default_query(self):
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        db.insert_sigma_alerts(self.db_file, [{
+            'timestamp': '2026-01-01T00:00:00', 'rule_title': 'r', 'rule_id': 'r1',
+            'severity': 'high', 'level': 'high',
+        }])
+        sigma_id = db.query_sigma_alerts_sqlite(self.db_file)[0]['id']
+        db.set_acknowledged(self.db_file, 'sigma_alerts', sigma_id, True)
+        self.assertEqual(db.query_sigma_alerts_sqlite(self.db_file), [])
+        self.assertEqual(db.get_sigma_alert_count_sqlite(self.db_file), 0)
+        only = db.query_sigma_alerts_sqlite(self.db_file, acknowledged_only=True)
+        self.assertEqual([a['id'] for a in only], [sigma_id])
+        self.assertEqual(db.get_sigma_alert_count_sqlite(self.db_file, acknowledged_only=True), 1)
+
     def test_get_event_count_sqlite(self):
         db.create_sqlite_db(self.db_file, self.eve_file)
         count = db.get_event_count_sqlite(self.db_file)
@@ -531,6 +644,25 @@ class TestSQLite(unittest.TestCase):
         names = {n['name'] for n in data['nodes']}
         self.assertIn('1.2.3.4', names)
         self.assertNotIn('1.2.3.5', names)
+
+    def test_get_sankey_data_sqlite_does_not_crash_after_acknowledging_an_alert(self):
+        """REGRESSION: get_sankey_data_sqlite's 5 node/link queries build
+        their WHERE clause (including the acknowledged-exclusion check)
+        inside a ThreadPoolExecutor worker (see run()). Checking whether
+        acknowledged_alerts exists via conn.execute() from inside that
+        worker - instead of once on the main thread beforehand - would
+        raise sqlite3.ProgrammingError ("SQLite objects created in a
+        thread can only be used in that same thread"), since conn is the
+        connection this function's own with-block created on the main
+        thread. Only exercised once something has actually been
+        acknowledged (the exclusion clause is unconditional either way,
+        but this proves the threaded path itself doesn't blow up)."""
+        db.create_sqlite_db(self.db_file, self.eve_file)
+        alert_id = db.query_events_sqlite(self.db_file, event_type='alert')[0]['id']
+        db.set_acknowledged(self.db_file, 'events', alert_id, True)
+        data = db.get_sankey_data_sqlite(self.db_file)
+        self.assertIn('nodes', data)
+        self.assertIn('links', data)
 
     def test_get_sankey_data_sqlite_no_events(self):
         db.init_empty_db(self.db_file)
@@ -861,6 +993,21 @@ class TestSQLite(unittest.TestCase):
         self.assertIn({'value': 'Sev 2', 'count': 2}, data['Severity'])
         self.assertIn({'value': 'Sev 0', 'count': 1}, data['Severity'])
         self.assertEqual(data['Protocol'], [{'value': 'TCP', 'count': 3}])
+
+    def test_get_aggregation_data_sqlite_does_not_crash_after_acknowledging_an_alert(self):
+        """Same threading regression as
+        test_get_sankey_data_sqlite_does_not_crash_after_acknowledging_an_alert,
+        for get_aggregation_data_sqlite's run_column() worker closure."""
+        eve_file = self._write_eve('eve_agg_ack.json', [
+            {'event_type': 'alert', 'timestamp': '2026-01-01T00:00:00', 'src_ip': '1.1.1.1',
+             'dest_ip': '2.2.2.2', 'dest_port': 80, 'proto': 'TCP',
+             'alert': {'signature': 'Sig A', 'category': 'Trojan', 'severity': 2}},
+        ])
+        db.create_sqlite_db(self.db_file, eve_file)
+        alert_id = db.query_events_sqlite(self.db_file, event_type='alert')[0]['id']
+        db.set_acknowledged(self.db_file, 'events', alert_id, True)
+        data = db.get_aggregation_data_sqlite(self.db_file, 'alert')
+        self.assertEqual(data, {}, 'the only alert is acknowledged - every aggregation column must come back empty')
 
     def test_get_aggregation_data_sqlite_alert_ruleset(self):
         """'Ruleset' buckets alerts by signature_id via
@@ -1875,6 +2022,48 @@ class TestBackwardCompatibility(unittest.TestCase):
         self._create_old_schema()
         stats = db.get_sigma_stats_sqlite(self.db_file)
         self.assertEqual(stats, {})
+
+    def test_query_sigma_alerts_when_acknowledged_alerts_table_missing(self):
+        """REGRESSION: an analysis created between v2.0.0 (sigma_alerts
+        added) and this feature's release has a sigma_alerts table but no
+        acknowledged_alerts table yet - nothing on this read path calls
+        _init_db to lazily create it (that's a write-path-only convention).
+        The acknowledged-exclusion condition inside _sigma_alert_where must
+        not reference acknowledged_alerts unconditionally, or every such
+        analysis would hit 'no such table: acknowledged_alerts' (caught
+        broadly as sqlite3.OperationalError) and silently show zero alerts
+        until something else happened to create the table first."""
+        self._create_old_schema()
+        db.insert_sigma_alerts(self.db_file, [{
+            'timestamp': '2026-01-01T00:00:00', 'rule_title': 'r', 'rule_id': 'r1',
+            'severity': 'high', 'level': 'high',
+        }])
+        # insert_sigma_alerts calls _init_db, which would create
+        # acknowledged_alerts too - drop it back out to reproduce the
+        # narrower window where sigma_alerts exists but it doesn't.
+        conn = sqlite3.connect(self.db_file)
+        conn.execute('DROP TABLE acknowledged_alerts')
+        conn.commit()
+        conn.close()
+
+        alerts = db.query_sigma_alerts_sqlite(self.db_file)
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(db.get_sigma_alert_count_sqlite(self.db_file), 1)
+
+    def test_query_events_when_acknowledged_alerts_table_missing(self):
+        """Same regression as test_query_sigma_alerts_when_acknowledged_alerts_table_missing,
+        for the events side."""
+        self._create_old_schema()
+        conn = sqlite3.connect(self.db_file)
+        conn.execute('''INSERT INTO events (event_type, timestamp, src_ip, src_port, dest_ip, dest_port, protocol, app_proto, json_data)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                     ('alert', '2026-01-01T00:00:00', '1.2.3.4', 1234, '5.6.7.8', 80, 'TCP', '', '{"event_type":"alert"}'))
+        conn.commit()
+        conn.close()
+
+        events = db.query_events_sqlite(self.db_file)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(db.get_event_count_sqlite(self.db_file), 1)
 
     def test_query_events_on_old_schema_still_works(self):
         """query_events_sqlite must still return events from an old-schema database."""

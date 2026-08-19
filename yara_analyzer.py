@@ -131,6 +131,12 @@ def setup_yara_rules(data_dir=None, on_progress=print, network_allowed=True, for
         try:
             with gzip.open(BAKED_IN_YARA_FILE, 'rb') as f_in, open(rules_file, 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
+            # Decompressing writes a brand-new file, so its mtime would
+            # otherwise be "now" (container start) rather than when the
+            # ruleset was actually baked into the image at build time -
+            # carry the compressed source's mtime over so the Rules modal's
+            # "updated" date reflects reality, not container uptime.
+            shutil.copystat(BAKED_IN_YARA_FILE, rules_file)
             return rules_file
         except OSError as e:
             on_progress(f'Warning: could not copy baked-in rules: {e}')

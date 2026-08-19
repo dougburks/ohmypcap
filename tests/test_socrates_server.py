@@ -147,6 +147,27 @@ class TestFilenameSanitization(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     server.sanitize_filename(reserved)
 
+    def test_rejects_control_characters(self):
+        """REGRESSION: sanitize_filename's output becomes the real on-disk
+        filename, which yara_analyzer.scan_single_file later writes
+        one-per-line into a temp file passed to `yara --scan-list` - an
+        embedded newline there splits one entry into two bogus paths, so
+        YARA silently never scans the real file while the pipeline still
+        reports the scan as clean/completed. Must reject any control
+        character (0x00-0x1F, 0x7F), not just strip the specific
+        traversal/reserved-name cases already covered above."""
+        for bad in ('evil.exe\nfake_line.exe', 'evil.exe\rfake_line.exe',
+                    'evil.exe\ttab.exe', 'evil\x00null.exe', 'evil\x7fdel.exe'):
+            with self.subTest(filename=bad):
+                with self.assertRaises(ValueError):
+                    server.sanitize_filename(bad)
+
+    def test_allows_normal_unicode_and_spaces(self):
+        """Control-character rejection must not overreach into rejecting
+        legitimate filenames - spaces and non-ASCII characters are fine."""
+        self.assertEqual(server.sanitize_filename('file with spaces.pcap'), 'file with spaces.pcap')
+        self.assertEqual(server.sanitize_filename('unicode-文件.log'), 'unicode-文件.log')
+
 
 class TestZipSlipPrevention(unittest.TestCase):
     def test_normal_zip(self):
@@ -734,9 +755,14 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(len(data), 1)
 
     def test_events_requires_md5(self):
+        """REGRESSION: /api/events used to swallow a missing/malformed md5
+        into a 200 with an empty body, unlike every sibling md5-scoped
+        route (/api/stats, /api/count, etc.) which all return a clean 400
+        for the identical _resolve_md5_dir error - now consistent."""
         status, body = self._get('/api/events')
-        self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body), [])
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn('error', data)
 
     def test_events_with_q_parameter(self):
         md5 = 'e99a18c428cb38d5f260853678922e03'
@@ -915,6 +941,24 @@ class TestAPIEndpoints(unittest.TestCase):
 
     def test_sigma_count_requires_md5(self):
         status, body = self._get('/api/sigma-count')
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn('error', data)
+
+    def test_sigma_alerts_requires_md5(self):
+        """REGRESSION: /api/sigma-alerts used to swallow a missing/malformed
+        md5 into a 200 with an empty body, unlike its sibling /api/sigma-
+        count, which already returns a clean 400 for the identical
+        _resolve_md5_dir error - now consistent."""
+        status, body = self._get('/api/sigma-alerts')
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn('error', data)
+
+    def test_sigma_stats_requires_md5(self):
+        """REGRESSION: same inconsistency as /api/sigma-alerts above, for
+        /api/sigma-stats."""
+        status, body = self._get('/api/sigma-stats')
         self.assertEqual(status, 400)
         data = json.loads(body)
         self.assertIn('error', data)
@@ -2182,6 +2226,22 @@ bright_magenta = "#D9B9D9"
         finally:
             shutil.rmtree(md5dir, ignore_errors=True)
 
+    def test_row_note_sqlite_error_returns_clean_500(self):
+        """REGRESSION: set_row_note's caller only caught OSError, but
+        sqlite3.Error (e.g. sqlite3.OperationalError from lock contention,
+        a disk I/O error, or corruption) is not an OSError subclass - a
+        genuine SQLite failure during a note save used to propagate
+        uncaught out of the handler (a connection reset, not a clean JSON
+        error) instead of becoming a 500 like every other DB-backed route."""
+        md5 = '6' * 32
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            with unittest.mock.patch('socrates.set_row_note', side_effect=sqlite3.OperationalError('database is locked')):
+                status, body = self._post('/api/row-note', {'md5': md5, 'table': 'events', 'rowId': event_id, 'note': 'x'})
+            self.assertEqual(status, 500)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
     def test_row_note_invalid_row_id_returns_400(self):
         md5 = '6' * 32
         md5dir, _, _ = self._make_events_db_with_rows(md5)
@@ -2369,6 +2429,209 @@ bright_magenta = "#D9B9D9"
             self.assertEqual(len(page), 1)
             self.assertEqual(page[0]['id'], second_id)
             self.assertEqual(page[0]['row_note'], 'middle row note')
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alert_invalid_md5_returns_400(self):
+        status, body = self._post('/api/acknowledge-alert', {'md5': 'not-a-real-md5', 'table': 'events', 'rowId': 1, 'acknowledged': True})
+        self.assertEqual(status, 400)
+
+    def test_acknowledge_alert_nonexistent_analysis_returns_404(self):
+        status, body = self._post('/api/acknowledge-alert', {'md5': 'a' * 32, 'table': 'events', 'rowId': 1, 'acknowledged': True})
+        self.assertEqual(status, 404)
+
+    def test_acknowledge_alert_get_returns_404(self):
+        """GET /api/acknowledge-alert must return 404 - POST only."""
+        status, body = self._get('/api/acknowledge-alert?md5=' + 'a' * 32)
+        self.assertEqual(status, 404)
+
+    def test_acknowledge_alert_malformed_json_returns_400(self):
+        status, body = self._post('/api/acknowledge-alert', b'not-json-at-all')
+        self.assertEqual(status, 400)
+
+    def test_acknowledge_alert_invalid_table_returns_400(self):
+        md5 = hashlib.md5(b'ack_invalid_table').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'not_a_table', 'rowId': event_id, 'acknowledged': True})
+            self.assertEqual(status, 400)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alert_invalid_row_id_returns_400(self):
+        md5 = hashlib.md5(b'ack_invalid_row_id').hexdigest()
+        md5dir, _, _ = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'events', 'rowId': 'not-an-int', 'acknowledged': True})
+            self.assertEqual(status, 400)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alert_bool_row_id_returns_400(self):
+        """REGRESSION: bool is a subclass of int in Python - a bare
+        isinstance(x, int) check would silently accept True/False."""
+        md5 = hashlib.md5(b'ack_bool_row_id').hexdigest()
+        md5dir, _, _ = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'events', 'rowId': True, 'acknowledged': True})
+            self.assertEqual(status, 400)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alert_non_bool_acknowledged_returns_400(self):
+        md5 = hashlib.md5(b'ack_non_bool_acknowledged').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'events', 'rowId': event_id, 'acknowledged': 'yes'})
+            self.assertEqual(status, 400)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alert_sqlite_error_returns_clean_500(self):
+        md5 = hashlib.md5(b'ack_sqlite_error').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            with unittest.mock.patch('socrates.set_acknowledged', side_effect=sqlite3.OperationalError('database is locked')):
+                status, body = self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'events', 'rowId': event_id, 'acknowledged': True})
+            self.assertEqual(status, 500)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alert_success_removes_row_from_events(self):
+        md5 = hashlib.md5(b'ack_success_events').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'events', 'rowId': event_id, 'acknowledged': True})
+            self.assertEqual(status, 200)
+            data = json.loads(body)
+            self.assertEqual(data, {'success': True, 'acknowledged': True})
+
+            events = db.query_events_sqlite(os.path.join(md5dir, 'events.db'))
+            self.assertEqual(events, [], 'acknowledged row must no longer appear in the default query')
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alert_success_sigma_alerts_table(self):
+        md5 = hashlib.md5(b'ack_success_sigma').hexdigest()
+        md5dir, _, sigma_id = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'sigma_alerts', 'rowId': sigma_id, 'acknowledged': True})
+            self.assertEqual(status, 200)
+            alerts = db.query_sigma_alerts_sqlite(os.path.join(md5dir, 'events.db'))
+            self.assertEqual(alerts, [])
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alert_false_reincludes_row(self):
+        md5 = hashlib.md5(b'ack_unack_roundtrip').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'events', 'rowId': event_id, 'acknowledged': True})
+            status, body = self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'events', 'rowId': event_id, 'acknowledged': False})
+            self.assertEqual(status, 200)
+            events = db.query_events_sqlite(os.path.join(md5dir, 'events.db'))
+            self.assertEqual([e['id'] for e in events], [event_id])
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alerts_bulk_invalid_row_ids_type_returns_400(self):
+        md5 = hashlib.md5(b'ack_bulk_invalid_type').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alerts-bulk', {'md5': md5, 'table': 'events', 'rowIds': event_id})
+            self.assertEqual(status, 400)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alerts_bulk_empty_row_ids_returns_400(self):
+        md5 = hashlib.md5(b'ack_bulk_empty').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alerts-bulk', {'md5': md5, 'table': 'events', 'rowIds': []})
+            self.assertEqual(status, 400)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alerts_bulk_non_int_entry_returns_400(self):
+        md5 = hashlib.md5(b'ack_bulk_non_int').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alerts-bulk', {'md5': md5, 'table': 'events', 'rowIds': [event_id, 'nope']})
+            self.assertEqual(status, 400)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alerts_bulk_bool_entry_returns_400(self):
+        """REGRESSION: bool is a subclass of int in Python - a bare
+        isinstance(x, int) check would silently accept True/False."""
+        md5 = hashlib.md5(b'ack_bulk_bool_entry').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alerts-bulk', {'md5': md5, 'table': 'events', 'rowIds': [event_id, True]})
+            self.assertEqual(status, 400)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alerts_bulk_too_many_row_ids_returns_400(self):
+        md5 = hashlib.md5(b'ack_bulk_too_many').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            too_many = list(range(1, config.MAX_QUERY_LIMIT + 2))
+            status, body = self._post('/api/acknowledge-alerts-bulk', {'md5': md5, 'table': 'events', 'rowIds': too_many})
+            self.assertEqual(status, 400)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alerts_bulk_success(self):
+        md5 = hashlib.md5(b'ack_bulk_success').hexdigest()
+        md5dir, event_id, sigma_id = self._make_events_db_with_rows(md5)
+        try:
+            status, body = self._post('/api/acknowledge-alerts-bulk', {'md5': md5, 'table': 'events', 'rowIds': [event_id]})
+            self.assertEqual(status, 200)
+            data = json.loads(body)
+            self.assertEqual(data, {'success': True, 'count': 1})
+            events = db.query_events_sqlite(os.path.join(md5dir, 'events.db'))
+            self.assertEqual(events, [])
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_acknowledge_alerts_bulk_sqlite_error_returns_clean_500(self):
+        md5 = hashlib.md5(b'ack_bulk_sqlite_error').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            with unittest.mock.patch('socrates.set_acknowledged_bulk', side_effect=sqlite3.OperationalError('database is locked')):
+                status, body = self._post('/api/acknowledge-alerts-bulk', {'md5': md5, 'table': 'events', 'rowIds': [event_id]})
+            self.assertEqual(status, 500)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_events_api_acknowledged_only_returns_just_acknowledged_rows(self):
+        md5 = hashlib.md5(b'ack_events_api_only').hexdigest()
+        md5dir, event_id, _ = self._make_events_db_with_rows(md5)
+        try:
+            self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'events', 'rowId': event_id, 'acknowledged': True})
+            status, body = self._get(f'/api/events?md5={md5}&acknowledged=only')
+            self.assertEqual(status, 200)
+            data = json.loads(body)
+            self.assertEqual([e['id'] for e in data], [event_id])
+
+            status, body = self._get(f'/api/count?md5={md5}&acknowledged=only')
+            self.assertEqual(json.loads(body)['count'], 1)
+        finally:
+            shutil.rmtree(md5dir, ignore_errors=True)
+
+    def test_sigma_alerts_api_acknowledged_only_returns_just_acknowledged_rows(self):
+        md5 = hashlib.md5(b'ack_sigma_api_only').hexdigest()
+        md5dir, _, sigma_id = self._make_events_db_with_rows(md5)
+        try:
+            self._post('/api/acknowledge-alert', {'md5': md5, 'table': 'sigma_alerts', 'rowId': sigma_id, 'acknowledged': True})
+            status, body = self._get(f'/api/sigma-alerts?md5={md5}&acknowledged=only')
+            self.assertEqual(status, 200)
+            data = json.loads(body)
+            self.assertEqual([a['id'] for a in data], [sigma_id])
+
+            status, body = self._get(f'/api/sigma-count?md5={md5}&acknowledged=only')
+            self.assertEqual(json.loads(body)['count'], 1)
         finally:
             shutil.rmtree(md5dir, ignore_errors=True)
 
@@ -3125,27 +3388,35 @@ bright_magenta = "#D9B9D9"
         # Verify directory was created using PCAP MD5
         self.assertTrue(os.path.exists(os.path.join(self.tmpdir, expected_md5, 'test.pcap')))
 
-    def test_upload_zip_with_extra_files_reports_files_skipped(self):
-        """REGRESSION: only the first PCAP in a multi-file ZIP is ever
-        analyzed - every other file extracted alongside it used to be
-        silently discarded with no indication to the user. filesSkipped
-        must reflect how many were dropped."""
+    def test_upload_zip_with_extra_files_analyzes_them_as_standalone_files(self):
+        """REGRESSION: only the first PCAP in a multi-file ZIP used to ever
+        be analyzed - every other file extracted alongside it was silently
+        discarded. Non-pcap extras must now each get their own standalone
+        (log/binary) analysis, listed in additionalMd5s, rather than being
+        dropped/counted as filesSkipped."""
         import io
         import zipfile as zf
         import hashlib
         pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x11' * 100
+        readme_data = b'not analyzed'
+        notes_data = b'also not analyzed'
         expected_md5 = hashlib.md5(pcap_data).hexdigest()
+        readme_md5 = hashlib.md5(readme_data).hexdigest()
+        notes_md5 = hashlib.md5(notes_data).hexdigest()
         zip_buffer = io.BytesIO()
         with zf.ZipFile(zip_buffer, 'w') as zf_obj:
             zf_obj.writestr('test.pcap', pcap_data)
-            zf_obj.writestr('readme.txt', b'not analyzed')
-            zf_obj.writestr('notes.md', b'also not analyzed')
+            zf_obj.writestr('readme.txt', readme_data)
+            zf_obj.writestr('notes.md', notes_data)
         zip_data = zip_buffer.getvalue()
         status, body = self._post_multipart('/api/upload', 'multi.zip', zip_data)
         self.assertEqual(status, 200)
         data = json.loads(body)
         self.assertEqual(data['md5'], expected_md5)
-        self.assertEqual(data.get('filesSkipped'), 2, '2 of the 3 extracted files were not analyzed')
+        self.assertNotIn('filesSkipped', data)
+        self.assertEqual(set(data.get('additionalMd5s', [])), {readme_md5, notes_md5})
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, readme_md5, 'readme.txt')))
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, notes_md5, 'notes.md')))
 
     def test_upload_single_file_zip_has_no_files_skipped(self):
         """A ZIP containing exactly one file must not report filesSkipped
@@ -3161,6 +3432,260 @@ bright_magenta = "#D9B9D9"
         self.assertEqual(status, 200)
         data = json.loads(body)
         self.assertNotIn('filesSkipped', data)
+
+    def test_upload_zip_with_two_distinct_pcaps_analyzes_both(self):
+        """A ZIP with multiple PCAPs must analyze all of them, not just the
+        first - the primary is returned as md5/status/phase as before, and
+        every other pcap's md5 is listed in additionalMd5s with its own
+        analysis kicked off in the background. Extraction order (and thus
+        which pcap ends up 'primary') is a filesystem detail, not something
+        this test should assume - it only asserts both were handled."""
+        import io
+        import zipfile as zf
+        import hashlib
+        first_data = b'\xd4\xc3\xb2\xa1' + b'\x33' * 100
+        second_data = b'\xd4\xc3\xb2\xa1' + b'\x44' * 100
+        first_md5 = hashlib.md5(first_data).hexdigest()
+        second_md5 = hashlib.md5(second_data).hexdigest()
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('first.pcap', first_data)
+            zf_obj.writestr('second.pcap', second_data)
+        zip_data = zip_buffer.getvalue()
+        with unittest.mock.patch('socrates.spawn_suricata', return_value=True) as mock_spawn:
+            status, body = self._post_multipart('/api/upload', 'two-pcaps.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data['status'], 'processing')
+        self.assertNotIn('filesSkipped', data)
+        self.assertEqual({data['md5']} | set(data.get('additionalMd5s', [])), {first_md5, second_md5})
+        self.assertEqual(len(data.get('additionalMd5s', [])), 1)
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, first_md5, 'first.pcap')))
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, second_md5, 'second.pcap')))
+        spawned_dirs = {call.args[0] for call in mock_spawn.call_args_list}
+        self.assertEqual(spawned_dirs,
+                          {os.path.join(self.tmpdir, first_md5), os.path.join(self.tmpdir, second_md5)},
+                          'both pcaps must have their own analysis spawned')
+
+    def test_upload_zip_with_two_pcaps_and_extra_file_analyzes_all_three(self):
+        """A ZIP with multiple pcaps plus a non-pcap extra file must
+        analyze all three, each as its own independent analysis - the
+        extra file is no longer dropped/counted as filesSkipped, it gets
+        its own standalone (log/binary) analysis alongside the pcaps."""
+        import io
+        import zipfile as zf
+        import hashlib
+        first_data = b'\xd4\xc3\xb2\xa1' + b'\x55' * 100
+        second_data = b'\xd4\xc3\xb2\xa1' + b'\x66' * 100
+        readme_data = b'also analyzed now'
+        first_md5 = hashlib.md5(first_data).hexdigest()
+        second_md5 = hashlib.md5(second_data).hexdigest()
+        readme_md5 = hashlib.md5(readme_data).hexdigest()
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('first.pcap', first_data)
+            zf_obj.writestr('second.pcap', second_data)
+            zf_obj.writestr('readme.txt', readme_data)
+        zip_data = zip_buffer.getvalue()
+        status, body = self._post_multipart('/api/upload', 'two-pcaps-plus-extra.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertNotIn('filesSkipped', data)
+        self.assertEqual({data['md5']} | set(data.get('additionalMd5s', [])),
+                          {first_md5, second_md5, readme_md5})
+        self.assertEqual(len(data.get('additionalMd5s', [])), 2)
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, readme_md5, 'readme.txt')))
+
+    def test_upload_zip_with_identical_pcaps_dedupes_within_batch(self):
+        """Two byte-identical pcaps in the same ZIP must only produce one
+        analysis - the duplicate must not appear in additionalMd5s, must
+        not be reported as skipped, must not trigger a second
+        commit/spawn, and must not crash the request."""
+        import io
+        import zipfile as zf
+        import hashlib
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x77' * 100
+        expected_md5 = hashlib.md5(pcap_data).hexdigest()
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('capture-a.pcap', pcap_data)
+            zf_obj.writestr('capture-b.pcap', pcap_data)
+        zip_data = zip_buffer.getvalue()
+        with unittest.mock.patch('socrates.spawn_suricata', return_value=True) as mock_spawn:
+            status, body = self._post_multipart('/api/upload', 'duplicate-pcaps.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data['md5'], expected_md5)
+        self.assertNotIn('additionalMd5s', data)
+        self.assertNotIn('filesSkipped', data)
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, expected_md5)))
+        mock_spawn.assert_called_once()
+        self.assertEqual(mock_spawn.call_args.args[0], os.path.join(self.tmpdir, expected_md5),
+                          'the duplicate pcap must not trigger a second spawn_suricata call')
+
+    def test_upload_zip_with_pcap_and_exe_analyzes_both(self):
+        """A ZIP with a pcap plus a non-pcap binary (e.g. a malware sample)
+        must analyze both - the exe is no longer dropped, it gets its own
+        standalone binary analysis alongside the pcap's network analysis."""
+        import io
+        import zipfile as zf
+        import hashlib
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x99' * 100
+        exe_data = b'MZ' + b'\x90' * 100 + b'PCAP_AND_EXE_TEST'
+        pcap_md5 = hashlib.md5(pcap_data).hexdigest()
+        exe_md5 = hashlib.md5(exe_data).hexdigest()
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('capture.pcap', pcap_data)
+            zf_obj.writestr('malware.exe', exe_data)
+        zip_data = zip_buffer.getvalue()
+        status, body = self._post_multipart('/api/upload', 'pcap-and-exe.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data['md5'], pcap_md5, 'the pcap must be the primary analysis, exe secondary')
+        self.assertEqual(data.get('phase'), 'network')
+        self.assertNotIn('filesSkipped', data)
+        self.assertEqual(data.get('additionalMd5s'), [exe_md5])
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, pcap_md5, 'capture.pcap')))
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, exe_md5, 'malware.exe')))
+
+    def test_upload_zip_with_pcap_and_log_analyzes_both_with_correct_types(self):
+        """A ZIP with a pcap plus an EVTX log (e.g. traffic capture bundled
+        with the endpoint's event log) must analyze both, each detected
+        and routed to its own correct analysis type - network for the
+        pcap, log for the EVTX - not just 'the extra gets analyzed
+        somehow'."""
+        import io
+        import zipfile as zf
+        import hashlib
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\xaa' * 100
+        evtx_data = b'<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System><EventID>1</EventID><Data>PCAP_AND_LOG_TEST</Data></System></Event>'
+        pcap_md5 = hashlib.md5(pcap_data).hexdigest()
+        evtx_md5 = hashlib.md5(evtx_data).hexdigest()
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('capture.pcap', pcap_data)
+            zf_obj.writestr('security.evtx', evtx_data)
+        zip_data = zip_buffer.getvalue()
+        status, body = self._post_multipart('/api/upload', 'pcap-and-log.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data['md5'], pcap_md5, 'the pcap must be the primary analysis')
+        self.assertEqual(data.get('phase'), 'network')
+        self.assertNotIn('filesSkipped', data)
+        self.assertEqual(data.get('additionalMd5s'), [evtx_md5])
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, pcap_md5, 'capture.pcap')))
+        log_meta_path = os.path.join(self.tmpdir, evtx_md5, '.meta')
+        self.assertTrue(os.path.exists(log_meta_path), '.meta must be written for the additional log file')
+        with open(log_meta_path, 'r') as f:
+            log_meta = json.load(f)
+        self.assertEqual(log_meta['detected_type'], 'log',
+                          'the EVTX must be detected as a log, not lumped in as generic binary')
+        self.assertEqual(log_meta['extracted'], 'security.evtx')
+
+    def test_upload_zip_with_log_and_exe_no_pcap_analyzes_both_with_correct_types(self):
+        """A ZIP with no pcap at all, containing both a log file and a
+        binary, must still route each to its own correct analysis type -
+        proves type detection is per-file even when neither file is a
+        pcap and there's no network-analysis branch involved at all."""
+        import io
+        import zipfile as zf
+        import hashlib
+        evtx_data = b'<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System><EventID>1</EventID><Data>LOG_AND_EXE_TEST</Data></System></Event>'
+        exe_data = b'MZ' + b'\x90' * 100 + b'LOG_AND_EXE_TEST'
+        evtx_md5 = hashlib.md5(evtx_data).hexdigest()
+        exe_md5 = hashlib.md5(exe_data).hexdigest()
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('security.evtx', evtx_data)
+            zf_obj.writestr('malware.exe', exe_data)
+        zip_data = zip_buffer.getvalue()
+        status, body = self._post_multipart('/api/upload', 'log-and-exe.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertNotIn('filesSkipped', data)
+        self.assertEqual({data['md5']} | set(data.get('additionalMd5s', [])), {evtx_md5, exe_md5})
+        self.assertEqual(len(data.get('additionalMd5s', [])), 1)
+
+        with open(os.path.join(self.tmpdir, evtx_md5, '.meta'), 'r') as f:
+            evtx_meta = json.load(f)
+        with open(os.path.join(self.tmpdir, exe_md5, '.meta'), 'r') as f:
+            exe_meta = json.load(f)
+        self.assertEqual(evtx_meta['detected_type'], 'log')
+        self.assertEqual(exe_meta['detected_type'], 'binary')
+
+    def test_upload_zip_with_no_pcap_multiple_files_analyzes_all(self):
+        """A ZIP with no pcap but multiple non-pcap files must analyze all
+        of them, not just the first - extraction order is a filesystem
+        detail, so this only asserts both ended up analyzed."""
+        import io
+        import zipfile as zf
+        import hashlib
+        first_data = b'first file contents'
+        second_data = b'second file contents'
+        first_md5 = hashlib.md5(first_data).hexdigest()
+        second_md5 = hashlib.md5(second_data).hexdigest()
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('a.bin', first_data)
+            zf_obj.writestr('b.bin', second_data)
+        zip_data = zip_buffer.getvalue()
+        status, body = self._post_multipart('/api/upload', 'no-pcap-multi.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertNotIn('filesSkipped', data)
+        self.assertEqual({data['md5']} | set(data.get('additionalMd5s', [])), {first_md5, second_md5})
+        self.assertEqual(len(data.get('additionalMd5s', [])), 1)
+
+    def test_upload_zip_with_identical_non_pcap_files_dedupes_within_batch(self):
+        """Two byte-identical non-pcap files in the same ZIP must only
+        produce one analysis, mirroring the pcap-duplicate case."""
+        import io
+        import zipfile as zf
+        import hashlib
+        file_data = b'duplicate content'
+        expected_md5 = hashlib.md5(file_data).hexdigest()
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('copy-a.bin', file_data)
+            zf_obj.writestr('copy-b.bin', file_data)
+        zip_data = zip_buffer.getvalue()
+        status, body = self._post_multipart('/api/upload', 'duplicate-files.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data['md5'], expected_md5)
+        self.assertNotIn('additionalMd5s', data)
+        self.assertNotIn('filesSkipped', data)
+
+    def test_upload_zip_extra_file_failure_reported_as_files_skipped(self):
+        """A file that genuinely fails to hash/commit within a multi-file
+        ZIP must be dropped gracefully and counted via filesSkipped,
+        without aborting analysis of the rest of the batch."""
+        import io
+        import zipfile as zf
+        import hashlib
+        pcap_data = b'\xd4\xc3\xb2\xa1' + b'\x88' * 100
+        expected_md5 = hashlib.md5(pcap_data).hexdigest()
+        zip_buffer = io.BytesIO()
+        with zf.ZipFile(zip_buffer, 'w') as zf_obj:
+            zf_obj.writestr('test.pcap', pcap_data)
+            zf_obj.writestr('bad.bin', b'unreadable')
+        zip_data = zip_buffer.getvalue()
+
+        real_hash_with_prefix = server._hash_file_with_prefix
+
+        def flaky_hash_with_prefix(path, *args, **kwargs):
+            if os.path.basename(path) == 'bad.bin':
+                raise OSError('simulated failure')
+            return real_hash_with_prefix(path, *args, **kwargs)
+
+        with unittest.mock.patch('socrates._hash_file_with_prefix', side_effect=flaky_hash_with_prefix):
+            status, body = self._post_multipart('/api/upload', 'flaky.zip', zip_data)
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data['md5'], expected_md5)
+        self.assertNotIn('additionalMd5s', data)
+        self.assertEqual(data.get('filesSkipped'), 1)
 
     def test_upload_tries_password_protected_zips(self):
         """Upload handler code must attempt common passwords before rejecting protected ZIPs."""
@@ -4310,6 +4835,54 @@ class TestSpawnSuricataErrorHandling(unittest.TestCase):
             self.assertEqual(mock_proc.wait.call_count, 2,
                              'proc.wait() must be called again after kill() to reap the process, not just once before the timeout')
 
+    def test_watchdog_clears_phase_on_unexpected_non_timeout_exception(self):
+        """REGRESSION: _suricata_watchdog only caught subprocess.TimeoutExpired
+        around proc.wait() - any other exception occurring anywhere in the
+        watchdog's body (here simulated via on_suricata_done()'s own
+        _set_phase('files', ...) call failing unexpectedly) left .phase in
+        place forever, since this runs in a daemon thread where an
+        uncaught exception is silently swallowed rather than propagated to
+        spawn_suricata()'s caller. spawn_suricata()'s own re-entry guard
+        then refuses to start a new run while .phase exists, so the
+        analysis directory would be permanently stuck "in progress"."""
+        import unittest.mock
+        import time
+        import suricata_analyzer
+        from suricata_analyzer import spawn_suricata
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pcap_path = os.path.join(tmpdir, 'test.pcap')
+            with open(pcap_path, 'wb') as f:
+                f.write(b'\xd4\xc3\xb2\xa1' + b'\x00' * 100)
+
+            mock_proc = unittest.mock.MagicMock()
+            mock_proc.wait.return_value = None  # succeeds immediately - not a timeout
+
+            # First _set_phase call is spawn_suricata()'s own 'network'
+            # phase (must succeed so spawn_suricata itself returns True);
+            # the second is on_suricata_done()'s 'files' phase, inside the
+            # watchdog thread - simulate that one failing unexpectedly.
+            call_count = {'n': 0}
+            def flaky_set_phase(dir_path, phase):
+                call_count['n'] += 1
+                if call_count['n'] == 2:
+                    raise RuntimeError('simulated unexpected failure')
+
+            with unittest.mock.patch('subprocess.Popen', return_value=mock_proc), \
+                 unittest.mock.patch('suricata_analyzer._set_phase', side_effect=flaky_set_phase):
+                result = spawn_suricata(tmpdir, pcap_path)
+                self.assertTrue(result)
+
+                error_file = os.path.join(tmpdir, '.error')
+                for _ in range(50):
+                    if os.path.exists(error_file):
+                        break
+                    time.sleep(0.1)
+
+            self.assertTrue(os.path.exists(error_file),
+                            '.error must be written on an unexpected watchdog failure, not just a subprocess.TimeoutExpired')
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, '.phase')),
+                             '.phase must be cleared even when the failure is not a subprocess.TimeoutExpired, or the analysis is stuck forever')
+
 
 class TestServerBinding(unittest.TestCase):
     def test_server_binds_localhost(self):
@@ -4701,10 +5274,16 @@ class TestReanalyzeEndpoint(unittest.TestCase):
         self.assertIn("PCAP_ANALYSIS_ARTIFACTS = ('eve.json', 'events.db', '.phase', '.error', 'yara_matches.json', 'sigma_matches.json', '.meta', 'file_metadata.json')", content,
                       'PCAP artifact list must be centralized in PCAP_ANALYSIS_ARTIFACTS')
         reanalyze_section = content.split("def handle_post_reanalyze(self):")[1]
-        self.assertIn("for artifact in PCAP_ANALYSIS_ARTIFACTS:", reanalyze_section,
-                      'reanalyze must loop over analysis artifacts to delete')
-        self.assertIn('os.unlink(artifact_path)', reanalyze_section,
-                      'reanalyze must unlink artifact files')
+        # The actual per-artifact loop lives in the shared _remove_artifacts
+        # helper now (both the pcap and non-pcap branches used to each
+        # inline an identical copy of it) - reanalyze itself just calls it.
+        self.assertIn("self._remove_artifacts(dir_path, PCAP_ANALYSIS_ARTIFACTS)", reanalyze_section,
+                      'reanalyze must delete PCAP_ANALYSIS_ARTIFACTS via _remove_artifacts')
+        remove_artifacts_section = content.split("def _remove_artifacts(self, dir_path, artifacts):")[1].split("\n    def ")[0]
+        self.assertIn('for artifact in artifacts:', remove_artifacts_section,
+                      '_remove_artifacts must loop over the given artifact list')
+        self.assertIn('os.unlink(artifact_path)', remove_artifacts_section,
+                      '_remove_artifacts must unlink artifact files')
 
     def test_reanalyze_evicts_sankey_and_aggregation_cache(self):
         """Reanalyze deletes and rebuilds events.db, so any cached Sankey/
@@ -4713,23 +5292,30 @@ class TestReanalyzeEndpoint(unittest.TestCase):
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
         reanalyze_section = content.split("def handle_post_reanalyze(self):")[1]
-        # Must evict before the artifact-deletion loop, not after.
+        # Must evict before the artifact-deletion call, not after.
         evict_pos = reanalyze_section.find('_evict_analysis_cache(md5)')
-        loop_pos = reanalyze_section.find('for artifact in PCAP_ANALYSIS_ARTIFACTS:')
+        removal_pos = reanalyze_section.find('self._remove_artifacts(dir_path, PCAP_ANALYSIS_ARTIFACTS)')
         self.assertNotEqual(evict_pos, -1, 'reanalyze must call _evict_analysis_cache(md5)')
-        self.assertLess(evict_pos, loop_pos,
+        self.assertLess(evict_pos, removal_pos,
                          'cache eviction must happen before events.db is deleted/rebuilt')
 
     def test_reanalyze_keeps_pcap_and_name(self):
         """Verify reanalyze does NOT delete pcap files or name.txt."""
         with open(SERVER_FILE, 'r') as f:
             content = f.read()
-        reanalyze_section = content.split("def handle_post_reanalyze(self):")[1]
-        # Should only unlink artifacts, not rmtree the whole directory
-        # rmtree is allowed only for the filestore subdirectory
-        loop_section = reanalyze_section.split("for artifact in")[1].split("if spawn_suricata")[0]
-        self.assertNotIn("name.txt", loop_section,
-                         'reanalyze loop must not reference name.txt')
+        # name.txt must not appear in either artifact tuple _remove_artifacts
+        # is ever called with from handle_post_reanalyze, and reanalyze must
+        # never rmtree the whole analysis directory (only the filestore
+        # subdirectory is allowed to be rmtree'd).
+        pcap_artifacts_line = content.split('PCAP_ANALYSIS_ARTIFACTS = ')[1].split('\n')[0]
+        file_artifacts_line = content.split('FILE_ANALYSIS_ARTIFACTS = ')[1].split('\n')[0]
+        self.assertNotIn('name.txt', pcap_artifacts_line,
+                         'PCAP_ANALYSIS_ARTIFACTS must not include name.txt')
+        self.assertNotIn('name.txt', file_artifacts_line,
+                         'FILE_ANALYSIS_ARTIFACTS must not include name.txt')
+        reanalyze_section = content.split("def handle_post_reanalyze(self):")[1].split("\n\nclass ")[0]
+        self.assertNotIn('shutil.rmtree(dir_path)', reanalyze_section,
+                         'reanalyze must not rmtree the whole analysis directory (only filestore/ is allowed)')
 
     def test_reanalyze_handles_non_pcap_files(self):
         """Verify reanalyze can re-analyze standalone non-PCAP files."""

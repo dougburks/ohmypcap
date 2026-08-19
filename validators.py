@@ -51,12 +51,20 @@ def sanitize_filename(filename):
     - path traversal sequences (. / ..)
     - empty names after stripping
     - names that collide with internal analysis files.
+    - control characters (0x00-0x1F, 0x7F), most importantly newlines.
+      This sanitized name becomes the real on-disk filename, which later
+      gets written one-per-line into YARA's --scan-list input
+      (yara_analyzer.scan_single_file) - an embedded newline there splits
+      one entry into two bogus paths, so YARA silently never scans the
+      real file while the pipeline still reports a clean/completed scan.
     """
     safe = os.path.basename(filename.replace('\\', '/'))
     if not safe or safe in ('.', '..') or safe.startswith('..'):
         raise ValueError(f'Invalid filename: {filename!r}')
     if safe in RESERVED_FILENAMES:
         raise ValueError(f'Reserved filename not allowed: {safe}')
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in safe):
+        raise ValueError(f'Filename contains control characters: {filename!r}')
     return safe
 
 

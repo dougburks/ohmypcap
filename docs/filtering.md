@@ -161,5 +161,5 @@ python3 -m unittest discover tests -v
 All tests must pass. The filtering-related tests are in:
 
 - `TestFilterOnclickQuoting` (4 tests)
-- `TestAdvancedModeFilterBar` (25 tests)
-- `TestSearchUI` (29 tests)
+- `TestAdvancedModeFilterBar` (32 tests)
+- `TestSearchUI` (30 tests)

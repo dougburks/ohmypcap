@@ -33,33 +33,6 @@
             --tag-green-text: #66bb6a;
             --help-icon-color: #f1c40f;
         }
-        [data-theme="light"] {
-            --bg-primary: #ffffff;
-            --bg-secondary: #f6f8fa;
-            --bg-tertiary: #eaeef2;
-            --bg-hover: #d0d7de;
-            --bg-hover-light: #afb8c1;
-            --border-color: #d0d7de;
-            --text-primary: #1f2328;
-            --text-bright: #1f2328;
-            --text-muted: #656d76;
-            --accent: #0969da;
-            --accent-hover: #0550ae;
-            --bg-drop-active: #ddf4ff;
-            --modal-backdrop: rgba(0,0,0,0.5);
-            --badge-danger-text: #c62828;
-            --danger-bg: #e0e5ea;
-            --badge-bg-neutral: #fafcfc;
-            --badge-warning-text: #e65100;
-            --badge-success-text: #2e7d32;
-            --tag-red-text: #c62828;
-            --tag-purple-text: #8e24aa;
-            --tag-orange-text: #e65100;
-            --tag-blue-text: #1565c0;
-            --tag-gray-text: #616161;
-            --tag-green-text: #2e7d32;
-            --help-icon-color: #9a7d0a;
-        }
         [data-theme="sguil"] {
             --bg-primary: #ffffff;
             --bg-secondary: #f0f0f0;
@@ -1004,6 +977,40 @@
             );
         }
 
+        /* MP3 Player: brushed-metal chrome grays evoking the skeuomorphic
+           skinnable media players of the late-90s/early-2000s, with a soft
+           LCD-green readout as the dominant text/accent color and a cyan
+           highlight for the "pressed button" bezel look. Badge colors lean
+           into a green-yellow-orange-red EQ ladder, which doubles neatly as
+           semantic success/warning/danger coloring. */
+        [data-theme="mp3-player"] {
+            --bg-primary: #1c1e22;
+            --bg-secondary: #26282d;
+            --bg-tertiary: #303338;
+            --bg-hover: #3a3d43;
+            --bg-hover-light: #4a4e55;
+            --border-color: #55595f;
+            --text-primary: #8FE388;
+            --text-bright: #F5F5F0;
+            --text-muted: #7A7E85;
+            --accent: #4DD9E8;
+            --accent-hover: #7EE8F2;
+            --bg-drop-active: #2a3a3d;
+            --modal-backdrop: rgba(0,0,0,0.85);
+            --badge-danger-text: #F24B4B;
+            --danger-bg: #3a1f1f;
+            --badge-bg-neutral: #232529;
+            --badge-warning-text: #F2A73B;
+            --badge-success-text: #3DDC5A;
+            --tag-red-text: #F24B4B;
+            --tag-purple-text: #B98EE8;
+            --tag-orange-text: #F2A73B;
+            --tag-blue-text: #4DD9E8;
+            --tag-gray-text: #9A9EA5;
+            --tag-green-text: #3DDC5A;
+            --help-icon-color: var(--accent);
+        }
+
         /* MS-DOS Blue: the flat cobalt-blue background of classic DOS
            text-mode UIs (Norton Commander, EDIT.COM, QBasic) - the actual
            standard 16-color EGA/VGA text-mode palette values, not an
@@ -1159,7 +1166,7 @@
             display: inline-block;
             vertical-align: middle;
         }
-        .code-rain-canvas {
+        .code-rain-canvas, .block-rain-canvas, .vaporwave-grid-canvas, .dos-defrag-canvas, .cga-starfield-canvas, .breadbin-sprites-canvas, .digital-frontier-streaks-canvas, .luna-bliss-canvas, .amber-boot-log-canvas, .mp3-visualizer-canvas {
             position: fixed;
             top: 0;
             left: 0;
@@ -1173,15 +1180,124 @@
         [data-theme="hacker"] .code-rain-canvas {
             opacity: 0.32;
         }
+        /* Falling-tetromino ambient background for Retro Handheld -
+           same fixed/low-opacity/behind-everything technique as Hacker's
+           code rain above, its own separate canvas (rather than reusing
+           #codeRain) since both effects are simple enough that a second
+           <canvas> costs nothing and keeps the two fully independent -
+           no shared, theme-branching draw loop to reason about. Slightly
+           lower opacity than Hacker's 0.32 since blocky, mostly-solid
+           tetromino shapes read as more visually "present" at a given
+           opacity than sparse rain glyphs do. */
+        [data-theme="retro-handheld"] .block-rain-canvas {
+            opacity: 0.25;
+        }
+        /* Synthwave grid-horizon ambient background for Vaporwave - same
+           technique again, its own third canvas. Meaningfully higher
+           opacity than the other two (0.55 vs 0.25-0.32) - unlike rain
+           or falling blocks (diffuse patterns that still read fine
+           mostly covered by page panels), a horizon+sun scene needs a
+           decent amount of contiguous, unobstructed space to read as
+           itself at all, and most of the viewport is usually covered by
+           opaque panel content - boosting opacity is what keeps whatever
+           sliver *does* peek through actually noticeable. */
+        [data-theme="vaporwave"] .vaporwave-grid-canvas {
+            opacity: 0.55;
+        }
+        /* Norton Commander dual-pane ambient background for DOS Blue - a
+           bordered file-list panel in each side margin, mostly-static
+           composed scenes (like Luna Blue's hill/sky) rather than sparse
+           text/dots, so it gets Luna Blue's opacity rather than Amber's
+           boot log's. */
+        [data-theme="dos-blue"] .dos-defrag-canvas {
+            opacity: 0.35;
+        }
+        /* Dithered plasma ambient background for CGA - a continuous,
+           full-canvas color field like Breadbin Blue's plasma, so it
+           gets the same low opacity treatment for the same reason: a
+           solid wash at 0.6 (right for the old sparse twinkling dots)
+           would dominate the page instead of reading as a subtle ambient
+           backdrop. */
+        [data-theme="cga"] .cga-starfield-canvas {
+            opacity: 0.25;
+        }
+        /* Demoscene plasma field for Breadbin Blue - a continuous,
+           full-canvas color field (not sparse discrete shapes like the
+           blinking sprites this replaced), so it needs a much lower
+           opacity than those did - a solid wash at 0.6 would dominate
+           the page rather than reading as a subtle ambient backdrop. */
+        [data-theme="breadbin-blue"] .breadbin-sprites-canvas {
+            opacity: 0.25;
+        }
+        /* Light-cycle trail streaks for Digital Frontier - thin glowing
+           Tron-style lines that periodically sweep across the viewport
+           (horizontally or vertically) and fade behind their own head,
+           rather than a continuous field of many small shapes like the
+           other effects above. Lower opacity than the sprite-style
+           effects since these streaks already carry their own glow
+           (canvas shadowBlur) which reads as bright even faded down. */
+        [data-theme="digital-frontier"] .digital-frontier-streaks-canvas {
+            opacity: 0.5;
+        }
+        /* "Bliss" hill-and-sky homage for Luna Blue - a fully opaque
+           painted scene (unlike the other effects, which are translucent
+           overlays on the page's own background color), so this one
+           needs a much lower canvas opacity to avoid fighting with real
+           page content for attention - it reads as a soft backdrop
+           rather than a wash of color. */
+        [data-theme="luna-blue"] .luna-bliss-canvas {
+            opacity: 0.35;
+        }
+        /* Scrolling boot-log ambient background for Amber - same
+           small-text-column technique as Hacker's code rain, similar
+           opacity for the same reason (sparse text needs to stay
+           reasonably visible against the theme's solid black page). */
+        [data-theme="amber"] .amber-boot-log-canvas {
+            opacity: 0.3;
+        }
+        /* Spectrum-analyzer bars for MP3 Player - solid-filled bars (not
+           sparse dots/text/lines like the other effects), so they need a
+           lower opacity than most to avoid feeling like a wall of color at
+           the bottom of the screen while still reading clearly against the
+           theme's dark chrome background. */
+        [data-theme="mp3-player"] .mp3-visualizer-canvas {
+            opacity: 0.28;
+        }
         .code-rain-canvas ~ * {
             position: relative;
             z-index: 1;
+        }
+        /* Re-asserts the other ambient canvases' own fixed/behind-
+           everything positioning after the general sibling-bump rule
+           above, which - being a following sibling of #codeRain itself -
+           would otherwise catch them too. Same specificity as that rule
+           (one class selector each), so these win purely by appearing
+           later in the file - deliberately NOT expressed with a chain of
+           :not() exclusions instead: a :not() argument counts toward
+           specificity, and that extra specificity made the bump rule win
+           against .app-header's and .footer's own "position: fixed"
+           rules too (further down this file) regardless of source
+           order, breaking their fixed pinning to the top/bottom of the
+           viewport - a real regression, caught after the header/footer
+           visibly broke (see git history on .block-rain-canvas's
+           introduction). */
+        .block-rain-canvas, .vaporwave-grid-canvas, .dos-defrag-canvas, .cga-starfield-canvas, .breadbin-sprites-canvas, .digital-frontier-streaks-canvas, .luna-bliss-canvas, .amber-boot-log-canvas, .mp3-visualizer-canvas {
+            position: fixed;
+            z-index: 0;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-primary); color: var(--text-primary); line-height: 1.6; }
         .app-header { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); z-index: 1000; }
         .app-header-left { display: flex; align-items: center; gap: 8px; }
         .app-header-left svg { vertical-align: middle; }
+        /* Without this, the SO-CRATES logo link (a bare <a>, no other
+           focus styling defined) falls back to the browser's native
+           outline: auto ring - a stray gray/white box that doesn't match
+           any theme and (since keyboard focus isn't cleared by the 't'
+           theme-cycle hotkey) stays visibly mismatched after switching
+           themes while it's focused. Same themed outline pattern already
+           used for .theme-switch's focus-visible ring. */
+        .app-logo-text:focus-visible { outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: 2px; border-radius: 4px; }
         .app-header-filename { color: var(--text-bright); font-weight: 600; font-size: 0.9rem; margin-left: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
         .app-header-filename-input { color: var(--text-bright); font-weight: 600; font-size: 0.9rem; font-family: inherit; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 6px; width: 280px; max-width: 100%; }
         .app-header-filename-input:focus { outline: none; border-color: var(--interactive-highlight, var(--accent)); }
@@ -1216,9 +1332,43 @@
         header { background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%); padding: 30px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border-color); }
         #mainHeader { padding: 0; background: transparent; border: none; }
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-bottom: 20px; }
-        .stat-card { background: var(--bg-secondary); padding: 20px; border-radius: 10px; border: 1px solid var(--border-color); text-align: center; cursor: pointer; container-type: inline-size; }
+        .stat-card { background: var(--bg-secondary); padding: 20px; border-radius: 10px; border: 1px solid var(--border-color); text-align: center; cursor: pointer; container-type: inline-size; position: relative; }
         .stat-card:hover { border-color: var(--interactive-highlight, var(--accent)); }
         .stat-card.tab-active { border-color: var(--interactive-highlight, var(--accent)); background: var(--bg-tertiary); }
+        /* HUD-style corner-bracket accent (theme-agnostic - pulls from
+           --accent like every other decoration, no new per-theme variable):
+           a targeting-reticle frame that appears on the active/hovered stat
+           card instead of just a border-color swap. All four corners, but
+           only two pseudo-elements exist per real element, so each one
+           paints two adjacent corners via a stack of background-image
+           gradients (a horizontal + vertical stroke per corner) rather
+           than a single border-based L - ::before spans a band across the
+           top edge and paints the top-left/top-right corners, ::after
+           spans the bottom edge and paints the bottom two. inset to the
+           edges (not a negative offset) so it can never get clipped by a
+           parent's overflow:hidden. Same trigger as
+           .stat-card:hover/.tab-active above, just layered visual feedback
+           rather than a replacement. Scoped under .fun-theme (toggled in
+           JS by updateFunThemeClass(), keyed off the same fun-theme set
+           THEMED_LOADING_PHRASES defines) - it's pure decoration on top of
+           the border-color swap that already signals hover/active state,
+           so standard/professional themes skip it entirely rather than
+           getting a sci-fi HUD accent that doesn't fit their identity. */
+        .fun-theme .stat-card::before, .fun-theme .stat-card::after {
+            content: ''; position: absolute; left: 0; right: 0; height: 10px;
+            background-repeat: no-repeat;
+            background-image:
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent));
+            background-size: 10px 2px, 2px 10px, 10px 2px, 2px 10px;
+            opacity: 0; transition: opacity 0.15s ease; pointer-events: none;
+        }
+        .fun-theme .stat-card::before { top: 0; background-position: top left, top left, top right, top right; }
+        .fun-theme .stat-card::after { bottom: 0; background-position: bottom left, bottom left, bottom right, bottom right; }
+        .fun-theme .stat-card:hover::before, .fun-theme .stat-card:hover::after,
+        .fun-theme .stat-card.tab-active::before, .fun-theme .stat-card.tab-active::after { opacity: 1; }
         /* Fluid, not fixed - a large sample can have 20+ event-type cards
            in the auto-fit grid below, squeezing each card down to its
            140px minmax floor; a fixed 2.5rem digit size overflowed cards
@@ -1247,6 +1397,11 @@
         td { padding: 12px; border-bottom: 1px solid var(--border-color); overflow-wrap: break-word; vertical-align: top; }
         tr { cursor: pointer; }
         tr:hover { background: var(--bg-tertiary); }
+        /* Arrow-key (Up/Down) row navigation highlight - an inset outline
+           on top of the same background :hover uses, so a keyboard-
+           selected row still reads as distinct from a merely-hovered one
+           rather than looking identical. */
+        tr[data-id].keyboard-selected { background: var(--bg-tertiary); outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: -2px; }
         tr.expanded-row td { border-bottom: none; }
         .detail-row { display: none; }
         .detail-row.visible { display: table-row; }
@@ -1260,6 +1415,10 @@
            never an empty placeholder. */
         .detail-value-pivot { cursor: pointer; border-radius: 3px; }
         .detail-value-pivot:hover { background: var(--bg-hover); }
+        /* Same arrow-key selection treatment as .filter-chip.keyboard-selected -
+           an inline span within a label/value grid row, not a full-width row
+           of its own, so this is a positive offset rather than inset. */
+        .detail-value-pivot.keyboard-selected { background: var(--bg-hover); outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: 1px; }
         .ascii-transcript div { overflow-wrap: break-word; word-break: break-all; }
         .ascii-loading { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border-color); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; vertical-align: middle; }
         .value-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: middle; flex-shrink: 0; }
@@ -1268,21 +1427,58 @@
         .timestamp { color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .stream-btn { background: var(--bg-hover); border: none; color: var(--accent); padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
         .stream-btn:hover { background: var(--bg-hover-light); }
+        /* Same arrow-key selection treatment as .filter-chip.keyboard-selected -
+           a positive offset, not inset, since this is a small pill/button rather
+           than a full-width row. */
+        .stream-btn.keyboard-selected { outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: 2px; }
+        /* The "+ Add Note"/"Edit" link (see rowNoteDetailValueHtml) is otherwise
+           unstyled apart from its own inline color - same outline treatment as
+           .stream-btn/.view-tab above, the other controls in an expanded row's
+           own keyboard-nav list. */
+        .row-note-edit-link.keyboard-selected { outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: 2px; border-radius: 2px; }
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--modal-backdrop); z-index: 1001; }
         .modal.active { display: flex; align-items: center; justify-content: center; }
         
         .loading-modal { text-align: center; padding: 40px; background: var(--bg-secondary); border-radius: 12px; display: inline-block; }
-        .spinner { position: relative; width: 80px; height: 80px; margin: 0 auto 25px; }
-        .spinner::before, .spinner::after { content: ''; position: absolute; border-radius: 50%; }
-        .spinner::before { inset: 0; border: 4px solid transparent; border-top-color: var(--accent); border-right-color: var(--accent); animation: spin 1s linear infinite; }
-        .spinner::after { inset: 10px; border: 4px solid transparent; border-bottom-color: var(--accent-hover); border-left-color: var(--accent-hover); animation: spin 0.6s linear infinite reverse; }
-        .spinner-dot { position: absolute; top: 50%; left: 50%; width: 8px; height: 8px; margin: -4px; background: var(--accent); border-radius: 50%; animation: pulse 1.5s ease-in-out infinite; }
+        /* 140px (up from an original 80px) - the loading modal has
+           plenty of unused room around it at the old size, and a bigger
+           dial gives the tick marks/comet-tail sweep more presence. Ring
+           thickness and center dot scaled up to match (10px/14px, from
+           6px/8px) rather than just growing the outer diameter, so the
+           ring doesn't thin out relative to the larger circle. */
+        .spinner { position: relative; width: 140px; height: 140px; margin: 0 auto 25px; }
+        /* HUD radar/targeting scan, replacing the old two-rings-spinning-
+           opposite-directions look. Both layers are a solid disc masked
+           down to a thin ring via a radial-gradient mask (transparent
+           center + transparent past the outer edge leaves only a 10px
+           band visible) rather than a CSS border, since a repeating/conic
+           gradient can't be expressed as a border value.
+           ::before: the static "scope" backdrop - 12 evenly-spaced tick
+           marks (repeating-conic-gradient, 30deg apart) like a
+           rangefinder dial, always visible under the sweep below.
+           ::after: the moving scan itself - a conic-gradient wedge that
+           fades in and back out (a comet tail, not a hard-edged arc),
+           continuously rotating. Reuses the existing spin keyframe (a
+           plain 0deg->360deg rotation) rather than a new one. */
+        .spinner::before, .spinner::after {
+            content: ''; position: absolute; inset: 0; border-radius: 50%;
+            -webkit-mask: radial-gradient(circle, transparent calc(50% - 10px), #000 calc(50% - 10px), #000 50%, transparent 50%);
+            mask: radial-gradient(circle, transparent calc(50% - 10px), #000 calc(50% - 10px), #000 50%, transparent 50%);
+        }
+        .spinner::before {
+            background: repeating-conic-gradient(var(--border-color) 0deg 2deg, transparent 2deg 30deg);
+        }
+        .spinner::after {
+            background: conic-gradient(from 0deg, transparent 0deg, var(--accent) 70deg, transparent 100deg);
+            animation: spin 1.4s linear infinite;
+        }
+        .spinner-dot { position: absolute; top: 50%; left: 50%; width: 14px; height: 14px; margin: -7px; background: var(--accent); border-radius: 50%; animation: pulse 1.5s ease-in-out infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .rule-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-color); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
         @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } }
         .loading-text { color: var(--text-bright); font-size: 1.1rem; margin-bottom: 8px; font-weight: 500; }
         .loading-subtext { color: var(--text-muted); font-size: 0.9rem; }
-        .modal-content { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; width: 90%; max-width: 900px; max-height: 80vh; overflow: auto; padding: 20px; }
+        .modal-content { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; width: 90%; max-width: 900px; max-height: 80vh; overflow: auto; padding: 20px; position: relative; }
         .modal-header { display: flex; justify-content: flex-start; align-items: center; margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
         .modal-header h3 { color: var(--text-bright); }
         .modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; margin-left: auto; }
@@ -1294,6 +1490,9 @@
            clickable either. */
         .agg-row[data-agg-pivot] { cursor: pointer; }
         .agg-row[data-agg-pivot]:hover { background: var(--bg-hover) !important; }
+        /* Same arrow-key selection treatment as tr[data-id].keyboard-selected -
+           agg rows are now stops in the same Up/Down list. */
+        .agg-row[data-agg-pivot].keyboard-selected { background: var(--bg-tertiary) !important; outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: -2px; }
         .agg-table { display: block; margin-bottom: 12px; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; background: var(--bg-secondary); }
         .agg-table .agg-header { display: flex; width: 100%; justify-content: space-between; align-items: center; padding: 12px; box-sizing: border-box; background: var(--bg-tertiary); color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-color); }
         .agg-close { background: none; border: none; color: var(--text-muted); font-size: 1rem; cursor: pointer; line-height: 1; padding: 0 4px; margin-left: 8px; }
@@ -1310,6 +1509,12 @@
         .filter-chip-remove { cursor: pointer; font-size: 1rem; line-height: 1; opacity: 0.7; }
         .filter-chip-remove:hover { opacity: 1; }
         .filter-clear-all { background: var(--badge-bg-neutral); border: 1px solid var(--badge-danger-text); color: var(--badge-danger-text); padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; cursor: pointer; }
+        /* Same arrow-key selection treatment as tr[data-id].keyboard-selected,
+           but a positive offset (not inset) - these are small pills against a
+           solid accent background, so an inset outline would run straight
+           through the chip's own edge instead of ringing around it. */
+        .filter-chip.keyboard-selected { outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: 2px; }
+        .filter-clear-all.keyboard-selected { outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: 2px; }
 
         /* Row-cell pivot menu (Include/Exclude/Only/Hunt) - see
            showPivotMenu(). position: fixed + JS-set left/top (viewport
@@ -1319,9 +1524,42 @@
            (bg-secondary/border-color/shadow) for visual consistency with
            this app's other dropdown. */
         .pivot-menu { position: fixed; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); min-width: 160px; z-index: 1003; overflow: hidden; }
+        /* Same four-corner HUD bracket accent as .stat-card above (see its
+           comment for why two pseudo-elements paint two corners each via
+           background gradients rather than a border), always-on rather
+           than hover-triggered - the menu only exists in the DOM while
+           open (see showPivotMenu()/hidePivotMenu()), so there's no
+           separate "active" state to gate it on. Scoped under .fun-theme
+           like .stat-card's (see its own comment for the full rationale). */
+        .fun-theme .pivot-menu::before, .fun-theme .pivot-menu::after {
+            content: ''; position: absolute; left: 0; right: 0; height: 10px;
+            background-repeat: no-repeat;
+            background-image:
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent));
+            background-size: 10px 2px, 2px 10px, 10px 2px, 2px 10px;
+            pointer-events: none;
+        }
+        .fun-theme .pivot-menu::before { top: 0; background-position: top left, top left, top right, top right; }
+        .fun-theme .pivot-menu::after { bottom: 0; background-position: bottom left, bottom left, bottom right, bottom right; }
         .pivot-menu-label { padding: 8px 14px; color: var(--text-muted); font-size: 0.75rem; border-bottom: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
         .pivot-menu-item { display: block; width: 100%; padding: 8px 14px; color: var(--text-primary); font-size: 0.9rem; cursor: pointer; border: none; background: none; text-align: left; }
         .pivot-menu-item:hover { background: var(--bg-tertiary); }
+        /* Same arrow-key selection treatment as tr[data-id].keyboard-selected -
+           kept visually consistent since this is a stop in the same style of list. */
+        .pivot-menu-item.keyboard-selected { background: var(--bg-tertiary); outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: -2px; }
+        /* Live-filtered command palette (see AUTOCOMPLETE_COMMANDS/
+           filterAutocomplete()) - same flat-list-of-buttons shape as
+           .pivot-menu-item above, in its own plain modal rather than a
+           fixed-position popup since it opens from anywhere on the page,
+           not next to any one element. */
+        #autocompleteResults { max-height: 50vh; overflow-y: auto; }
+        .autocomplete-item { display: block; width: 100%; padding: 8px 12px; color: var(--text-primary); font-size: 0.9rem; cursor: pointer; border: none; background: none; text-align: left; border-radius: 4px; }
+        .autocomplete-item:hover { background: var(--bg-tertiary); }
+        .autocomplete-item.keyboard-selected { background: var(--bg-tertiary); outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: -2px; }
+        .autocomplete-empty { padding: 8px 12px; color: var(--text-muted); font-size: 0.9rem; }
         /* Separates the field-scoped filter actions (Include/Exclude/Only/
            Hunt) from Copy to Clipboard and the external lookup-site links. */
         .pivot-menu-divider { border-top: 1px solid var(--border-color); margin: 4px 0; }
@@ -1385,34 +1623,81 @@
         .sankey-panel { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
         .agg-panel { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
         .data-panel { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
+        /* Same HUD corner-bracket accent as .stat-card/.pivot-menu (see
+           those for the full rationale) - deliberately NOT on
+           .sankey-panel/.agg-panel/.data-panel (tried, then reverted):
+           the bracket reads as an affordance ("this is selectable/the
+           active thing"), which fits .stat-card/.sample-card (a small,
+           static set of options you're choosing between), .pivot-menu and
+           .modal-content (the current focused surface), but not a plain
+           static display panel - putting it on every panel diluted that
+           signal into ambient decoration instead. Also deliberately NOT
+           on .previous-analysis-row (tried, then reverted) - a scrolling,
+           arbitrary-length list flickers the bracket in and out on every
+           row as the mouse moves down it, reading as noise rather than a
+           deliberate cue; see its own comment near .previous-analysis-row
+           for the full reasoning (same four-corner background-gradient
+           technique, see .stat-card's comment for why). Always-on like
+           .pivot-menu, not hover-triggered, since .modal-content's only
+           state is "open"; there's no separate active variant to gate on.
+           Sized up from .stat-card/.pivot-menu's 10px to 24px since a
+           modal commonly renders far larger on screen than those (up to
+           900px/80vh) - the same 10px mark that reads fine on a ~200px
+           card would be proportionally the smallest accent on the app's
+           single biggest surface, barely registering at a glance. */
+        .fun-theme .modal-content::before, .fun-theme .modal-content::after {
+            content: ''; position: absolute; left: 0; right: 0; height: 24px;
+            background-repeat: no-repeat;
+            background-image:
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent));
+            background-size: 24px 2px, 2px 24px, 24px 2px, 2px 24px;
+            pointer-events: none;
+        }
+        .fun-theme .modal-content::before { top: 0; background-position: top left, top left, top right, top right; }
+        .fun-theme .modal-content::after { bottom: 0; background-position: bottom left, bottom left, bottom right, bottom right; }
         .data-panel-heading { background: var(--bg-tertiary); padding: 12px 20px; color: var(--text-muted); font-size: 0.85rem; font-weight: 600; user-select: none; border-bottom: 1px solid var(--border-color); }
         #mainHeader { margin-bottom: 20px; }
         #aggregations { margin-bottom: 20px; }
         .section-toggle-bar { background: var(--bg-tertiary); padding: 12px 20px; color: var(--text-muted); font-size: 0.85rem; font-weight: 600; cursor: pointer; user-select: none; border-bottom: 1px solid var(--border-color); }
         .section-toggle-bar:hover { background: var(--bg-hover); }
+        /* Same arrow-key selection treatment as tr[data-id].keyboard-selected above -
+           kept visually consistent since both are stops in the same Up/Down list. */
+        .section-toggle-bar.keyboard-selected { background: var(--bg-hover); outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: -2px; }
         .sankey-content { padding: 20px; }
         .agg-content { padding: 15px 20px 5px; }
         .packet-block { border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
-        .packet-block.src-dir { border-left: 3px solid #ff6b6b; }
-        .packet-block.dst-dir { border-left: 3px solid #58a6ff; }
+        .packet-block.src-dir { border-left: 3px solid var(--badge-danger-text); }
+        .packet-block.dst-dir { border-left: 3px solid var(--tag-blue-text); }
         .packet-header { background: var(--bg-tertiary); padding: 8px 12px; cursor: pointer; font-family: monospace; font-size: 0.8rem; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
         .packet-header:hover { background: var(--bg-hover); }
+        /* Same arrow-key selection treatment as tr[data-id].keyboard-selected -
+           a full-width row, not a small pill, so this is inset like that one
+           rather than the positive-offset treatment .packet-control-btn below uses. */
+        .packet-header.keyboard-selected { background: var(--bg-hover); outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: -2px; }
         .packet-content { padding: 10px 12px; background: var(--bg-primary); }
         .packet-content.hidden { display: none; }
         .packet-content pre { margin: 0; font-family: monospace; font-size: 0.75rem; color: var(--text-primary); white-space: pre-wrap; word-break: break-all; }
         .packet-controls { display: flex; justify-content: flex-start; gap: 10px; margin-bottom: 10px; }
         .packet-control-btn { background: none; border: 1px solid var(--border-color); color: var(--text-muted); padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
         .packet-control-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .packet-control-btn.keyboard-selected { outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: 2px; }
         .view-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border-color); margin-bottom: 10px; }
         .view-tab { background: none; border: none; color: var(--text-muted); padding: 6px 12px; cursor: pointer; font-size: 0.8rem; border-bottom: 2px solid transparent; margin-bottom: -1px; }
         .view-tab:hover { color: var(--text-primary); }
         .view-tab.active { color: var(--text-primary); border-bottom-color: var(--interactive-highlight, var(--accent)); }
+        /* Deliberately a full outline, not another border-bottom-color change
+           like .active above - keyboard focus and "currently shown view" are
+           independent (a keyboard-selected tab isn't necessarily the active
+           one yet), so this needs to read as visually distinct from .active. */
+        .view-tab.keyboard-selected { outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: 2px; }
         .sankey-svg { width: 100%; height: auto; display: block; }
         .sankey-link { fill: none; stroke-opacity: 0.35; transition: stroke-opacity 0.2s; cursor: pointer; }
         .sankey-link:hover { stroke-opacity: 0.7; }
         .sankey-node rect { fill: var(--bg-tertiary); stroke: var(--bg-hover); stroke-width: 1; rx: 4; shape-rendering: crispEdges; cursor: pointer; }
         .sankey-node text { fill: var(--text-primary); font-size: 10px; font-family: monospace; pointer-events: none; text-shadow: 0 0 3px var(--bg-primary), 0 0 3px var(--bg-primary); }
-        [data-theme="light"] .sankey-node text { text-shadow: none; }
         .sankey-title { fill: var(--text-muted); font-size: 12px; font-weight: 600; text-transform: uppercase; }
         .search-bar { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 15px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
         body.file-analysis #sankeyPanel { display: none !important; }
@@ -1426,20 +1711,85 @@
         .search-input:focus { outline: none; border-color: var(--interactive-highlight, var(--accent)); }
         .search-btn { background: var(--accent); color: var(--bg-primary); border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
         .search-btn:hover { background: var(--accent-hover); }
-        .sample-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; padding: 16px 20px; cursor: pointer; transition: border-color 0.2s; flex: 1; display: flex; align-items: center; justify-content: center; }
+        .sample-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; padding: 16px 20px; cursor: pointer; transition: border-color 0.2s; flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
         .sample-card:hover { border-color: var(--interactive-highlight, var(--accent)); }
+        /* Left/Right arrow-key navigation highlight - same border-color
+           source as :hover, so keyboard and mouse selection read as the
+           same kind of feedback rather than two different things. */
+        .sample-card.keyboard-selected { border-color: var(--interactive-highlight, var(--accent)); }
         .sample-card .sample-label { font-weight: 600; font-size: 0.9rem; white-space: nowrap; color: var(--accent); }
-        .previous-analysis-delete { background: var(--danger-bg); color: var(--badge-danger-text); }
-        [data-theme="hacker"] .previous-analysis-delete { color: var(--accent); }
-        .previous-analysis-reanalyze, .previous-analysis-notes { background: var(--bg-hover); color: var(--accent); }
-        [data-theme="ristretto"] .previous-analysis-reanalyze, [data-theme="ristretto"] .previous-analysis-notes,
-        [data-theme="rose-pine"] .previous-analysis-reanalyze, [data-theme="rose-pine"] .previous-analysis-notes,
-        [data-theme="ethereal"] .previous-analysis-reanalyze, [data-theme="ethereal"] .previous-analysis-notes,
-        [data-theme="miasma"] .previous-analysis-reanalyze, [data-theme="miasma"] .previous-analysis-notes,
-        [data-theme="catppuccin-latte"] .previous-analysis-reanalyze, [data-theme="catppuccin-latte"] .previous-analysis-notes,
-        [data-theme="white"] .previous-analysis-reanalyze, [data-theme="white"] .previous-analysis-notes { color: var(--text-bright); }
+        /* Same four-corner HUD bracket accent as .stat-card (see its own
+           rule for the full rationale, including why two pseudo-elements
+           paint two corners each via background gradients rather than a
+           border) - hover-triggered like .stat-card since .sample-card has
+           no persistent "active" state to also gate it on (unlike
+           .stat-card.tab-active, a sample card is never the "current" one,
+           just clicked-and-gone); also triggered by .keyboard-selected so
+           Left/Right arrow-key navigation reads as the same feedback as
+           mouse hover. */
+        .fun-theme .sample-card::before, .fun-theme .sample-card::after {
+            content: ''; position: absolute; left: 0; right: 0; height: 10px;
+            background-repeat: no-repeat;
+            background-image:
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent)),
+                linear-gradient(var(--accent), var(--accent));
+            background-size: 10px 2px, 2px 10px, 10px 2px, 2px 10px;
+            opacity: 0; transition: opacity 0.15s ease; pointer-events: none;
+        }
+        .fun-theme .sample-card::before { top: 0; background-position: top left, top left, top right, top right; }
+        .fun-theme .sample-card::after { bottom: 0; background-position: bottom left, bottom left, bottom right, bottom right; }
+        .fun-theme .sample-card:hover::before, .fun-theme .sample-card:hover::after,
+        .fun-theme .sample-card.keyboard-selected::before, .fun-theme .sample-card.keyboard-selected::after { opacity: 1; }
+        /* Base look unchanged from before (was previously an inline
+           border-bottom on the row itself, in static/socrates.js) - moved
+           into the stylesheet so :hover below can cleanly promote it to a
+           full border without an inline style (higher cascade priority
+           than any external stylesheet rule, hover or not) permanently
+           pinning the bottom edge to --border-color while the other three
+           sides go accent-colored on hover. */
+        .previous-analysis-row { border-bottom: 1px solid var(--border-color); transition: border-color 0.15s ease, background 0.15s ease; }
+        .previous-analysis-row:hover { border: 1px solid var(--accent); border-radius: 6px; background: var(--bg-hover); }
+        /* Up/Down arrow-key navigation highlight - same treatment as
+           :hover (border + background), just keyed off keyboard
+           selection instead of the mouse. */
+        .previous-analysis-row.keyboard-selected { border: 1px solid var(--interactive-highlight, var(--accent)); border-radius: 6px; background: var(--bg-hover); }
+        /* No corner-bracket accent here (tried, then reverted) - unlike
+           .stat-card/.sample-card (a small, static set of options you're
+           choosing between), this is a scrolling, arbitrary-length list -
+           the bracket would flicker in and out on every row as the mouse
+           moves down the list, reading as noise rather than a deliberate
+           "select this" cue, and a thin wide row doesn't give a diagonal
+           corner bracket much shape to work with anyway. The hover
+           background/border above already signals "clickable" on its
+           own. */
+        /* Same danger-red treatment .previous-analysis-delete used to have
+           before Delete moved to the analysis page header - just without
+           the pill background/padding, matching the plain icon styling of
+           the notes icon already in this header. No Hacker-theme override
+           (see .previous-analysis-delete-all below - same reasoning, now
+           applied consistently: every delete/danger control just uses the
+           theme's own --badge-danger-text). */
+        .app-header-delete-icon { color: var(--badge-danger-text); }
+        .previous-analysis-notes { background: var(--bg-hover); color: var(--accent); }
+        [data-theme="ristretto"] .previous-analysis-notes,
+        [data-theme="rose-pine"] .previous-analysis-notes,
+        [data-theme="ethereal"] .previous-analysis-notes,
+        [data-theme="miasma"] .previous-analysis-notes,
+        [data-theme="catppuccin-latte"] .previous-analysis-notes,
+        [data-theme="white"] .previous-analysis-notes { color: var(--text-bright); }
+        /* No Hacker-theme override (dropped along with .app-header-delete
+           -icon's - see its comment above) - Delete All just uses the
+           theme's own --badge-danger-text like any other danger control. */
         .previous-analysis-delete-all { background: var(--danger-bg); color: var(--badge-danger-text); }
-        [data-theme="hacker"] .previous-analysis-delete-all { color: var(--accent); }
+        /* Settings' Danger Zone button is disabled while there are no
+           analyses to delete (nothing shown here fetches a count until
+           after showSettingsModal()'s async fetch resolves) - the button's
+           own danger color already reads as "important", so this just
+           needs to read as "not currently clickable" without losing that
+           color entirely. */
+        .previous-analysis-delete-all:disabled { opacity: 0.5; cursor: not-allowed; }
         .reanalyze-confirm-btn {
             background: var(--accent);
             color: var(--bg-primary);
@@ -1464,11 +1814,11 @@
         }
         [data-theme="hacker"] .reanalyze-confirm-btn.danger {
             background: var(--bg-hover);
-            color: #ff6b6b;
-            border: 1px solid #ff6b6b;
+            color: var(--accent);
+            border: 1px solid var(--accent);
         }
         [data-theme="hacker"] .reanalyze-confirm-btn.danger:hover {
-            background: #ff6b6b;
+            background: var(--accent);
             color: var(--bg-primary);
         }
         .delete-modal-title { color: var(--badge-danger-text); }
@@ -1508,6 +1858,7 @@
         .theme-tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; padding: 4px 14px 16px 14px; }
         .theme-tile { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 12px; color: var(--text-primary); font-size: 0.9rem; cursor: pointer; border: 1px solid var(--border-color); background: var(--bg-primary); border-radius: 8px; text-align: center; }
         .theme-tile:hover { background: var(--bg-tertiary); border-color: var(--interactive-highlight, var(--accent)); }
+        .theme-tile.keyboard-selected { background: var(--bg-tertiary); border-color: var(--interactive-highlight, var(--accent)); }
         .theme-tile[data-theme-option].theme-active { border-color: var(--accent); border-width: 2px; font-weight: 600; }
         .theme-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
         .theme-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
@@ -1559,7 +1910,9 @@
         [data-theme="digital-frontier"] .stat-card:hover,
         [data-theme="digital-frontier"] .stat-card.tab-active,
         [data-theme="digital-frontier"] .sample-card:hover,
-        [data-theme="digital-frontier"] .theme-tile:hover {
+        [data-theme="digital-frontier"] .sample-card.keyboard-selected,
+        [data-theme="digital-frontier"] .theme-tile:hover,
+        [data-theme="digital-frontier"] .theme-tile.keyboard-selected {
             box-shadow: 0 0 8px rgba(0, 217, 255, 0.85), 0 0 28px rgba(0, 217, 255, 0.5);
         }
         [data-theme="digital-frontier"] .app-header {
@@ -1575,6 +1928,34 @@
         [data-theme="digital-frontier"] input:focus,
         [data-theme="digital-frontier"] textarea:focus {
             box-shadow: 0 0 10px rgba(0, 217, 255, 0.7);
+        }
+        /* HUD corner brackets (see .stat-card/.pivot-menu/.modal-content/
+           .sample-card's own ::before/::after rules - .sankey-panel/
+           .agg-panel/.data-panel deliberately don't have these, see that
+           rule's own comment for why) pick up the same neon treatment as
+           the panels themselves here - filter: drop-shadow(), not
+           box-shadow, since the bracket
+           pseudo-elements are mostly-transparent L-shapes (only two
+           border sides painted): box-shadow would glow the element's
+           full invisible bounding box (a hazy little square), while
+           drop-shadow follows the actual painted pixels (the border
+           strokes) the way text-shadow follows glyph shapes above. */
+        [data-theme="digital-frontier"] .stat-card::before, [data-theme="digital-frontier"] .stat-card::after,
+        [data-theme="digital-frontier"] .pivot-menu::before, [data-theme="digital-frontier"] .pivot-menu::after,
+        [data-theme="digital-frontier"] .sample-card::before, [data-theme="digital-frontier"] .sample-card::after,
+        [data-theme="digital-frontier"] .modal-content::before, [data-theme="digital-frontier"] .modal-content::after {
+            filter: drop-shadow(0 0 2px rgba(0, 217, 255, 0.9)) drop-shadow(0 0 6px rgba(0, 217, 255, 0.6));
+        }
+        /* .modal-content's glow bumped further still, same reasoning as
+           its size bump above (see .modal-content::before's own comment) -
+           the shared two-layer glow just above reads as noticeably fainter
+           on a ~900px modal than on a ~200px stat card even at identical
+           values, since the glow's absolute size barely registers against
+           a much larger surface; a third, wider bloom layer plus a
+           brighter core compensates so the effect actually reads as
+           comparably prominent up close. */
+        [data-theme="digital-frontier"] .modal-content::before, [data-theme="digital-frontier"] .modal-content::after {
+            filter: drop-shadow(0 0 3px rgba(0, 217, 255, 1)) drop-shadow(0 0 10px rgba(0, 217, 255, 0.75)) drop-shadow(0 0 20px rgba(0, 217, 255, 0.4));
         }
 
         /* Vaporwave: same neon-outline treatment as Digital Frontier
@@ -1592,7 +1973,9 @@
         [data-theme="vaporwave"] .stat-card:hover,
         [data-theme="vaporwave"] .stat-card.tab-active,
         [data-theme="vaporwave"] .sample-card:hover,
-        [data-theme="vaporwave"] .theme-tile:hover {
+        [data-theme="vaporwave"] .sample-card.keyboard-selected,
+        [data-theme="vaporwave"] .theme-tile:hover,
+        [data-theme="vaporwave"] .theme-tile.keyboard-selected {
             box-shadow: 0 0 8px rgba(255, 113, 206, 0.85), 0 0 28px rgba(1, 205, 254, 0.55);
         }
         [data-theme="vaporwave"] .app-header {
@@ -1608,6 +1991,20 @@
         [data-theme="vaporwave"] input:focus,
         [data-theme="vaporwave"] textarea:focus {
             box-shadow: 0 0 6px rgba(255, 113, 206, 0.7), 0 0 14px rgba(1, 205, 254, 0.4);
+        }
+        /* HUD corner brackets pick up the same two-tone neon treatment as
+           Digital Frontier's own bracket rule above - see its comment for
+           why drop-shadow() rather than box-shadow() here. */
+        [data-theme="vaporwave"] .stat-card::before, [data-theme="vaporwave"] .stat-card::after,
+        [data-theme="vaporwave"] .pivot-menu::before, [data-theme="vaporwave"] .pivot-menu::after,
+        [data-theme="vaporwave"] .sample-card::before, [data-theme="vaporwave"] .sample-card::after,
+        [data-theme="vaporwave"] .modal-content::before, [data-theme="vaporwave"] .modal-content::after {
+            filter: drop-shadow(0 0 2px rgba(255, 113, 206, 0.9)) drop-shadow(0 0 6px rgba(1, 205, 254, 0.6));
+        }
+        /* .modal-content's glow bumped further still, same reasoning as
+           Digital Frontier's own modal-content bracket comment above. */
+        [data-theme="vaporwave"] .modal-content::before, [data-theme="vaporwave"] .modal-content::after {
+            filter: drop-shadow(0 0 3px rgba(255, 113, 206, 1)) drop-shadow(0 0 10px rgba(255, 113, 206, 0.7)) drop-shadow(0 0 20px rgba(1, 205, 254, 0.5));
         }
 
         /* Amber: same neon-outline treatment again, single-toned like
@@ -1631,7 +2028,9 @@
         [data-theme="amber"] .stat-card:hover,
         [data-theme="amber"] .stat-card.tab-active,
         [data-theme="amber"] .sample-card:hover,
-        [data-theme="amber"] .theme-tile:hover {
+        [data-theme="amber"] .sample-card.keyboard-selected,
+        [data-theme="amber"] .theme-tile:hover,
+        [data-theme="amber"] .theme-tile.keyboard-selected {
             box-shadow: 0 0 8px rgba(255, 176, 0, 0.85), 0 0 28px rgba(255, 176, 0, 0.5);
         }
         [data-theme="amber"] .app-header {
@@ -1639,6 +2038,22 @@
         }
         [data-theme="amber"] .app-logo-text {
             text-shadow: 0 0 6px rgba(255, 176, 0, 0.7);
+        }
+        /* HUD corner brackets pick up the same neon treatment as Digital
+           Frontier's own bracket rule above - see its comment for why
+           drop-shadow() rather than box-shadow() here. (Missing until now -
+           every other neon theme has this, Amber's cards/header/logo all
+           glow but its corner brackets were rendering unglowed.) */
+        [data-theme="amber"] .stat-card::before, [data-theme="amber"] .stat-card::after,
+        [data-theme="amber"] .pivot-menu::before, [data-theme="amber"] .pivot-menu::after,
+        [data-theme="amber"] .sample-card::before, [data-theme="amber"] .sample-card::after,
+        [data-theme="amber"] .modal-content::before, [data-theme="amber"] .modal-content::after {
+            filter: drop-shadow(0 0 2px rgba(255, 176, 0, 0.9)) drop-shadow(0 0 6px rgba(255, 176, 0, 0.6));
+        }
+        /* .modal-content's glow bumped further still, same reasoning as
+           Digital Frontier's own modal-content bracket comment above. */
+        [data-theme="amber"] .modal-content::before, [data-theme="amber"] .modal-content::after {
+            filter: drop-shadow(0 0 3px rgba(255, 176, 0, 1)) drop-shadow(0 0 10px rgba(255, 176, 0, 0.75)) drop-shadow(0 0 20px rgba(255, 176, 0, 0.4));
         }
         [data-theme="amber"] button:hover,
         [data-theme="amber"] input:focus,
@@ -1665,7 +2080,9 @@
         [data-theme="hacker"] .stat-card:hover,
         [data-theme="hacker"] .stat-card.tab-active,
         [data-theme="hacker"] .sample-card:hover,
-        [data-theme="hacker"] .theme-tile:hover {
+        [data-theme="hacker"] .sample-card.keyboard-selected,
+        [data-theme="hacker"] .theme-tile:hover,
+        [data-theme="hacker"] .theme-tile.keyboard-selected {
             box-shadow: 0 0 8px rgba(0, 255, 65, 0.85), 0 0 28px rgba(0, 255, 65, 0.5);
         }
         [data-theme="hacker"] .app-header {
@@ -1673,6 +2090,20 @@
         }
         [data-theme="hacker"] .app-logo-text {
             text-shadow: 0 0 6px rgba(0, 255, 65, 0.7);
+        }
+        /* HUD corner brackets pick up the same neon treatment as Digital
+           Frontier's own bracket rule above - see its comment for why
+           drop-shadow() rather than box-shadow() here. */
+        [data-theme="hacker"] .stat-card::before, [data-theme="hacker"] .stat-card::after,
+        [data-theme="hacker"] .pivot-menu::before, [data-theme="hacker"] .pivot-menu::after,
+        [data-theme="hacker"] .sample-card::before, [data-theme="hacker"] .sample-card::after,
+        [data-theme="hacker"] .modal-content::before, [data-theme="hacker"] .modal-content::after {
+            filter: drop-shadow(0 0 2px rgba(0, 255, 65, 0.9)) drop-shadow(0 0 6px rgba(0, 255, 65, 0.6));
+        }
+        /* .modal-content's glow bumped further still, same reasoning as
+           Digital Frontier's own modal-content bracket comment above. */
+        [data-theme="hacker"] .modal-content::before, [data-theme="hacker"] .modal-content::after {
+            filter: drop-shadow(0 0 3px rgba(0, 255, 65, 1)) drop-shadow(0 0 10px rgba(0, 255, 65, 0.75)) drop-shadow(0 0 20px rgba(0, 255, 65, 0.4));
         }
         [data-theme="hacker"] button:hover,
         [data-theme="hacker"] input:focus,

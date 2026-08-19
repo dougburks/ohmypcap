@@ -16,7 +16,7 @@ Redirects to `/socrates.html`.
 
 Returns the running SO-CRATES version.
 
-**Response:** `{"version": "3.2.0"}`
+**Response:** `{"version": "4.0.0"}`
 
 ---
 
@@ -59,6 +59,7 @@ Returns event data from Suricata's eve.json (via SQLite index or direct JSON par
 | `limit` | No | `1000` | Max events to return (capped at `MAX_QUERY_LIMIT`, 100,000 by default - see `GET /api/limits`) |
 | `order_by` | No | none (sorts by `timestamp`) | Server-side sort column, e.g. `Source IP`. Only sortable for columns with a static JSON path for the given `type` (mirrors the same source-of-truth constraint as `GET /api/aggregation-data`); silently falls back to `timestamp` if the column isn't server-sortable for that type, rather than erroring |
 | `sort_dir` | No | `asc` | `asc` or `desc`; any other value is treated as `asc` |
+| `acknowledged` | No | none | `only` returns *only* acknowledged rows (see `POST /api/acknowledge-alert`) instead of the default, which excludes them entirely - used solely by the Acknowledged Alerts tab's own fetches |
 
 **Response:** Array of eve.json event objects. Any event with a saved row-level
 note (see `POST /api/row-note`) includes an extra `row_note` field with the
@@ -107,6 +108,7 @@ Returns total event count, optionally filtered by type or search query.
 | `md5` | Yes | - | MD5 hash of a historical analysis |
 | `type` | No | all | Filter by event type |
 | `q` | No | none | Full-text search query (counts only matching events). Multiple `q` params AND together. |
+| `acknowledged` | No | none | `only` counts *only* acknowledged rows instead of excluding them - see `GET /api/events`'s own `acknowledged` param |
 
 **Response:** `{"count": <number>}`
 
@@ -336,6 +338,7 @@ Returns Sigma alerts stored in `events.db` for the specified analysis.
 | `limit` | No | `1000` | Max alerts to return (capped at `MAX_QUERY_LIMIT`, 100,000 by default - see `GET /api/limits`) |
 | `severity` | No | none | Filter by severity level |
 | `q` | No | none | Full-text search query. Multiple `q` params AND together. |
+| `acknowledged` | No | none | `only` returns *only* acknowledged alerts instead of excluding them - see `GET /api/events`'s own `acknowledged` param |
 
 **Response:** Array of Sigma alert objects. Same `row_note` field convention
 as `GET /api/events` above (present only when a note exists).
@@ -353,6 +356,7 @@ Returns the total Sigma alert count for the specified analysis, optionally filte
 | `md5` | Yes | - | MD5 hash of a historical analysis |
 | `severity` | No | none | Filter by severity level |
 | `q` | No | none | Full-text search query. Multiple `q` params AND together. |
+| `acknowledged` | No | none | `only` counts *only* acknowledged alerts instead of excluding them |
 
 **Response:** `{"count": <number>}`
 
@@ -623,6 +627,66 @@ whole-analysis notes). An empty (or whitespace-only) value clears the note.
 Row-level notes are lost on `POST /api/reanalyze` (it rebuilds `events.db`
 from scratch) - unlike whole-analysis notes (`notes.txt`), which reanalyze
 never touches. This is intentional, not a bug.
+
+---
+
+### `POST /api/acknowledge-alert`
+
+Acknowledges or un-acknowledges one row of the `events` or `sigma_alerts`
+table - the single-row counterpart to `POST /api/acknowledge-alerts-bulk`
+below. Acknowledging removes the row from every other endpoint's default
+results immediately (it's excluded server-side, not just hidden client-side)
+- see the `acknowledged` param on `GET /api/events`/`GET /api/count`/
+`GET /api/sigma-alerts`/`GET /api/sigma-count` above, which is the only way
+to see acknowledged rows again.
+
+**Request Body:**
+```json
+{"md5": "<hash>", "table": "events", "rowId": 42, "acknowledged": true}
+```
+
+`table` must be `"events"` or `"sigma_alerts"`. `rowId` must be an integer
+(not a boolean). `acknowledged` defaults to `true` if omitted; set it to
+`false` to un-acknowledge.
+
+**Response:**
+```json
+{"success": true, "acknowledged": true}
+```
+
+**Errors:** `400` for invalid MD5, unsafe path, invalid `table`, invalid
+`rowId`, or non-boolean `acknowledged`. `404` if analysis not found.
+
+Acknowledged state is scoped to the current analysis only and, like
+row-level notes, is lost on `POST /api/reanalyze`.
+
+---
+
+### `POST /api/acknowledge-alerts-bulk`
+
+Acknowledges every id in `rowIds` in one call - the "all instances of this
+alert" bulk path (the matching id set is computed client-side from
+whatever's already loaded, not by a server-side signature/rule lookup).
+No bulk un-acknowledge counterpart - undoing is always one row at a time,
+via `POST /api/acknowledge-alert` from within the Acknowledged Alerts tab.
+
+**Request Body:**
+```json
+{"md5": "<hash>", "table": "events", "rowIds": [42, 43, 44]}
+```
+
+`table` must be `"events"` or `"sigma_alerts"`. `rowIds` must be a
+non-empty array of integers (not booleans), capped at `MAX_QUERY_LIMIT`
+(100,000 by default - see `GET /api/limits`).
+
+**Response:**
+```json
+{"success": true, "count": 3}
+```
+
+**Errors:** `400` for invalid MD5, unsafe path, invalid `table`, or invalid
+`rowIds` (wrong type, empty, non-integer/boolean entries, or too many).
+`404` if analysis not found.
 
 ---
 

@@ -5,13 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SO-CRATES - Welcome</title>
     <link id="faviconLink" rel="icon" type="image/svg+xml" href="static/favicon.svg">
-    <script>(function(){try{var t=localStorage.getItem('socrates-theme');if(t&&t!='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+    <script>(function(){try{var t=localStorage.getItem('socrates-theme');if(t=='light')localStorage.setItem('socrates-theme',t='white');if(t&&t!='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
     <link rel="stylesheet" href="static/socrates.css">
     <script src="static/d3.min.js"></script>
     <script src="static/d3-sankey.min.js"></script>
 </head>
 <body>
     <canvas id="codeRain" class="code-rain-canvas" aria-hidden="true"></canvas>
+    <canvas id="blockRain" class="block-rain-canvas" aria-hidden="true"></canvas>
+    <canvas id="vaporwaveGrid" class="vaporwave-grid-canvas" aria-hidden="true"></canvas>
+    <canvas id="dosDefrag" class="dos-defrag-canvas" aria-hidden="true"></canvas>
+    <canvas id="cgaStarfield" class="cga-starfield-canvas" aria-hidden="true"></canvas>
+    <canvas id="breadbinSprites" class="breadbin-sprites-canvas" aria-hidden="true"></canvas>
+    <canvas id="digitalFrontierStreaks" class="digital-frontier-streaks-canvas" aria-hidden="true"></canvas>
+    <canvas id="lunaBliss" class="luna-bliss-canvas" aria-hidden="true"></canvas>
+    <canvas id="amberBootLog" class="amber-boot-log-canvas" aria-hidden="true"></canvas>
+    <canvas id="mp3Visualizer" class="mp3-visualizer-canvas" aria-hidden="true"></canvas>
     <div class="app-header" id="appHeader">
         <div class="app-header-left">
             <a href="#" onclick="showWelcome(); return false;" style="display: inline-flex; align-items: center; text-decoration: none; margin-right: 8px;">
@@ -190,6 +199,16 @@
                             </div>
                         </div>
                     </div>
+
+                    <div style="border-top: 1px solid var(--bg-hover); margin: 18px 0;"></div>
+
+                    <div id="settingsDangerZoneSection">
+                        <label style="color: var(--badge-danger-text); font-size: 0.9rem; display: block; margin-bottom: 8px; font-weight: 600;">
+                            Danger Zone
+                        </label>
+                        <div id="settingsDeleteAllHint" style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 10px;"></div>
+                        <button id="settingsDeleteAllBtn" class="previous-analysis-delete-all" onclick="openDeleteAllAnalyses(settingsAnalysisCount)" style="border: none; cursor: pointer; border-radius: 6px; padding: 8px 20px; font-weight: 600;" title="Delete all previous analyses">Delete All</button>
+                    </div>
                 </div>
                 <div style="display: flex; justify-content: flex-end; gap: 10px; padding-top: 15px; border-top: 1px solid var(--bg-hover); margin-top: 10px;">
                     <button onclick="closeSettingsModal()" class="modal-btn-secondary">Cancel</button>
@@ -264,10 +283,10 @@
                     Theme is controlled by OhMyDebn. Turn off the sync option above to choose a theme manually.
                 </div>
                 <div id="themePickerControls">
-                    <div id="themeCheatCodeHint" style="color: var(--text-muted); font-size: 0.95rem; margin: 0 14px 8px 14px;">Previewing <strong id="themePreviewingLabel" style="color: var(--text-bright);"></strong> theme<span id="themeCheatCodePart" style="visibility: hidden;"> — Cheat code: <code style="color: var(--accent); font-weight: 600;"></code></span></div>
+                    <div id="themePreviewHint" style="color: var(--text-muted); font-size: 0.95rem; margin: 0 14px 8px 14px;">Previewing <strong id="themePreviewingLabel" style="color: var(--text-bright);"></strong> theme</div>
                     <iframe class="theme-preview-frame" id="themePreviewFrame" title="Theme preview" tabindex="-1" aria-hidden="true"></iframe>
                     <div style="color: var(--text-muted); font-size: 0.95rem; margin: 8px 14px 4px 14px;">Hover over a theme name below to preview it in this live preview. Click the theme name to apply the theme to the entire window.</div>
-                    <div style="color: var(--text-muted); font-size: 0.95rem; margin: 0 14px 12px 14px;">You can also press the <strong>t</strong> key at any time to cycle through themes.</div>
+                    <div style="color: var(--text-muted); font-size: 0.95rem; margin: 0 14px 12px 14px;">You can also press <strong>&lt;</strong>/<strong>&gt;</strong> at any time to cycle through themes.</div>
                     <div id="themesModalBody"></div>
                 </div>
             </div>
@@ -319,6 +338,13 @@
                 <div style="display: flex; justify-content: flex-end;">
                     <button id="updateAllRulesBtn" onclick="triggerRulesetUpdate('all')" class="modal-btn-primary">Update All</button>
                 </div>
+            </div>
+        </div>
+
+        <div class="modal" id="autocompleteModal" onclick="handleModalBackdropClick(event, closeAutocompleteModal)">
+            <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 420px;">
+                <input type="text" id="autocompleteInput" oninput="filterAutocomplete()" autocomplete="off" spellcheck="false" placeholder="Type a command or theme code&hellip;" class="settings-text-input" style="width: 100%; box-sizing: border-box; margin-bottom: 10px;">
+                <div id="autocompleteResults"></div>
             </div>
         </div>
 

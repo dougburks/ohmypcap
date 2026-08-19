@@ -499,6 +499,13 @@ def _seed_active_from_library(baked_in_library_dir, data_dir, source_names, on_p
             if filename.endswith('.gz'):
                 with gzip.open(src, 'rb') as f_in, open(dest, 'wb') as f_out:
                     shutil.copyfileobj(f_in, f_out)
+                # Decompressing writes a brand-new file, so its mtime would
+                # otherwise be "now" (container start) rather than when the
+                # ruleset was actually baked into the image at build time -
+                # carry the compressed source's mtime over (as shutil.copy2
+                # already does for the uncompressed branch below) so the
+                # Rules modal's "updated" date reflects reality, not uptime.
+                shutil.copystat(src, dest)
             else:
                 shutil.copy2(src, dest)
     except OSError as e:
@@ -830,14 +837,28 @@ def spawn_suricata(dir_path, pcap_path, suricata_config_path=None, data_dir=None
         def _suricata_watchdog():
             """Kill Suricata if it runs longer than the configured timeout."""
             try:
-                proc.wait(timeout=config.SURICATA_RUN_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-                _set_error(dir_path, f'Suricata timed out after {config.SURICATA_RUN_TIMEOUT}s')
+                try:
+                    proc.wait(timeout=config.SURICATA_RUN_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                    _set_error(dir_path, f'Suricata timed out after {config.SURICATA_RUN_TIMEOUT}s')
+                    _clear_phase(dir_path)
+                    return
+                on_suricata_done()
+            except Exception as e:
+                # This runs in a daemon thread, where an uncaught exception
+                # is silently swallowed (never surfaced to the user or to
+                # spawn_suricata()'s caller) rather than propagated - and
+                # without this, any failure here besides a timeout (e.g. an
+                # OSError from proc.wait() itself, or from _set_phase/
+                # _clear_phase's own file I/O) would leave .phase in place
+                # forever. spawn_suricata()'s own re-entry guard refuses to
+                # start a new run while .phase exists, so this analysis
+                # directory would become permanently stuck "in progress"
+                # with no way to recover except deleting it outright.
+                _set_error(dir_path, f'Suricata analysis failed unexpectedly: {e}')
                 _clear_phase(dir_path)
-                return
-            on_suricata_done()
 
         threading.Thread(target=_suricata_watchdog, daemon=True).start()
         return True

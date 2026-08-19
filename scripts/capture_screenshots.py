@@ -3,9 +3,11 @@
 
 Requires: pip install -r requirements-screenshots.txt, and a running server
 (default http://127.0.0.1:8000/socrates.html - override with --base-url).
-Uses the app's own built-in "Sample pcap file" (DEFAULT_SAMPLE_URL in
-static/socrates.js) so it needs no pre-existing local analysis or hardcoded
-MD5 - it works on a clean checkout with an empty DATA_DIR.
+Uses the app's own default "Sample pcap file" (DEFAULT_SAMPLE_URL in
+static/socrates.js - a one-click convenience link to an external pcap on
+malware-traffic-analysis.net, not something bundled with the app) so it
+needs no pre-existing local analysis or hardcoded MD5 - it works on a
+clean checkout with an empty DATA_DIR.
 
 Usage:
     python3 scripts/capture_screenshots.py [--base-url http://127.0.0.1:8000/socrates.html]
@@ -24,12 +26,12 @@ IMAGES_DIR = os.path.join(REPO_ROOT, 'docs', 'images')
 THEMES_DIR = os.path.join(IMAGES_DIR, 'themes')
 
 THEMES = [
-    'dark', 'light', 'sguil', 'hacker', 'cga', 'breadbin-blue', 'vaporwave', 'digital-frontier',
+    'dark', 'sguil', 'hacker', 'cga', 'breadbin-blue', 'vaporwave', 'digital-frontier',
     'retro-handheld', 'matte-black', 'tokyo-night',
     'retro-82', 'ethereal', 'lumon', 'catppuccin', 'ohmydebn', 'catppuccin-latte', 'flexoki-light',
     'everforest', 'gruvbox', 'hackerman', 'kanagawa', 'miasma', 'nord',
     'osaka-jade', 'ristretto', 'rose-pine', 'vantablack', 'white', 'luna-blue', 'amber', 'dos-blue',
-    'dracula', 'solarized-dark', 'monokai',
+    'dracula', 'solarized-dark', 'monokai', 'mp3-player',
 ]
 
 DEFAULT_VIEWPORT = {'width': 1600, 'height': 1000}
@@ -68,7 +70,7 @@ async def main(base_url):
         await page.screenshot(path=os.path.join(IMAGES_DIR, 'so-crates-main.png'))
         print('captured main')
 
-        # 3. Load the app's own built-in sample pcap (self-contained, no fixture needed)
+        # 3. Load the app's own default sample pcap (self-contained, no fixture needed)
         await page.click(".sample-card:has-text('Sample pcap file')")
         await page.wait_for_selector('#statsGrid .stat-card', timeout=60000)
         await page.wait_for_timeout(1000)
