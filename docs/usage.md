@@ -20,7 +20,7 @@ After analysis completes, the UI displays different views depending on the file 
 
 - **Stats Grid** - clickable cards showing event counts by type (Alerts, DNS, HTTP, TLS, Flows, etc.). If you've enabled "Show protocol-anomaly noise alerts" (Gear Menu → Rules), those alerts get their own **Decoder Alerts** card instead of mixing into Network Alerts. A **DNS Heuristics** card appears immediately before DNS whenever any domain in the capture trips a scoring flag; see [DNS Heuristics](#dns-heuristics) below
 - **Sankey Diagram** - expand the collapsible heading to visualize network flow relationships (Source IP → Dest IP → Dest Port)
-- **Aggregation Tables** - frequency counts for each column; click a value to open the [pivot menu](#pivot-menu)
+- **Aggregation Tables** - frequency counts for each column; click a value to open the [pivot menu](#pivot-menu). Each table pages through its values with Prev/Next instead of growing the page, at a size (10/25/50/100) set by the "Items per page" selector, which applies to every table in the section and persists across sessions
 - **Data Table** - sortable table with expandable detail rows showing full event JSON, ASCII transcripts, and hexdumps. Every row's flow carries a community ID, and a TLS row's detail panel includes JA3/JA3S/JA4 fingerprints whenever present - both computed by Suricata automatically, no configuration needed
 - **Search** - full-text search across all event data using SQLite FTS5 (falls back to `LIKE` if FTS5 is unavailable)
 - **Filtering** - filter via the pivot menu's Include/Exclude/Only actions on any table cell or aggregation value; filter chips show active filters; filters persist across all tabs and the Sankey diagram
@@ -29,7 +29,7 @@ After analysis completes, the UI displays different views depending on the file 
 
 - **Sigma Alerts** - detections matched by Sigma rules, with severity, MITRE techniques, and rule metadata
 - **Log Events** - all parsed log events with dynamic column discovery based on the actual data
-- **Aggregation Tables** - filterable counts for discovered fields (Channel, EventID, Image, Source IP, etc.)
+- **Aggregation Tables** - filterable counts for discovered fields (Channel, EventID, Image, Source IP, etc.), with the same Prev/Next paging and adjustable page size as PCAP mode
 - **Search & Filtering** - same full-text search and pivot-menu filtering as PCAP mode
 
 **For binary files:**
@@ -83,8 +83,8 @@ Click a row's timestamp cell (or use the pivot menu's **Expand Row** entry) to e
 
 Arrow keys navigate rather than scroll the page, and adapt to what's on screen:
 
-- **Left/Right** - on the welcome screen, moves between the sample-file cards; on an analysis page, switches between stat-card tabs
-- **Up/Down** - on the welcome screen, moves between rows in Previous Analyses; on an analysis page, moves between rows in the visible data table
+- **Left/Right** - on the welcome screen, moves between the sample-file cards; on an analysis page, switches between stat-card tabs, or between Aggregation Tables (or, once on a table's Prev/Next stop, toggles between the two) when the ring is inside that section
+- **Up/Down** - on the welcome screen, moves between rows in Previous Analyses; on an analysis page, moves between rows in the visible data table. Inside the Aggregation Tables section, Down walks a table's own rows and then its Prev/Next stop before continuing into the next visual row of tables (or the Data Table if there isn't one) - Up retraces the same path in reverse
 - **Enter** - activates whatever's currently highlighted (opens a sample or previous analysis, or expands/collapses a table row) - the same as clicking it
 - **Escape** - closes whatever's open (a modal, the gear menu, a pivot menu) one level at a time, then returns to the welcome screen once nothing else is open
 - **`<` / `>`** - cycles through themes backward/forward; see [Themes](themes.md)

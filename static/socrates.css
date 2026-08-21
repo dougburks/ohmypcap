@@ -1511,6 +1511,14 @@
         .agg-table td { padding: 12px; background: transparent; border-bottom: 1px solid var(--border-color); }
         .agg-table tr { cursor: pointer; }
         .agg-table tr:hover { background: var(--bg-tertiary); }
+        .agg-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border-color); }
+        .agg-page-info { color: var(--text-muted); font-size: 0.78rem; white-space: nowrap; }
+        .agg-page-btn { background: none; border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 0.78rem; padding: 3px 8px; cursor: pointer; }
+        .agg-page-btn:hover:not(:disabled) { background: var(--bg-tertiary); border-color: var(--accent); }
+        .agg-page-btn:disabled { opacity: 0.4; cursor: default; }
+        /* Same arrow-key selection treatment as .stream-btn.keyboard-selected -
+           see navigateAggPaginationButtons(). */
+        .agg-page-btn.keyboard-selected { outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: 2px; }
         .filter-bar { background: var(--bg-drop-active); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 15px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .filter-label { color: var(--accent); font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
         .filter-chip { background: var(--accent); color: var(--bg-primary); padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
@@ -1677,6 +1685,9 @@
         .section-toggle-bar.keyboard-selected { background: var(--bg-hover); outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: -2px; }
         .sankey-content { padding: 20px; }
         .agg-content { padding: 15px 20px 5px; }
+        .agg-page-size-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 10px; }
+        .agg-page-size-bar label { color: var(--text-muted); font-size: 0.8rem; }
+        .agg-page-size-bar select { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.8rem; padding: 3px 6px; }
         .packet-block { border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
         .packet-block.src-dir { border-left: 3px solid var(--badge-danger-text); }
         .packet-block.dst-dir { border-left: 3px solid var(--tag-blue-text); }

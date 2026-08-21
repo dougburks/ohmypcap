@@ -2125,6 +2125,27 @@
             SANKEY_MAX_NODES_PER_COLUMN: 50,
             TABLE_PAGE_SIZE: 100,
         };
+        // Page size for every Aggregation Table's Prev/Next pagination
+        // (matches Security Onion's own aggregation-table UX) - user-
+        // adjustable via the "Items per page" selector (changeAggPageSize),
+        // persisted across sessions the same way theme/collapse-state
+        // preferences already are. db.py's AGGREGATION_TOP_N is only the
+        // fallback default the server uses if a request omits page_size
+        // entirely; the actual page size for every real request is always
+        // whatever this is set to.
+        const AGG_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+        const AGG_PAGE_SIZE_STORAGE_KEY = 'socrates_aggPageSize';
+        // var (not let/const) like every other piece of mutable top-level
+        // state in this file (hiddenAggregations, aggPage, currentMd5,
+        // advancedMode, ...) - only var/function declarations attach to the
+        // real global object, so a jsdom test's own separate indirect-eval
+        // invocation (see tests/jsdom_helper.py, window["eval"]) can
+        // actually see and mutate it; a let here would be invisible outside
+        // whichever indirect eval originally loaded this file.
+        var AGG_PAGE_SIZE = (() => {
+            const stored = parseInt(safeStorageGet(localStorage, AGG_PAGE_SIZE_STORAGE_KEY), 10);
+            return AGG_PAGE_SIZE_OPTIONS.includes(stored) ? stored : CONFIG.AGGREGATION_TOP_N;
+        })();
         const DEFAULT_SAMPLE_URL = 'https://www.malware-traffic-analysis.net/2026/02/03/2026-02-03-GuLoader-for-AgentTesla-style-infection-with-FTP-data-exfil.pcap.zip';
         const SAMPLE_LOG_URL = 'https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES/raw/refs/heads/master/Defense%20Evasion/apt10_jjs_sideloading_prochollowing_persist_as_service_sysmon_1_7_8_13.evtx';
         const SAMPLE_BINARY_URL = 'https://secure.eicar.org/eicar.com';
@@ -4491,15 +4512,93 @@
             dnsHeuristicsInfo: '#section-dns_heuristics .dns-heuristics-info-toggle',
         };
 
-        // Aggregation-table value rows (tr.agg-row[data-agg-pivot], see
-        // _renderAggTablesHtml) are included in strict DOM order once the
-        // panel is expanded - the agg-grid can lay several tables out
-        // side by side, but there's no per-table row-count to key a real
-        // 2D Up/Down-within-a-column/Left-Right-between-tables scheme off
-        // of (unlike the themes modal's fixed-column tile grid), so this
-        // just walks the flat document order like every other list here.
-        // Collapsed panels naturally contribute nothing since
-        // #aggregations then has no .agg-row elements to find at all.
+        // Groups the currently-visible aggregation tables into visual rows
+        // by rendered top position - the flex-wrap agg-grid has no fixed
+        // column count the way #statsGrid's CSS Grid does (read via
+        // statsGridColumnCount()), so row membership can only come from
+        // actual layout, not arithmetic. Real bug report: DOM order alone
+        // (every table's rows back to back) makes Down from a table's last
+        // row land on the very next table in DOM order - almost always the
+        // sibling immediately to its right, same visual row - when the
+        // expectation is "next VISUAL row of tables, or the Data Table if
+        // this was the last row"; Left/Right (navigateAggTables) is what's
+        // supposed to move sideways within a row, not Down.
+        function aggTableRowGroups() {
+            const tables = Array.from(document.querySelectorAll('#aggregations .agg-section')).filter(t => t.offsetParent !== null);
+            const rows = [];
+            for (const table of tables) {
+                const top = table.offsetTop;
+                let row = rows.find(r => Math.abs(r.top - top) < 4); // sub-pixel tolerance
+                if (!row) { row = { top, tables: [] }; rows.push(row); }
+                row.tables.push(table);
+            }
+            rows.sort((a, b) => a.top - b.top);
+            return rows.map(r => r.tables);
+        }
+
+        // A table's own value rows (tr.agg-row[data-agg-pivot], see
+        // _renderAggTablesHtml) plus its Prev/Next pagination row collapsed
+        // to one stop, if it has one (mirrors filterBarRowAnchor's own
+        // reasoning exactly) - contributes whichever button is already
+        // selected if Left/Right has moved within it
+        // (navigateAggPaginationButtons), else defaults to the first
+        // non-disabled one (page 1 has no Prev - landing on it by default
+        // would need an extra Left/Right press before Enter could do
+        // anything).
+        function aggTableOwnItems(table) {
+            const rows = Array.from(table.querySelectorAll('tr.agg-row[data-agg-pivot]'));
+            const pageButtons = Array.from(table.querySelectorAll('.agg-page-btn'));
+            if (pageButtons.length === 0) return rows;
+            const current = (verticalNavSelection && verticalNavSelection.isConnected && pageButtons.includes(verticalNavSelection))
+                ? verticalNavSelection : (pageButtons.find(b => !b.disabled) || pageButtons[0]);
+            return rows.concat([current]);
+        }
+
+        // Down/Up walks the reference table's own rows/pagination stop,
+        // bridging to the first table of the next visual row once it runs
+        // out (or the last table of the previous row, moving the other
+        // direction) - recomputed fresh on every keypress from wherever
+        // verticalNavSelection actually landed, so chaining across several
+        // rows in a row (so to speak) falls out for free without needing
+        // to pre-build the whole multi-row sequence in one call. Left/Right
+        // jumps directly to a different table instead of stepping through
+        // every intervening row (see navigateAggTables) - the same
+        // "Down/Up walks the flat list, Left/Right jumps within/between
+        // groups" split every other section here already uses. Collapsed
+        // panels naturally contribute nothing since #aggregations then has
+        // no .agg-section elements to find at all.
+        function aggTableAndPaginationItems() {
+            const rowGroups = aggTableRowGroups();
+            if (rowGroups.length === 0) return [];
+            let referenceTable = (verticalNavSelection && verticalNavSelection.isConnected)
+                ? verticalNavSelection.closest('#aggregations .agg-section') : null;
+            let rowIndex = referenceTable ? rowGroups.findIndex(row => row.includes(referenceTable)) : -1;
+            if (rowIndex === -1) {
+                // verticalNavSelection isn't currently inside the agg block
+                // at all (a toggle bar/filter chip/stat card, a Data Table
+                // row, or nothing selected yet) - which end of the block to
+                // offer as the entry point depends on which side we're
+                // approaching from. Real bug report: with 3+ rows, Up from
+                // the Data Table always re-entered at row 0 regardless of
+                // how many rows actually existed below it, since this used
+                // to default to the first row unconditionally - only a Data
+                // Table row means "arriving from below" (Up); every other
+                // case (including the very first Down of a fresh page) means
+                // "arriving from above" (Down), so the first row is still
+                // the right default there.
+                const fromBelow = verticalNavSelection && verticalNavSelection.isConnected
+                    && getVisibleDataTableRows().includes(verticalNavSelection);
+                rowIndex = fromBelow ? rowGroups.length - 1 : 0;
+                referenceTable = rowGroups[rowIndex][0];
+            }
+            let items = aggTableOwnItems(referenceTable);
+            const prevRow = rowGroups[rowIndex - 1];
+            if (prevRow) items = aggTableOwnItems(prevRow[prevRow.length - 1]).concat(items);
+            const nextRow = rowGroups[rowIndex + 1];
+            if (nextRow) items = items.concat(aggTableOwnItems(nextRow[0]));
+            return items;
+        }
+
         function getVerticalNavItems() {
             // The filter bar (search-term/filter-value chips, plus Clear
             // All) is a single horizontal row - see filterBarRowAnchor()'s
@@ -4511,7 +4610,7 @@
                 document.querySelector(TOGGLE_BAR_SELECTORS.agg),
                 document.querySelector(TOGGLE_BAR_SELECTORS.dnsHeuristicsInfo),
             ];
-            const aggRows = Array.from(document.querySelectorAll('#aggregations tr.agg-row[data-agg-pivot]'));
+            const aggRows = aggTableAndPaginationItems();
             // Positioned right after the filter chips, matching where
             // #statsGrid actually sits on the page (see socrates.html:
             // #filterBarContainer, #statsGrid, #sankeyPanel,
@@ -4532,6 +4631,57 @@
             return filterBarItems.concat(gridRowCards, toggleBars, aggRows)
                 .filter(el => el && el.offsetParent !== null)
                 .concat(getVisibleDataTableRows());
+        }
+
+        // Left/Right's own handling once the current selection is actually
+        // one of the two Prev/Next buttons (i.e. Down has already entered
+        // the pagination stop aggTableAndPaginationItems() collapses to one
+        // entry) - mirrors currentFilterBarSelection/navigateFilterBarItems
+        // exactly. navigateAggTables (below) handles Left/Right for every
+        // OTHER agg-area selection (an ordinary row, not yet on Prev/Next).
+        function currentAggPaginationSelection() {
+            if (!(verticalNavSelection && verticalNavSelection.isConnected && verticalNavSelection.offsetParent !== null)) return null;
+            if (!verticalNavSelection.classList.contains('agg-page-btn')) return null;
+            return verticalNavSelection;
+        }
+
+        function navigateAggPaginationButtons(direction) {
+            const current = currentAggPaginationSelection();
+            if (!current) return false;
+            const table = current.closest('.agg-section');
+            const buttons = table ? Array.from(table.querySelectorAll('.agg-page-btn')) : [];
+            if (buttons.length < 2) return false;
+            const index = buttons.indexOf(current);
+            moveStreamControlSelectionTo(buttons[(index + direction + buttons.length) % buttons.length]);
+            return true;
+        }
+
+        // Left/Right jumps straight to a different aggregation table
+        // instead of stepping through every intervening row via Down - only
+        // active while the current selection is actually inside one (an
+        // agg-row or one of its Prev/Next buttons); Down/Up
+        // (navigateVertical(), via aggTableAndPaginationItems() above) is
+        // what walks within/between tables one row at a time. Lands on the
+        // target table's first row (matching navigateStatTabs' own
+        // "preview, don't require a second Down" landing behavior) - every
+        // rendered table has at least one row (_renderOneAggTableHtml is
+        // never called with zero entries), so a null first-row can't happen
+        // in practice.
+        function navigateAggTables(direction) {
+            const current = (verticalNavSelection && verticalNavSelection.isConnected)
+                ? verticalNavSelection.closest('#aggregations tr.agg-row, #aggregations .agg-page-btn')
+                : null;
+            if (!current) return false;
+            const currentTable = current.closest('.agg-section');
+            if (!currentTable) return false;
+            const tables = Array.from(document.querySelectorAll('#aggregations .agg-section')).filter(t => t.offsetParent !== null);
+            const index = tables.indexOf(currentTable);
+            if (index === -1 || tables.length < 2) return false;
+            const nextTable = tables[(index + direction + tables.length) % tables.length];
+            const target = nextTable.querySelector('tr.agg-row[data-agg-pivot]');
+            if (!target) return false;
+            moveStreamControlSelectionTo(target);
+            return true;
         }
 
         // Which toggle bar (if any) is the current keyboard selection,
@@ -5415,12 +5565,12 @@
             // switch tabs (rebuilding the very table the open menu's row
             // belongs to) while the menu is still sitting on screen.
             if (e.key === 'ArrowRight' && isNavigableKeyContext(e)) {
-                if (!activePivotMenuEl && (navigateThemeTiles(1) || navigateStreamControls(1) || navigatePacketControls(1) || navigateFilterBarItems(1) || (leftRightSwitchesStatTabs && navigateStatTabs(1)) || navigateSampleCards(1))) {
+                if (!activePivotMenuEl && (navigateThemeTiles(1) || navigateStreamControls(1) || navigatePacketControls(1) || navigateFilterBarItems(1) || navigateAggPaginationButtons(1) || navigateAggTables(1) || (leftRightSwitchesStatTabs && navigateStatTabs(1)) || navigateSampleCards(1))) {
                     e.preventDefault();
                 }
             }
             if (e.key === 'ArrowLeft' && isNavigableKeyContext(e)) {
-                if (!activePivotMenuEl && (navigateThemeTiles(-1) || navigateStreamControls(-1) || navigatePacketControls(-1) || navigateFilterBarItems(-1) || (leftRightSwitchesStatTabs && navigateStatTabs(-1)) || navigateSampleCards(-1))) {
+                if (!activePivotMenuEl && (navigateThemeTiles(-1) || navigateStreamControls(-1) || navigatePacketControls(-1) || navigateFilterBarItems(-1) || navigateAggPaginationButtons(-1) || navigateAggTables(-1) || (leftRightSwitchesStatTabs && navigateStatTabs(-1)) || navigateSampleCards(-1))) {
                     e.preventDefault();
                 }
             }
@@ -6167,11 +6317,10 @@
             const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
             if (!visibleSection) {
                 // Binary analysis mode: no tab sections, rebuild aggregations directly
-                const fileAlerts = allEvents.filter(e => e.event_type === 'filealerts');
-                const filtered = fileAlerts.filter(e => matchesCurrentFilters(e, (ev, col) => extractValue(ev, col, -1)));
                 if (advancedMode) {
                     hiddenAggregations = new Set();
-                    buildBinaryAggregations(filtered);
+                    aggPage = {}; aggFullCountsCache = {}; aggTotalsCache = {};
+                    await rebuildVisibleAggregations();
                 } else {
                     const aggContainer = document.getElementById('aggregations');
                     if (aggContainer) aggContainer.innerHTML = AGG_COLLAPSED_HTML;
@@ -6179,30 +6328,10 @@
                 updateFilterBarVisibility();
                 return;
             }
-            const eventType = visibleSection.id.replace('section-', '');
             if (advancedMode) {
-                // needsFullBatch (not an unconditional ensureCappedBatch) so
-                // opening the aggregation view for an eligible pcap per-type
-                // tab with no active filter goes straight through
-                // buildAggregationsSection's own server-aggregation branch
-                // instead of always eagerly fetching the full capped batch.
-                if (needsFullBatch(eventType)) await ensureCappedBatch(eventType);
                 hiddenAggregations = new Set();
-                if (eventType === 'all') {
-                    await buildAggregationsSectionAll();
-                } else if (isLogAnalysisMode && eventType === 'log') {
-                    const events = tabDataCache['log'] || [];
-                    const filtered = getFilteredLogEvents(events);
-                    buildLogAggregations(filtered, visibleSection.id);
-                } else if (isLogAnalysisMode && eventType === 'sigmaalert') {
-                    const alerts = tabDataCache['sigmaalert'] || [];
-                    const filtered = getFilteredSigmaAlerts(alerts);
-                    buildSigmaAlertAggregations(filtered, visibleSection.id);
-                } else {
-                    const events = tabDataCache[eventType] || [];
-                    const filtered = getFilteredEvents(visibleSection.id, events, eventType);
-                    await buildAggregationsSection(eventType, filtered);
-                }
+                aggPage = {}; aggFullCountsCache = {}; aggTotalsCache = {};
+                await rebuildVisibleAggregations();
             } else {
                 const aggContainer = document.getElementById('aggregations');
                 if (aggContainer) {
@@ -7105,7 +7234,7 @@
             }
             const columns = ['Rule Name', 'Tags', 'Author'];
             const html = buildAggregationTablesCore(events, columns, 'section-binary', extractValue);
-            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + html + '</div></div>';
+            aggContainer.innerHTML = _wrapAggPanel(html);
         }
 
         function buildBinaryAnalysisView(events, baseEvents) {
@@ -7921,46 +8050,158 @@
             container.innerHTML = html;
         }
 
-        // Shared aggregation-table renderer: countsByColumn maps column label ->
-        // {value: count}; columns control display order. Hidden columns and
-        // empty columns are skipped.
-        function _renderAggTablesHtml(countsByColumn, columns, sectionId) {
+        // Builds one column's whole <div class="agg-section">...</div>
+        // block - header/close button, the current page's rows, and
+        // Prev/Next controls if there's more than one page. `entries` is
+        // already the exact [value, count] pairs to display, in display
+        // order; `total`/`page` drive the pagination controls only, no
+        // further slicing happens here. Shared by both the full-section
+        // renderer below (_renderAggTablesHtml) and changeAggPage's
+        // single-table patch, so the two can never render this markup
+        // differently from each other.
+        function _renderOneAggTableHtml(sectionId, col, entries, total, page) {
+            let html = `<div class="section agg-section" data-col="${escapeHtml(col)}"><div class="section-content"><div class="agg-table">
+                <div class="agg-header"><span>${escapeHtml(col)}</span><button class="agg-close" onclick="hideAggregationTable('${sectionId}', '${escapeJsString(col)}')" title="Hide">&times;</button></div>
+                <table><thead><tr><th style="width:60px;text-align:right;">Count</th><th>Value</th></tr></thead><tbody>`;
+            for (const [val, count] of entries) {
+                const escapedVal = escapeHtml(val);
+                const filterVal = val === '(empty)' ? '' : val;
+                // data-agg-pivot (delegated, see the pivot-menu click
+                // listener below), not a direct call to the old
+                // (now-removed) single-value applyFilter helper - val is
+                // arbitrary field content, and the pivot menu needs the raw
+                // value for Hunt/Copy/the lookup sites, not just a
+                // JS-string-escaped one for a single hardcoded call. The
+                // "(empty)" bucket has nothing meaningful to pivot on
+                // (matches pivotDataAttrsHtml/htmlRowText's own empty-value
+                // exclusion) - left without the attribute, so it's not
+                // clickable at all.
+                const pivotAttr = filterVal
+                    ? ` data-agg-pivot="${encodeURIComponent(JSON.stringify([sectionId, col, filterVal]))}"`
+                    : '';
+                html += `<tr class="agg-row"${pivotAttr}>
+                    <td style="text-align:right;color:var(--text-muted);">${count}</td><td class="agg-cell" title="${escapedVal}">${escapedVal}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            if (total > AGG_PAGE_SIZE) {
+                const totalPages = Math.max(1, Math.ceil(total / AGG_PAGE_SIZE));
+                html += `<div class="agg-pagination">
+                    <button type="button" class="agg-page-btn" onclick="changeAggPage('${sectionId}', '${escapeJsString(col)}', -1)" ${page <= 1 ? 'disabled' : ''}>&larr; Prev</button>
+                    <span class="agg-page-info">Page ${page} of ${totalPages}</span>
+                    <button type="button" class="agg-page-btn" onclick="changeAggPage('${sectionId}', '${escapeJsString(col)}', 1)" ${page >= totalPages ? 'disabled' : ''}>Next &rarr;</button>
+                </div>`;
+            }
+            html += '</div></div></div>';
+            return html;
+        }
+
+        // Shared aggregation-table renderer: columns control display order,
+        // hidden columns are skipped. countsByColumn shape depends on the
+        // caller:
+        //
+        // - Client-computed callers (log/sigmaalert/binary/'all' client-
+        //   fallback) pass the FULL {value: count} map for every column -
+        //   `totals` is omitted, so this derives each column's total from
+        //   the map's own size and slices out the current page itself. The
+        //   full map is also stashed in aggFullCountsCache so changeAggPage
+        //   can re-slice later without recomputing from events.
+        // - Server-aggregated callers (buildAggregationsSection/
+        //   buildAggregationsSectionAll) pass `totals` (from
+        //   fetchAggregationTotals) plus a countsByColumn that already only
+        //   holds page 1's rows per column (from the bulk
+        //   /api/aggregation-data fetch) - no slicing needed, just render.
+        function _renderAggTablesHtml(countsByColumn, columns, sectionId, totals) {
+            if (!totals) aggFullCountsCache[sectionId] = countsByColumn;
             let html = '';
             for (const col of columns) {
                 if (hiddenAggregations.has(sectionId + ':' + col)) continue;
                 const colCounts = countsByColumn[col] || {};
-                const entries = Object.entries(colCounts).sort((a, b) => b[1] - a[1]).slice(0, CONFIG.AGGREGATION_TOP_N);
-                if (entries.length === 0) continue;
-                html += `<div class="section agg-section" data-col="${escapeHtml(col)}"><div class="section-content"><div class="agg-table">
-                    <div class="agg-header"><span>${escapeHtml(col)}</span><button class="agg-close" onclick="hideAggregationTable('${sectionId}', '${escapeJsString(col)}')" title="Hide">&times;</button></div>
-                    <table><thead><tr><th style="width:60px;text-align:right;">Count</th><th>Value</th></tr></thead><tbody>`;
-                for (const [val, count] of entries) {
-                    const escapedVal = escapeHtml(val);
-                    const filterVal = val === '(empty)' ? '' : val;
-                    // data-agg-pivot (delegated, see the pivot-menu click
-                    // listener below), not a direct call to the old
-                    // (now-removed) single-value applyFilter helper -
-                    // val is arbitrary field content, and the pivot menu
-                    // needs the raw value for Hunt/Copy/the lookup sites,
-                    // not just a JS-string-escaped one for a single
-                    // hardcoded call. The "(empty)" bucket has nothing
-                    // meaningful to pivot on (matches pivotDataAttrsHtml/
-                    // htmlRowText's own empty-value exclusion) - left
-                    // without the attribute, so it's not clickable at all.
-                    const pivotAttr = filterVal
-                        ? ` data-agg-pivot="${encodeURIComponent(JSON.stringify([sectionId, col, filterVal]))}"`
-                        : '';
-                    html += `<tr class="agg-row"${pivotAttr}>
-                        <td style="text-align:right;color:var(--text-muted);">${count}</td><td class="agg-cell" title="${escapedVal}">${escapedVal}</td>
-                    </tr>`;
+                const page = aggPage[sectionId + ':' + col] || 1;
+                let entries, total;
+                if (totals) {
+                    total = totals[col] || 0;
+                    // Re-sorted here too (not just trusted as "already in
+                    // server order") - plain-object key iteration order in
+                    // JS reorders integer-like string keys (e.g. a Dest
+                    // Port column's "443"/"80") numerically ascending ahead
+                    // of every other key, regardless of insertion order, so
+                    // trusting Object.entries() to preserve the server's
+                    // count-descending order would silently misorder any
+                    // numeric-looking value column.
+                    entries = Object.entries(colCounts).sort((a, b) => b[1] - a[1]);
+                } else {
+                    const sorted = Object.entries(colCounts).sort((a, b) => b[1] - a[1]);
+                    total = sorted.length;
+                    const start = (page - 1) * AGG_PAGE_SIZE;
+                    entries = sorted.slice(start, start + AGG_PAGE_SIZE);
                 }
-                html += '</tbody></table></div></div></div>';
+                if (total === 0) continue;
+                html += _renderOneAggTableHtml(sectionId, col, entries, total, page);
             }
             return html;
         }
 
+        function _aggPageSizeSelectorHtml() {
+            const options = AGG_PAGE_SIZE_OPTIONS.map(n =>
+                `<option value="${n}"${n === AGG_PAGE_SIZE ? ' selected' : ''}>${n}</option>`
+            ).join('');
+            return `<div class="agg-page-size-bar"><label for="aggPageSizeSelect">Items per page</label>
+                <select id="aggPageSizeSelect" onchange="changeAggPageSize(this.value)">${options}</select></div>`;
+        }
+
         function _wrapAggPanel(innerHtml) {
-            return '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + innerHtml + '</div></div>';
+            return '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">'
+                + _aggPageSizeSelectorHtml() + innerHtml + '</div></div>';
+        }
+
+        // Rebuilds whichever Aggregation Tables view currently applies -
+        // binary analysis mode (no tab sections at all) or the visible
+        // tab's own section - shared by toggleAggregations() (opening the
+        // panel) and changeAggPageSize() (page size changed while already
+        // open), so the section/eventType routing logic can't drift between
+        // the two call sites.
+        async function rebuildVisibleAggregations() {
+            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            if (!visibleSection) {
+                const fileAlerts = allEvents.filter(e => e.event_type === 'filealerts');
+                const filtered = fileAlerts.filter(e => matchesCurrentFilters(e, (ev, col) => extractValue(ev, col, -1)));
+                buildBinaryAggregations(filtered);
+                return;
+            }
+            const eventType = visibleSection.id.replace('section-', '');
+            // needsFullBatch (not an unconditional ensureCappedBatch) so
+            // opening the aggregation view for an eligible pcap per-type tab
+            // with no active filter goes straight through
+            // buildAggregationsSection's own server-aggregation branch
+            // instead of always eagerly fetching the full capped batch.
+            if (needsFullBatch(eventType)) await ensureCappedBatch(eventType);
+            if (eventType === 'all') {
+                await buildAggregationsSectionAll();
+            } else if (isLogAnalysisMode && eventType === 'log') {
+                const events = tabDataCache['log'] || [];
+                buildLogAggregations(getFilteredLogEvents(events), visibleSection.id);
+            } else if (isLogAnalysisMode && eventType === 'sigmaalert') {
+                const alerts = tabDataCache['sigmaalert'] || [];
+                buildSigmaAlertAggregations(getFilteredSigmaAlerts(alerts), visibleSection.id);
+            } else {
+                const events = tabDataCache[eventType] || [];
+                const filtered = getFilteredEvents(visibleSection.id, events, eventType);
+                await buildAggregationsSection(eventType, filtered);
+            }
+        }
+
+        // "Items per page" selector's onchange handler (see
+        // _aggPageSizeSelectorHtml) - applies to every Aggregation Table at
+        // once, not per-column like the old escalating "Show more" tiers
+        // this pagination feature replaced, since a per-table selector
+        // would mean one selector per column and real UI clutter.
+        async function changeAggPageSize(newSize) {
+            const parsed = parseInt(newSize, 10);
+            AGG_PAGE_SIZE = AGG_PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : CONFIG.AGGREGATION_TOP_N;
+            safeStorageSet(localStorage, AGG_PAGE_SIZE_STORAGE_KEY, String(AGG_PAGE_SIZE));
+            aggPage = {}; aggFullCountsCache = {}; aggTotalsCache = {};
+            await rebuildVisibleAggregations();
         }
 
         function buildLogAggregations(events, sectionId) {
@@ -8254,18 +8495,22 @@
             const sectionId = `section-${eventType}`;
 
             if (canUseServerAggregation(eventType)) {
-                const data = await fetchAggregationData(eventType);
+                const [data, totals] = await Promise.all([
+                    fetchAggregationData(eventType),
+                    fetchAggregationTotals(eventType),
+                ]);
+                aggTotalsCache[sectionId] = totals;
                 const countsByColumn = {};
                 for (const [col, entries] of Object.entries(data)) {
                     countsByColumn[col] = {};
                     for (const { value, count } of entries) countsByColumn[col][value] = count;
                 }
-                const html = '<div class="agg-grid">' + _renderAggTablesHtml(countsByColumn, getColumnsForType(eventType), sectionId) + '</div>';
-                aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + html + '</div></div>';
+                const html = '<div class="agg-grid">' + _renderAggTablesHtml(countsByColumn, getColumnsForType(eventType), sectionId, totals) + '</div>';
+                aggContainer.innerHTML = _wrapAggPanel(html);
                 return;
             }
 
-            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + buildAggregationTables(events, eventType) + '</div></div>';
+            aggContainer.innerHTML = _wrapAggPanel(buildAggregationTables(events, eventType));
         }
         
         // Whether the row table/aggregations/diagram for the currently-visible
@@ -8838,14 +9083,18 @@
             const sectionId = 'section-all';
 
             if (canUseServerAggregation('all')) {
-                const data = await fetchAggregationData('all');
+                const [data, totals] = await Promise.all([
+                    fetchAggregationData('all'),
+                    fetchAggregationTotals('all'),
+                ]);
+                aggTotalsCache[sectionId] = totals;
                 const countsByColumn = {};
                 for (const [col, entries] of Object.entries(data)) {
                     countsByColumn[col] = {};
                     for (const { value, count } of entries) countsByColumn[col][value] = count;
                 }
-                const html = '<div class="agg-grid">' + _renderAggTablesHtml(countsByColumn, allColumns, sectionId) + '</div>';
-                aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + html + '</div></div>';
+                const html = '<div class="agg-grid">' + _renderAggTablesHtml(countsByColumn, allColumns, sectionId, totals) + '</div>';
+                aggContainer.innerHTML = _wrapAggPanel(html);
                 return;
             }
 
@@ -8855,7 +9104,7 @@
                 filteredEvents = sortedAll.filter(e => matchesCurrentFilters(e, (ev, col) => extractAllValue(ev, col, allColumns.indexOf(col))));
             }
 
-            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + buildAggregationTablesAll(filteredEvents, allColumns) + '</div></div>';
+            aggContainer.innerHTML = _wrapAggPanel(buildAggregationTablesAll(filteredEvents, allColumns));
         }
         
         function extractAllValue(e, col, colIndex) {
@@ -9360,10 +9609,33 @@
                 && (currentSort === null || canServerSortEventType(eventType));
         }
 
-        async function fetchAggregationData(eventType) {
+        // column/page omitted -> the original bulk "every column, page 1"
+        // fetch. column+page together restrict to just that one column's
+        // one page - used by changeAggPage so paging one table doesn't
+        // reset every other column in the section back to page 1. Always
+        // sends the current AGG_PAGE_SIZE (the "Items per page" selector) -
+        // the server has its own fallback default, but every real request
+        // must be explicit so a page-size change and a page-navigation
+        // fetch can never disagree on how many rows a "page" is.
+        async function fetchAggregationData(eventType, column, page) {
             const qParam = buildSearchQuery();
             const typeParam = (eventType && eventType !== 'all') ? `&type=${eventType}` : '';
-            const resp = await fetch(`/api/aggregation-data?md5=${encodeURIComponent(currentMd5)}${typeParam}${qParam}&t=${Date.now()}`);
+            const columnParam = column ? `&column=${encodeURIComponent(column)}` : '';
+            const pageParam = page ? `&page=${page}` : '';
+            const resp = await fetch(`/api/aggregation-data?md5=${encodeURIComponent(currentMd5)}${typeParam}${columnParam}${pageParam}&page_size=${AGG_PAGE_SIZE}${qParam}&t=${Date.now()}`);
+            return await resp.json();
+        }
+
+        // Distinct-value COUNT per column, for the Prev/Next page-count math
+        // in _renderOneAggTableHtml - fetched once per section open/filter
+        // change (see buildAggregationsSection/buildAggregationsSectionAll),
+        // not on every Prev/Next click. See get_aggregation_totals_sqlite's
+        // own docstring for why this is a separate request from the page
+        // data itself.
+        async function fetchAggregationTotals(eventType) {
+            const qParam = buildSearchQuery();
+            const typeParam = (eventType && eventType !== 'all') ? `&type=${eventType}` : '';
+            const resp = await fetch(`/api/aggregation-totals?md5=${encodeURIComponent(currentMd5)}${typeParam}${qParam}&t=${Date.now()}`);
             return await resp.json();
         }
 
@@ -9447,6 +9719,21 @@
         }
 
         var hiddenAggregations = new Set();
+        // sectionId+':'+col -> current 1-indexed page for that one table's
+        // Prev/Next pagination. Reset alongside hiddenAggregations at every
+        // site that resets it - same "starts fresh each time the panel
+        // (re)opens" lifecycle.
+        var aggPage = {};
+        // sectionId -> {col: {value: count}} - the full, unpaged counts map
+        // for client-computed sections only (log/sigmaalert/binary/'all'
+        // client-fallback). Stashed by _renderAggTablesHtml so changeAggPage
+        // can re-slice a new page locally instead of recomputing from
+        // events/tabDataCache on every click.
+        var aggFullCountsCache = {};
+        // sectionId -> {col: totalDistinctValueCount} - for server-aggregated
+        // sections, whose countsByColumn only ever holds the current page
+        // (see fetchAggregationTotals/get_aggregation_totals_sqlite).
+        var aggTotalsCache = {};
         let baseEventStats = {};
         var isLogAnalysisMode = false;
         const ALL_EVENTS_COLUMNS = ['Time', 'Type', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Detail'];
@@ -9638,6 +9925,80 @@
                 const aggContainer = document.getElementById('aggregations');
                 if (aggContainer) {
                     aggContainer.innerHTML = AGG_COLLAPSED_HTML;
+                }
+            }
+        }
+
+        // Prev/Next for one table: server-aggregated sections fetch just
+        // that one column's new page (its own single-column request - see
+        // fetchAggregationData's column param); client-computed sections
+        // re-slice the full counts map _renderAggTablesHtml already stashed
+        // in aggFullCountsCache. Either way this patches only that one
+        // table's DOM node in place (via _renderOneAggTableHtml), not a
+        // full section rebuild - the whole point of paging in place is to
+        // keep the surrounding layout (and the user's scroll position)
+        // completely stable across clicks.
+        async function changeAggPage(sectionId, col, delta) {
+            const key = sectionId + ':' + col;
+            const newPage = (aggPage[key] || 1) + delta;
+            if (newPage < 1) return;
+
+            const eventType = sectionId.replace('section-', '');
+            let entries, total;
+            if (sectionId !== 'section-binary' && canUseServerAggregation(eventType)) {
+                const data = await fetchAggregationData(eventType, col, newPage);
+                entries = (data[col] || []).map(e => [e.value, e.count]);
+                const totals = aggTotalsCache[sectionId] || {};
+                total = totals[col] || 0;
+            } else {
+                const fullCounts = (aggFullCountsCache[sectionId] || {})[col] || {};
+                const sorted = Object.entries(fullCounts).sort((a, b) => b[1] - a[1]);
+                total = sorted.length;
+                const start = (newPage - 1) * AGG_PAGE_SIZE;
+                entries = sorted.slice(start, start + AGG_PAGE_SIZE);
+            }
+            // Guards against a stale double-click landing past the last
+            // page (e.g. Next clicked twice before the first response
+            // returns) - Prev/Next are disabled at the true last page in
+            // the rendered controls, so this should be unreachable in
+            // practice, not just a cosmetic clamp.
+            if (newPage > Math.max(1, Math.ceil(total / AGG_PAGE_SIZE))) return;
+
+            aggPage[key] = newPage;
+            const newTableHtml = _renderOneAggTableHtml(sectionId, col, entries, total, newPage);
+            // A keyboard-driven Prev/Next (Enter on a keyboard-selected
+            // button, via activateKeyboardSelection's generic .click()
+            // fallback) has verticalNavSelection pointing at the very
+            // button outerHTML below destroys - without re-pointing it at
+            // the replacement, isConnected goes false and the next arrow
+            // press would self-heal onto the top of the whole flat nav
+            // list (the stat-card grid) instead of staying right where the
+            // user just was (real bug report).
+            const hadFocus = verticalNavSelection && verticalNavSelection.isConnected
+                && verticalNavSelection.classList.contains('agg-page-btn')
+                && verticalNavSelection.closest('.agg-section')?.getAttribute('data-col') === col;
+            // col can contain quotes (attacker-controlled log field names),
+            // so compare attributes directly instead of building a CSS
+            // selector - same technique as hideAggregationTable.
+            document.querySelectorAll('.agg-section').forEach(el => {
+                if (el.getAttribute('data-col') === col) {
+                    el.outerHTML = newTableHtml;
+                }
+            });
+            if (hadFocus) {
+                const replacementTable = Array.from(document.querySelectorAll('.agg-section')).find(t => t.getAttribute('data-col') === col);
+                const buttons = replacementTable ? Array.from(replacementTable.querySelectorAll('.agg-page-btn')) : [];
+                // Same button just pressed (index 1 = Next for delta > 0,
+                // index 0 = Prev for delta < 0) - stays there even if that
+                // button is now disabled (e.g. Next after reaching the
+                // last page), rather than guessing the user wants Prev
+                // instead; Left/Right (navigateAggPaginationButtons) is
+                // already how they'd move off a disabled button.
+                const target = buttons[delta > 0 ? 1 : 0];
+                if (target) {
+                    verticalNavSelection = target;
+                    target.classList.add('keyboard-selected');
+                    scrollKeyboardSelectionIntoView(target);
                 }
             }
         }
@@ -10577,6 +10938,7 @@
                     currentSearch = [];
                     resetPagination();
                     hiddenAggregations = new Set();
+                    aggPage = {}; aggFullCountsCache = {}; aggTotalsCache = {};
                     tabDataCache = {};
                     clearAnalysisContainers();
                     document.getElementById('searchInput').value = '';

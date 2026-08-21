@@ -961,7 +961,8 @@ def get_sankey_data_sqlite(db_path, event_type=None, q=None, max_nodes_per_colum
         return {'nodes': nodes, 'links': links}
 
 
-# Must match CONFIG.AGGREGATION_TOP_N in static/socrates.js.
+# Must match AGG_PAGE_SIZE in static/socrates.js - the fixed page size for
+# every Aggregation Table (not client-controllable; only the page number is).
 AGGREGATION_TOP_N = 10
 
 # Real, already-populated columns aggregated for every event type (same
@@ -1451,7 +1452,33 @@ def _sort_expr(event_type, label, prefix=''):
     return None
 
 
-def get_aggregation_data_sqlite(db_path, event_type, q=None, top_n=AGGREGATION_TOP_N):
+def _aggregation_column_specs(event_type, prefix):
+    """The (label, plain_expr, fts_expr) tuples get_aggregation_data_sqlite
+    and get_aggregation_totals_sqlite both need - factored out so the two
+    can never drift on which columns/expressions they aggregate over.
+    Returns None if event_type isn't one of the supported per-type tabs (and
+    isn't the merged 'all events' view, event_type=None)."""
+    if event_type is not None and event_type not in AGGREGATION_JSON_PATHS:
+        return None
+    column_specs = []
+    for label, (col, cast_text) in REAL_AGGREGATION_COLUMNS.items():
+        plain = f'CAST({col} AS TEXT)' if cast_text else col
+        fts = f'CAST({prefix}{col} AS TEXT)' if cast_text else f'{prefix}{col}'
+        column_specs.append((label, plain, fts))
+    if event_type is None:
+        column_specs.append(('Type', 'UPPER(event_type)', f'UPPER({prefix}event_type)'))
+        column_specs.append(('Detail', _all_events_detail_expr(), _all_events_detail_expr(prefix=prefix)))
+    else:
+        for label, paths in AGGREGATION_JSON_PATHS[event_type].items():
+            column_specs.append((
+                label,
+                _aggregation_expr(event_type, label, paths),
+                _aggregation_expr(event_type, label, paths, prefix='e.'),
+            ))
+    return column_specs
+
+
+def get_aggregation_data_sqlite(db_path, event_type, q=None, top_n=AGGREGATION_TOP_N, offset=0, column=None):
     """Server-side equivalent of buildAggregationTablesCore()/extractValue()
     in socrates.js, for the 10 per-type pcap tabs that share that code path
     (alert/dns/http/tls/flow/fileinfo/filealerts/modbus/dnp3/pgsql), plus the
@@ -1463,6 +1490,15 @@ def get_aggregation_data_sqlite(db_path, event_type, q=None, top_n=AGGREGATION_T
     sorted descending and capped to top_n, matching CONFIG.AGGREGATION_TOP_N's
     client-side render-time cap.
 
+    `offset` supports Prev/Next pagination through a single column's values
+    (paired with `column` to restrict the query to just that one label -
+    the initial/bulk fetch that populates every column at once always uses
+    offset=0, column=None). See get_aggregation_totals_sqlite for the
+    matching distinct-value COUNT a client needs to compute page counts -
+    deliberately a separate function/query rather than folding a total into
+    every row here, so this function's shape (and every existing caller/
+    test built around it) doesn't have to change for pagination to work.
+
     Each column is an independent read-only GROUP BY query, so they run
     concurrently (one connection per worker - sqlite3 connections aren't
     thread-safe to share, and WAL mode, already enabled by _init_db, allows
@@ -1471,7 +1507,7 @@ def get_aggregation_data_sqlite(db_path, event_type, q=None, top_n=AGGREGATION_T
     Column order is preserved in the result regardless of completion order.
     """
     with _db_connection(db_path) as conn:
-        if not _has_events_table(conn) or (event_type is not None and event_type not in AGGREGATION_JSON_PATHS):
+        if not _has_events_table(conn):
             return {}
 
         _ensure_ip_port_indexes(conn)
@@ -1481,21 +1517,11 @@ def get_aggregation_data_sqlite(db_path, event_type, q=None, top_n=AGGREGATION_T
         has_fts = _has_fts5(conn) if terms else False
 
         prefix = 'e.' if (terms and has_fts) else ''
-        column_specs = []
-        for label, (col, cast_text) in REAL_AGGREGATION_COLUMNS.items():
-            plain = f'CAST({col} AS TEXT)' if cast_text else col
-            fts = f'CAST({prefix}{col} AS TEXT)' if cast_text else f'{prefix}{col}'
-            column_specs.append((label, plain, fts))
-        if event_type is None:
-            column_specs.append(('Type', 'UPPER(event_type)', f'UPPER({prefix}event_type)'))
-            column_specs.append(('Detail', _all_events_detail_expr(), _all_events_detail_expr(prefix=prefix)))
-        else:
-            for label, paths in AGGREGATION_JSON_PATHS[event_type].items():
-                column_specs.append((
-                    label,
-                    _aggregation_expr(event_type, label, paths),
-                    _aggregation_expr(event_type, label, paths, prefix='e.'),
-                ))
+        column_specs = _aggregation_column_specs(event_type, prefix)
+        if column_specs is None:
+            return {}
+        if column is not None:
+            column_specs = [spec for spec in column_specs if spec[0] == column]
 
         # Computed once here on the main thread, not inside run_column()
         # below - run_column() executes inside a ThreadPoolExecutor worker,
@@ -1513,10 +1539,10 @@ def get_aggregation_data_sqlite(db_path, event_type, q=None, top_n=AGGREGATION_T
             sql = select
             if conditions:
                 sql += ' WHERE ' + ' AND '.join(conditions)
-            sql += ' GROUP BY val ORDER BY cnt DESC LIMIT ?'
+            sql += ' GROUP BY val ORDER BY cnt DESC LIMIT ? OFFSET ?'
             try:
                 with _db_connection(db_path) as thread_conn:
-                    rows = thread_conn.execute(sql, list(params) + [top_n]).fetchall()
+                    rows = thread_conn.execute(sql, list(params) + [top_n, offset]).fetchall()
             except sqlite3.OperationalError:
                 return label, None
             entries = [
@@ -1526,13 +1552,70 @@ def get_aggregation_data_sqlite(db_path, event_type, q=None, top_n=AGGREGATION_T
             return label, (entries if entries else None)
 
         result = {}
-        max_workers = min(len(column_specs), os.cpu_count() or 4)
+        max_workers = min(len(column_specs), os.cpu_count() or 4) if column_specs else 1
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(run_column, label, plain, fts) for label, plain, fts in column_specs]
             for future in futures:
                 label, entries = future.result()
                 if entries:
                     result[label] = entries
+
+        return result
+
+
+def get_aggregation_totals_sqlite(db_path, event_type, q=None, column=None):
+    """Distinct-value COUNT per aggregation column, matching the same
+    column set/WHERE-filtering as get_aggregation_data_sqlite - lets a
+    client compute Prev/Next page counts without the page data itself
+    revealing the true total (a page can come back shorter than top_n
+    purely because its offset is near the end, not because that's the
+    overall total). Returns {column_label: total_count}.
+    """
+    with _db_connection(db_path) as conn:
+        if not _has_events_table(conn):
+            return {}
+
+        _ensure_ip_port_indexes(conn)
+        _ensure_flow_json_indexes(conn)
+
+        terms = _build_search_terms(q)
+        has_fts = _has_fts5(conn) if terms else False
+
+        prefix = 'e.' if (terms and has_fts) else ''
+        column_specs = _aggregation_column_specs(event_type, prefix)
+        if column_specs is None:
+            return {}
+        if column is not None:
+            column_specs = [spec for spec in column_specs if spec[0] == column]
+
+        has_acknowledged_table = _has_acknowledged_alerts_table(conn)
+
+        def run_column(label, plain_expr, fts_expr):
+            select, event_type_col = _events_select(
+                terms, has_fts,
+                f'{plain_expr} AS val',
+                f'{fts_expr} AS val',
+            )
+            conditions, params = _build_where_conditions(has_acknowledged_table, terms, has_fts, event_type, event_type_col)
+            sql = select
+            if conditions:
+                sql += ' WHERE ' + ' AND '.join(conditions)
+            sql += ' GROUP BY val'
+            try:
+                with _db_connection(db_path) as thread_conn:
+                    count = thread_conn.execute(f'SELECT COUNT(*) FROM ({sql})', params).fetchone()[0]
+            except sqlite3.OperationalError:
+                return label, 0
+            return label, count
+
+        result = {}
+        max_workers = min(len(column_specs), os.cpu_count() or 4) if column_specs else 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(run_column, label, plain, fts) for label, plain, fts in column_specs]
+            for future in futures:
+                label, count = future.result()
+                if count:
+                    result[label] = count
 
         return result
 

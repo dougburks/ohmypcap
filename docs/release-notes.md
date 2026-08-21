@@ -90,6 +90,28 @@ them now works via the same generic field lookup the underlying log
 extraction logic already supported internally, without guessing which
 fields are actually safe to allow through.
 
+### Aggregation Tables: pagination, page size, and keyboard navigation
+
+Aggregation Tables used to show only the top 10 values per column with no
+way to see more. Each table now pages through its values with Prev/Next
+controls instead of growing the page - so a table full of long, variable-
+width values (a DNS query column, say) never reflows the surrounding
+layout or shifts a Next button out from under your cursor as you click
+through it. An "Items per page" selector (10/25/50/100) applies to every
+table in the currently-open section at once and persists across
+sessions, matching how theme/collapse-state preferences already do.
+Pagination is keyboard-driven too: Left/Right jumps directly to a
+different table instead of stepping through every row to reach it; Down
+walks a table's own rows and, once it reaches the last one, its Prev/Next
+stop, then continues into the next *visual row* of tables (not just the
+next table in source order, which for a multi-column layout is usually a
+same-row sibling reachable via Left/Right instead) or the Data Table if
+there isn't one - Up retraces the same path in reverse, all the way back
+out through the Data Table if you page past the top. Left/Right toggles
+between Prev and Next once you've arrived at that stop, and Enter
+activates whichever one is highlighted without losing keyboard focus
+afterward.
+
 ### Fixed while preparing this release
 
 - The command palette's "Open X"/"Go to Y" entries (Themes, Rules,

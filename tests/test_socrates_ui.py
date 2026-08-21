@@ -3430,6 +3430,7 @@ class TestThemeAndMenu(unittest.TestCase):
             '.packet-control-btn.keyboard-selected',
             '.detail-value-pivot.keyboard-selected',
             '.autocomplete-item.keyboard-selected',
+            '.agg-page-btn.keyboard-selected',
         )
         fallback = 'var(--interactive-highlight, var(--accent))'
         for selector in documented_consumers:
@@ -8282,6 +8283,672 @@ class TestAggregationPivotMenu(unittest.TestCase):
         ''')
         self.assertFalse(result['hasPivotAttr'])
         self.assertFalse(result['menuOpen'], 'clicking the (empty) bucket must not open a pivot menu')
+
+
+class TestAggregationPagination(unittest.TestCase):
+    """Aggregation Tables' Prev/Next pagination (AGG_PAGE_SIZE, fixed at
+    CONFIG.AGGREGATION_TOP_N) - matches Security Onion's own aggregation-
+    table UX: a table's height never grows, Prev/Next cycle through fixed
+    pages instead. See _renderAggTablesHtml's own comment for how the
+    client-computed vs server-aggregated call shapes differ."""
+
+    def _counts(self, n, col='Source IP'):
+        return {col: {f'10.0.0.{i}': (n - i) for i in range(n)}}
+
+    def test_client_path_first_page_and_pagination_controls(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements(f'''
+            aggPage = {{}};
+            var html = _renderAggTablesHtml({json.dumps(self._counts(25))}, ['Source IP'], 'section-alert');
+            var div = document.createElement('div');
+            div.innerHTML = html;
+            window.__jsdom_result = {{
+                rowCount: div.querySelectorAll('.agg-row').length,
+                pageInfo: div.querySelector('.agg-page-info').textContent,
+                prevDisabled: div.querySelector('.agg-page-btn').disabled,
+                cachedFullCount: Object.keys(aggFullCountsCache['section-alert']['Source IP']).length
+            }};
+        ''')
+        self.assertEqual(result['rowCount'], 10)
+        self.assertEqual(result['pageInfo'], 'Page 1 of 3')
+        self.assertTrue(result['prevDisabled'], 'Prev must be disabled on page 1')
+        self.assertEqual(result['cachedFullCount'], 25, 'the full map must be stashed for changeAggPage to re-slice later')
+
+    def test_client_path_no_pagination_when_total_fits_one_page(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements(f'''
+            aggPage = {{}};
+            var html = _renderAggTablesHtml({json.dumps(self._counts(5))}, ['Source IP'], 'section-alert');
+            var div = document.createElement('div');
+            div.innerHTML = html;
+            window.__jsdom_result = {{
+                rowCount: div.querySelectorAll('.agg-row').length,
+                hasPagination: !!div.querySelector('.agg-pagination')
+            }};
+        ''')
+        self.assertEqual(result['rowCount'], 5)
+        self.assertFalse(result['hasPagination'])
+
+    def test_server_path_uses_supplied_totals_not_page_length(self):
+        """Server-aggregated columns only ever get one page's worth of rows
+        in countsByColumn - the total (and therefore page count) must come
+        from the separately-supplied `totals` map, not from
+        Object.keys(colCounts).length (which would just equal the page
+        size)."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements(f'''
+            aggPage = {{}};
+            var page1 = {json.dumps(self._counts(10)['Source IP'])};
+            var totals = {{ 'Source IP': 47 }};
+            var html = _renderAggTablesHtml({{ 'Source IP': page1 }}, ['Source IP'], 'section-alert', totals);
+            var div = document.createElement('div');
+            div.innerHTML = html;
+            window.__jsdom_result = {{
+                rowCount: div.querySelectorAll('.agg-row').length,
+                pageInfo: div.querySelector('.agg-page-info').textContent,
+                fullCountsCacheUntouched: !aggFullCountsCache['section-alert']
+            }};
+        ''')
+        self.assertEqual(result['rowCount'], 10)
+        self.assertEqual(result['pageInfo'], 'Page 1 of 5', 'ceil(47/10) = 5, not derived from the 10 rows actually present')
+        self.assertTrue(result['fullCountsCacheUntouched'], 'server-aggregated sections must not populate aggFullCountsCache')
+
+    def test_server_path_reorders_numeric_looking_values_by_count(self):
+        """Regression guard: a Dest Port-shaped column's values ('443',
+        '80', '21', ...) are integer-index-like object keys, which plain JS
+        objects reorder numerically ascending ahead of insertion order
+        regardless of how they were built - _renderAggTablesHtml's totals
+        branch must re-sort by count instead of trusting Object.entries()
+        to already be in the server's count-descending order."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            aggPage = {};
+            // Deliberately built so plain-object key order ('21','80','443'
+            // ascending) would NOT match count-descending order ('443':50
+            // highest, '21':1 lowest).
+            var page1 = { '21': 1, '80': 5, '443': 50 };
+            var totals = { 'Dest Port': 3 };
+            var html = _renderAggTablesHtml({ 'Dest Port': page1 }, ['Dest Port'], 'section-alert', totals);
+            var div = document.createElement('div');
+            div.innerHTML = html;
+            window.__jsdom_result = {
+                values: Array.from(div.querySelectorAll('.agg-cell')).map(function(td) { return td.textContent; })
+            };
+        ''')
+        self.assertEqual(result['values'], ['443', '80', '21'], 'rows must be in count-descending order')
+
+    def test_change_agg_page_client_path_advances_and_patches_dom(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements(f'''
+            aggPage = {{}};
+            // 'section-log' (not 'section-alert') deliberately - eventType
+            // 'log' is one of canUseServerAggregation's explicit exclusions,
+            // so this exercises the client-side re-slice branch
+            // deterministically without needing to mock fetch() at all
+            // (an 'alert'/'dns'/etc. sectionId would hit the real server
+            // branch here, since no filter is active).
+            var html = _renderAggTablesHtml({json.dumps(self._counts(25))}, ['Source IP'], 'section-log');
+            var div = document.createElement('div');
+            div.innerHTML = html;
+            document.body.appendChild(div);
+            await changeAggPage('section-log', 'Source IP', 1);
+            var section = document.querySelector('.agg-section[data-col="Source IP"]');
+            window.__jsdom_result = {{
+                newPage: aggPage['section-log:Source IP'],
+                pageInfo: section.querySelector('.agg-page-info').textContent,
+                prevDisabled: section.querySelectorAll('.agg-page-btn')[0].disabled,
+                nextDisabled: section.querySelectorAll('.agg-page-btn')[1].disabled,
+                firstRowValue: section.querySelector('.agg-cell').textContent
+            }};
+        ''')
+        self.assertEqual(result['newPage'], 2)
+        self.assertEqual(result['pageInfo'], 'Page 2 of 3')
+        self.assertFalse(result['prevDisabled'], 'Prev must be enabled once past page 1')
+        self.assertFalse(result['nextDisabled'], 'Next must be enabled - page 2 of 3 is not the last page')
+        self.assertEqual(result['firstRowValue'], '10.0.0.10', 'page 2 must start where page 1 left off (0-indexed, 10 per page)')
+
+    def test_change_agg_page_refuses_to_go_below_page_one(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements(f'''
+            aggPage = {{}};
+            var html = _renderAggTablesHtml({json.dumps(self._counts(25))}, ['Source IP'], 'section-log');
+            var div = document.createElement('div');
+            div.innerHTML = html;
+            document.body.appendChild(div);
+            await changeAggPage('section-log', 'Source IP', -1);
+            // aggPage[key] is `undefined` (never set) in the expected case -
+            // JSON.stringify drops keys whose value is undefined entirely,
+            // so this reports presence/absence rather than a value the
+            // Python side could compare to None.
+            window.__jsdom_result = {{ hasPage: ('section-log:Source IP' in aggPage) }};
+        ''')
+        self.assertFalse(result['hasPage'], 'must stay unset (defaults to page 1) - never go negative/zero')
+
+    def test_change_agg_page_server_path_fetches_single_column(self):
+        """canUseServerAggregation('alert') is true by default (no active
+        filters) - changeAggPage must fetch just the one column/page
+        (fetchAggregationData's column+page params), not re-fetch the whole
+        section, and must read the total from the already-cached
+        aggTotalsCache rather than issuing a second totals request."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            aggPage = {};
+            aggTotalsCache['section-alert'] = { 'Source IP': 25 };
+            window.__fetchCalls = [];
+            window.fetch = function(url) {
+                window.__fetchCalls.push(url);
+                var body = JSON.stringify({ 'Source IP': [
+                    { value: '10.0.0.10', count: 15 }, { value: '10.0.0.11', count: 14 }
+                ] });
+                return Promise.resolve({ json: function() { return Promise.resolve(JSON.parse(body)); } });
+            };
+            var div = document.createElement('div');
+            div.innerHTML = '<div class="section agg-section" data-col="Source IP"><div class="section-content"><div class="agg-table"></div></div></div>';
+            document.body.appendChild(div);
+            await changeAggPage('section-alert', 'Source IP', 1);
+            window.__jsdom_result = {
+                newPage: aggPage['section-alert:Source IP'],
+                fetchUrl: window.__fetchCalls[0],
+                rowCount: document.querySelectorAll('.agg-row').length
+            };
+        ''')
+        self.assertEqual(result['newPage'], 2)
+        self.assertIn('column=Source', result['fetchUrl'])
+        self.assertIn('page=2', result['fetchUrl'])
+        self.assertNotIn('/api/aggregation-totals', result['fetchUrl'], 'must reuse the cached total, not re-fetch it')
+        self.assertEqual(result['rowCount'], 2)
+
+    def test_change_agg_page_binary_mode_uses_client_slicing(self):
+        """section-binary is fully client-side (canUseServerAggregation
+        excludes 'binary') - changeAggPage must re-slice from
+        aggFullCountsCache rather than attempting a server fetch."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements(f'''
+            aggPage = {{}};
+            window.__fetchCalled = false;
+            window.fetch = function() {{ window.__fetchCalled = true; return Promise.reject(new Error('must not fetch')); }};
+            var html = _renderAggTablesHtml({json.dumps(self._counts(15, 'Rule Name'))}, ['Rule Name'], 'section-binary');
+            var div = document.createElement('div');
+            div.innerHTML = html;
+            document.body.appendChild(div);
+            await changeAggPage('section-binary', 'Rule Name', 1);
+            window.__jsdom_result = {{
+                newPage: aggPage['section-binary:Rule Name'],
+                fetchCalled: window.__fetchCalled
+            }};
+        ''')
+        self.assertEqual(result['newPage'], 2)
+        self.assertFalse(result['fetchCalled'])
+
+
+class TestAggregationPageSizeSelector(unittest.TestCase):
+    """The "Items per page" selector (AGG_PAGE_SIZE/AGG_PAGE_SIZE_OPTIONS) -
+    applies to every Aggregation Table in the currently-open section at
+    once, persisted via localStorage the same way theme/collapse-state
+    preferences already are."""
+
+    def test_selector_renders_with_current_size_selected(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            var html = _wrapAggPanel('<div class="agg-grid"></div>');
+            var div = document.createElement('div');
+            div.innerHTML = html;
+            var select = div.querySelector('#aggPageSizeSelect');
+            window.__jsdom_result = {
+                hasSelector: !!select,
+                selectedValue: select.value,
+                options: Array.from(select.querySelectorAll('option')).map(function(o) { return o.value; })
+            };
+        ''')
+        self.assertTrue(result['hasSelector'])
+        self.assertEqual(result['selectedValue'], '10', 'must default to CONFIG.AGGREGATION_TOP_N with nothing stored yet')
+        self.assertEqual(result['options'], ['10', '25', '50', '100'])
+
+    def test_change_agg_page_size_updates_state_persists_and_rebuilds(self):
+        """AGG_PAGE_SIZE is `var` (not `let`) specifically so a jsdom test's
+        own separate window.eval() call - see tests/jsdom_helper.py - can
+        read/write it directly, matching every other piece of mutable
+        top-level state in this file (hiddenAggregations, aggPage,
+        currentMd5, ...)."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            aggPage = { 'section-alert:Source IP': 3 };
+            aggFullCountsCache = { 'section-alert': { 'x': 1 } };
+            aggTotalsCache = { 'section-alert': { 'x': 1 } };
+            window.__rebuildCalled = false;
+            window.rebuildVisibleAggregations = async function() { window.__rebuildCalled = true; };
+            await changeAggPageSize('50');
+            window.__jsdom_result = {
+                newSize: AGG_PAGE_SIZE,
+                stored: localStorage.getItem('socrates_aggPageSize'),
+                rebuildCalled: window.__rebuildCalled,
+                pageReset: Object.keys(aggPage).length === 0,
+                fullCountsReset: Object.keys(aggFullCountsCache).length === 0,
+                totalsReset: Object.keys(aggTotalsCache).length === 0
+            };
+        ''')
+        self.assertEqual(result['newSize'], 50)
+        self.assertEqual(result['stored'], '50')
+        self.assertTrue(result['rebuildCalled'])
+        self.assertTrue(result['pageReset'], 'changing page size must reset every table back to page 1')
+        self.assertTrue(result['fullCountsReset'])
+        self.assertTrue(result['totalsReset'])
+
+    def test_change_agg_page_size_rejects_values_outside_the_allowed_set(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            window.rebuildVisibleAggregations = async function() {};
+            await changeAggPageSize('9999');
+            window.__jsdom_result = { size: AGG_PAGE_SIZE };
+        ''')
+        self.assertEqual(result['size'], 10, 'an out-of-range value must fall back to CONFIG.AGGREGATION_TOP_N, not be accepted as-is')
+
+    def test_fetch_aggregation_data_always_sends_current_page_size(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            AGG_PAGE_SIZE = 25;
+            currentMd5 = 'abc123';
+            var calls = [];
+            window.fetch = function(url) { calls.push(url); return Promise.resolve({ json: () => Promise.resolve({}) }); };
+            await fetchAggregationData('alert');
+            window.__jsdom_result = { calls: calls };
+        ''')
+        agg_calls = [u for u in result['calls'] if '/api/aggregation-data' in u]
+        self.assertEqual(len(agg_calls), 1)
+        self.assertIn('page_size=25', agg_calls[0])
+
+    def test_toggle_aggregations_still_works_after_the_rebuildVisibleAggregations_refactor(self):
+        """toggleAggregations() was refactored to delegate its actual
+        section/eventType routing to rebuildVisibleAggregations() (shared
+        with changeAggPageSize) - this locks in that opening the panel in
+        binary analysis mode (no tab sections) still reaches
+        buildBinaryAggregations, the one path with no sectionId to key off
+        of."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.body.innerHTML = '<div id="aggregations"></div>';
+            advancedMode = false;
+            allEvents = [];
+            currentFilters = {};
+            window.__called = false;
+            window.buildBinaryAggregations = function() { window.__called = true; };
+            await toggleAggregations();
+            window.__jsdom_result = { called: window.__called, advancedModeNow: advancedMode };
+        ''')
+        self.assertTrue(result['called'])
+        self.assertTrue(result['advancedModeNow'])
+
+
+class TestAggregationKeyboardNav(unittest.TestCase):
+    """Left/Right between aggregation tables, and Down/Up walking into each
+    table's own Prev/Next pagination stop - see aggTableAndPaginationItems/
+    navigateAggTables/navigateAggPaginationButtons. Mirrors
+    activeColumnStatCards' own "Down/Up stays within the current
+    column/table, Left/Right switches which one" split, and
+    filterBarRowAnchor's "collapse a row of buttons to one stop, Left/Right
+    cycles within it" idiom - both already established elsewhere in this
+    file, not new patterns invented for this feature."""
+
+    def _agg_table_html(self, col, n, with_pagination=False, page=1, total_pages=1):
+        rows = ''.join(
+            f'<tr class="agg-row" data-agg-pivot="x"><td>{n - i}</td><td class="agg-cell">v{i}</td></tr>'
+            for i in range(n)
+        )
+        pagination = ''
+        if with_pagination:
+            prev_disabled = 'disabled' if page <= 1 else ''
+            next_disabled = 'disabled' if page >= total_pages else ''
+            pagination = (
+                '<div class="agg-pagination">'
+                f'<button type="button" class="agg-page-btn" {prev_disabled}>Prev</button>'
+                f'<span class="agg-page-info">Page {page} of {total_pages}</span>'
+                f'<button type="button" class="agg-page-btn" {next_disabled}>Next</button>'
+                '</div>'
+            )
+        return (
+            f'<div class="section agg-section" data-col="{col}"><div class="section-content"><div class="agg-table">'
+            f'<div class="agg-header"><span>{col}</span></div>'
+            f'<table><tbody>{rows}</tbody></table>{pagination}'
+            '</div></div></div>'
+        )
+
+    def _bootstrap_js(self, inner_html, table_rows=None):
+        """Exits the welcome screen (isWelcomeScreen() gates navigateVertical
+        onto a completely different code path otherwise) and stubs
+        offsetParent for everything under #aggregations - jsdom has no real
+        layout engine, so offsetParent is always null there, and
+        getVerticalNavItems()'s own visibility filter would otherwise
+        silently drop every injected row/button. Mirrors
+        _bootstrap_multi_row_stat_grid_js's established technique for the
+        exact same jsdom gap.
+
+        Also stubs offsetTop per table (aggTableRowGroups() groups by it,
+        jsdom has no real layout engine to compute it either) -
+        `table_rows` is an optional list of 0-based row-membership indices
+        parallel to the tables in inner_html's DOM order (tables sharing an
+        index simulate sitting in the same visual flex-wrap row); defaults
+        to each table in its own row (index == DOM position), the natural
+        default for tests that only care about "Down moves from table A to
+        table B" without exercising same-row-skip specifics."""
+        row_idx = json.dumps(table_rows) if table_rows is not None else 'null'
+        return f'''
+            document.getElementById('inputBoxes').style.display = 'none';
+            document.getElementById('aggregations').innerHTML = '<div class="agg-grid">{inner_html}</div>';
+            Array.from(document.querySelectorAll('#aggregations *')).forEach(function(el) {{
+                Object.defineProperty(el, 'offsetParent', {{ get: function() {{ return document.body; }}, configurable: true }});
+            }});
+            var __rowIdx = {row_idx};
+            Array.from(document.querySelectorAll('#aggregations .agg-section')).forEach(function(t, i) {{
+                var top = (__rowIdx ? __rowIdx[i] : i) * 100;
+                Object.defineProperty(t, 'offsetTop', {{ get: function() {{ return top; }}, configurable: true }});
+            }});
+        '''
+
+    def test_down_walks_one_tables_rows_then_next_row_of_tables(self):
+        """Each table defaults to its own row here (see _bootstrap_js) - the
+        simple two-tables-stacked-vertically case, standing in for a real
+        multi-row agg-grid where the two tables just happen to also be
+        side-by-side-in-DOM-order siblings. See
+        test_down_skips_a_same_row_sibling_table for the case that
+        distinguishes "next table in DOM order" from "next visual row" -
+        the real bug report this was built to fix."""
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('Source IP', 2) + self._agg_table_html('Dest Port', 1)
+        result = js_statements(self._bootstrap_js(html) + '''
+            var trace = [];
+            for (var i = 0; i < 3; i++) {
+                navigateVertical(1);
+                var sel = document.querySelector('.keyboard-selected');
+                trace.push(sel.closest('.agg-section').getAttribute('data-col') + ':' + sel.textContent.trim());
+            }
+            window.__jsdom_result = { trace: trace };
+        ''')
+        self.assertEqual(result['trace'], ['Source IP:2v0', 'Source IP:1v1', 'Dest Port:1v0'])
+
+    def test_down_skips_a_same_row_sibling_table(self):
+        """REGRESSION (real bug report): with Source IP and Dest Port side
+        by side in the SAME visual row, Down from Source IP's last row must
+        NOT land on Dest Port (a sibling in the same row, reachable via
+        Left/Right instead) - with nothing in a further row to bridge to,
+        it must fall straight through past the whole agg block, same as
+        test_table_with_no_pagination_has_no_extra_stop's own real Data
+        Table row for evidence the fall-through actually happened rather
+        than just wrapping back within the agg block itself."""
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('Source IP', 1) + self._agg_table_html('Dest Port', 1)
+        result = js_statements(self._bootstrap_js(html, table_rows=[0, 0]) + '''
+            var section = document.createElement('div');
+            section.className = 'section';
+            section.innerHTML = '<table><tbody><tr data-id="1"><td>data row</td></tr></tbody></table>';
+            document.getElementById('sections').appendChild(section);
+            Object.defineProperty(section.querySelector('tr'), 'offsetParent', { get: function() { return document.body; }, configurable: true });
+
+            navigateVertical(1); // Source IP's only row
+            navigateVertical(1); // must NOT be Dest Port
+            var sel = document.querySelector('.keyboard-selected');
+            window.__jsdom_result = {
+                landedOnDestPort: sel.closest('.agg-section') ? sel.closest('.agg-section').getAttribute('data-col') === 'Dest Port' : false,
+                landedOnDataRow: sel.hasAttribute('data-id')
+            };
+        ''')
+        self.assertFalse(result['landedOnDestPort'], 'Dest Port is a same-row sibling - Left/Right reaches it, not Down')
+        self.assertTrue(result['landedOnDataRow'], 'must fall through to the Data Table, not wrap back within the agg block')
+
+    def test_down_skips_same_row_siblings_to_reach_the_next_row(self):
+        """A and B share row 0, C alone is row 1 - Down from A's last row
+        must skip B entirely and land on C."""
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('A', 1) + self._agg_table_html('B', 1) + self._agg_table_html('C', 1)
+        result = js_statements(self._bootstrap_js(html, table_rows=[0, 0, 1]) + '''
+            navigateVertical(1); // A
+            navigateVertical(1); // must be C, not B
+            window.__jsdom_result = {
+                table: document.querySelector('.keyboard-selected').closest('.agg-section').getAttribute('data-col')
+            };
+        ''')
+        self.assertEqual(result['table'], 'C')
+
+    def test_up_from_a_row_returns_to_the_previous_rows_last_table(self):
+        """Symmetric to the Down case - Up from C's first row (row 1) must
+        land on B (row 0's LAST table in DOM order), not A."""
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('A', 1) + self._agg_table_html('B', 1) + self._agg_table_html('C', 1)
+        result = js_statements(self._bootstrap_js(html, table_rows=[0, 0, 1]) + '''
+            navigateVertical(1); // A
+            navigateVertical(1); // C (skips B going down)
+            navigateVertical(-1); // Up from C - must land on B, row 0's last table
+            window.__jsdom_result = {
+                table: document.querySelector('.keyboard-selected').closest('.agg-section').getAttribute('data-col')
+            };
+        ''')
+        self.assertEqual(result['table'], 'B')
+
+    def test_up_from_the_data_table_reaches_the_last_agg_row_regardless_of_row_count(self):
+        """REGRESSION (real bug report): with 3+ rows of agg tables, Up from
+        the Data Table used to always re-enter the agg block at row 0
+        (aggTableAndPaginationItems' fallback for "verticalNavSelection
+        isn't inside the agg block at all" defaulted to the first row
+        unconditionally) - it must instead land on the LAST row when
+        arriving from the Data Table (Up), vs. the first row when arriving
+        from above (Down, from a toggle bar/filter chip/stat card, or
+        nothing selected yet) - see aggTableAndPaginationItems' own
+        comment on telling the two cases apart."""
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('A', 1) + self._agg_table_html('B', 1) + self._agg_table_html('C', 1)
+        result = js_statements(self._bootstrap_js(html, table_rows=[0, 1, 2]) + '''
+            var section = document.createElement('div');
+            section.className = 'section';
+            section.innerHTML = '<table><tbody><tr data-id="1"><td>data row</td></tr></tbody></table>';
+            document.getElementById('sections').appendChild(section);
+            Object.defineProperty(section.querySelector('tr'), 'offsetParent', { get: function() { return document.body; }, configurable: true });
+
+            var downTrace = [];
+            for (var i = 0; i < 4; i++) {
+                navigateVertical(1);
+                var sel = document.querySelector('.keyboard-selected');
+                downTrace.push(sel.hasAttribute('data-id') ? 'DATA_TABLE' : sel.closest('.agg-section').getAttribute('data-col'));
+            }
+            navigateVertical(-1); // Up from the Data Table
+            var afterUp = document.querySelector('.keyboard-selected');
+            window.__jsdom_result = {
+                downTrace: downTrace,
+                afterUpTable: afterUp.closest('.agg-section') ? afterUp.closest('.agg-section').getAttribute('data-col') : null
+            };
+        ''')
+        self.assertEqual(result['downTrace'], ['A', 'B', 'C', 'DATA_TABLE'], 'sanity check - Down must reach the Data Table via all 3 rows first')
+        self.assertEqual(result['afterUpTable'], 'C', 'Up from the Data Table must land on the LAST row (C), not skip back to row 0 (A)')
+
+    def test_left_right_jumps_directly_to_another_table(self):
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('Source IP', 2) + self._agg_table_html('Dest Port', 2)
+        result = js_statements(self._bootstrap_js(html) + '''
+            navigateVertical(1); // land on Source IP's first row
+            var before = document.querySelector('.keyboard-selected').closest('.agg-section').getAttribute('data-col');
+            var moved = navigateAggTables(1);
+            var sel = document.querySelector('.keyboard-selected');
+            window.__jsdom_result = {
+                before: before,
+                moved: moved,
+                afterTable: sel.closest('.agg-section').getAttribute('data-col'),
+                landedOnFirstRow: sel.classList.contains('agg-row')
+            };
+        ''')
+        self.assertEqual(result['before'], 'Source IP')
+        self.assertTrue(result['moved'])
+        self.assertEqual(result['afterTable'], 'Dest Port', 'Right must jump straight to the next table, not step through every row')
+        self.assertTrue(result['landedOnFirstRow'])
+
+    def test_navigate_agg_tables_wraps_around(self):
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('Source IP', 1) + self._agg_table_html('Dest Port', 1)
+        result = js_statements(self._bootstrap_js(html) + '''
+            navigateVertical(1);
+            navigateAggTables(1); // -> Dest Port
+            navigateAggTables(1); // -> wraps back to Source IP
+            window.__jsdom_result = {
+                table: document.querySelector('.keyboard-selected').closest('.agg-section').getAttribute('data-col')
+            };
+        ''')
+        self.assertEqual(result['table'], 'Source IP')
+
+    def test_navigate_agg_tables_no_op_outside_the_agg_area(self):
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            document.getElementById('inputBoxes').style.display = 'none';
+            window.__jsdom_result = { moved: navigateAggTables(1) };
+        ''')
+        self.assertFalse(result['moved'])
+
+    def test_down_from_last_row_enters_the_pagination_stop(self):
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('Source IP', 2, with_pagination=True, page=1, total_pages=3)
+        result = js_statements(self._bootstrap_js(html) + '''
+            var sel;
+            for (var i = 0; i < 3; i++) {
+                navigateVertical(1);
+                sel = document.querySelector('.keyboard-selected');
+            }
+            window.__jsdom_result = {
+                isPageBtn: sel.classList.contains('agg-page-btn'),
+                text: sel.textContent.trim()
+            };
+        ''')
+        self.assertTrue(result['isPageBtn'], 'the 3rd Down (past both rows) must land on the pagination stop')
+        self.assertIn('Next', result['text'], 'must default to the non-disabled button - Prev is disabled on page 1')
+
+    def test_table_with_no_pagination_has_no_extra_stop(self):
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('Source IP', 2)  # no with_pagination
+        result = js_statements(self._bootstrap_js(html) + '''
+            // A real Data Table row so the 3rd Down has somewhere else to
+            // land - with nothing else present, it would just wrap back to
+            // this same table's first row, which is equally consistent
+            // with "no phantom pagination stop" but wouldn't prove it.
+            var section = document.createElement('div');
+            section.className = 'section';
+            section.innerHTML = '<table><tbody><tr data-id="1"><td>data row</td></tr></tbody></table>';
+            document.getElementById('sections').appendChild(section);
+            Object.defineProperty(section.querySelector('tr'), 'offsetParent', { get: function() { return document.body; }, configurable: true });
+
+            navigateVertical(1);
+            navigateVertical(1);
+            navigateVertical(1); // 3rd Down - table only has 2 rows, no pagination
+            var sel = document.querySelector('.keyboard-selected');
+            window.__jsdom_result = {
+                landedOnAggRow: sel.classList.contains('agg-row'),
+                landedOnDataRow: sel.hasAttribute('data-id')
+            };
+        ''')
+        self.assertFalse(result['landedOnAggRow'], 'must have moved on past this table entirely, not stalled on a nonexistent pagination stop')
+        self.assertTrue(result['landedOnDataRow'], 'must have continued straight into the Data Table')
+
+    def test_left_right_toggles_prev_next_once_on_the_pagination_stop(self):
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('Source IP', 1, with_pagination=True, page=2, total_pages=3)
+        result = js_statements(self._bootstrap_js(html) + '''
+            navigateVertical(1); // row
+            navigateVertical(1); // pagination stop (defaults to Prev, page 2 has both enabled)
+            var before = document.querySelector('.keyboard-selected').textContent.trim();
+            var moved = navigateAggPaginationButtons(1);
+            var after = document.querySelector('.keyboard-selected').textContent.trim();
+            window.__jsdom_result = { before: before, moved: moved, after: after };
+        ''')
+        self.assertTrue(result['moved'])
+        self.assertNotEqual(result['before'], result['after'])
+
+    def test_navigate_agg_pagination_buttons_no_op_when_not_on_a_page_button(self):
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('Source IP', 2, with_pagination=True, page=1, total_pages=3)
+        result = js_statements(self._bootstrap_js(html) + '''
+            navigateVertical(1); // lands on a row, not the pagination stop
+            window.__jsdom_result = { moved: navigateAggPaginationButtons(1) };
+        ''')
+        self.assertFalse(result['moved'])
+
+    def test_enter_on_a_selected_page_button_activates_it(self):
+        """activateKeyboardSelection()'s generic verticalNavSelection.click()
+        fallback (used for toggle bars/data rows too - see its own comment)
+        needs no change for .agg-page-btn: it's a plain <button
+        onclick="changeAggPage(...)">, so the fallback already fires it."""
+        from tests.jsdom_helper import js_statements
+        html = self._agg_table_html('Source IP', 2, with_pagination=True, page=1, total_pages=3)
+        result = js_statements(self._bootstrap_js(html) + '''
+            navigateVertical(1);
+            navigateVertical(1); // pagination stop (Next, since Prev disabled)
+            var btn = document.querySelector('.keyboard-selected');
+            var clicked = false;
+            btn.addEventListener('click', function() { clicked = true; });
+            var handled = activateKeyboardSelection();
+            window.__jsdom_result = { handled: handled, clicked: clicked };
+        ''')
+        self.assertTrue(result['handled'])
+        self.assertTrue(result['clicked'])
+
+    def test_pressing_next_keeps_keyboard_focus_on_next_not_the_stat_card_grid(self):
+        """REGRESSION (real bug report): changeAggPage() replaces the whole
+        table via outerHTML, destroying the very button verticalNavSelection
+        points to when Prev/Next was pressed via Enter - without re-pointing
+        it at the replacement, isConnected goes false and the NEXT arrow
+        press self-heals onto the top of the whole flat nav list (the
+        stat-card grid) instead of staying on the button just pressed.
+
+        Uses the real _renderOneAggTableHtml (not this class's own
+        hand-rolled _agg_table_html helper) - this test needs the actual
+        onclick="changeAggPage(...)" attribute that function bakes in,
+        which _agg_table_html's fixture markup deliberately doesn't bother
+        with since every other test here only needs plain, inert buttons to
+        exercise pure navigation logic."""
+        from tests.jsdom_helper import js_statements
+        result = js_statements('''
+            // Lets a pending init microtask from script load settle first
+            // (see _bootstrap_multi_row_stat_grid_js's own identical first
+            // line) - without this, the real await inside changeAggPage
+            // below is the first tick that yields control back to the
+            // event loop, letting that still-pending init fire mid-test
+            // and wipe #aggregations's manually-injected content out from
+            // under this test instead.
+            await new Promise(function(r) { setTimeout(r, 100); });
+            document.getElementById('inputBoxes').style.display = 'none';
+            window.fetch = function() {
+                return Promise.resolve({ json: function() {
+                    return Promise.resolve({ 'Source IP': [{value: 'v0', count: 1}, {value: 'v1', count: 1}] });
+                } });
+            };
+            currentMd5 = 'abc123';
+            currentFilters = {};
+            aggTotalsCache['section-alert'] = { 'Source IP': 25 };
+            var tableHtml = _renderOneAggTableHtml('section-alert', 'Source IP', [['v0', 2], ['v1', 1]], 25, 1);
+            document.getElementById('aggregations').innerHTML = '<div class="agg-grid">' + tableHtml + '</div>';
+            Array.from(document.querySelectorAll('#aggregations *')).forEach(function(el) {
+                Object.defineProperty(el, 'offsetParent', { get: function() { return document.body; }, configurable: true });
+            });
+
+            navigateVertical(1); // row
+            navigateVertical(1); // row
+            navigateVertical(1); // pagination stop (Next, since Prev disabled on page 1)
+            var beforeText = document.querySelector('.keyboard-selected').textContent.trim();
+
+            // activateKeyboardSelection() itself is NOT async - its generic
+            // fallback fires .click(), which synchronously *starts*
+            // changeAggPage (an async function) without anything here
+            // awaiting its completion. A real Enter keypress doesn't block
+            // on it either, so this mirrors reality rather than being a
+            // test-only workaround.
+            activateKeyboardSelection(); // Enter -> clicks Next -> changeAggPage
+            await new Promise(function(r) { setTimeout(r, 20); });
+
+            var afterSel = document.querySelector('.keyboard-selected');
+            window.__jsdom_result = {
+                beforeText: beforeText,
+                stillOnPageBtn: afterSel ? afterSel.classList.contains('agg-page-btn') : false,
+                afterText: afterSel ? afterSel.textContent.trim() : null,
+                pageAdvanced: aggPage['section-alert:Source IP']
+            };
+        ''')
+        self.assertIn('Next', result['beforeText'])
+        self.assertEqual(result['pageAdvanced'], 2, 'sanity check that the page change actually happened')
+        self.assertTrue(result['stillOnPageBtn'], 'keyboard focus must stay on a Prev/Next button, not reset elsewhere')
+        self.assertIn('Next', result['afterText'], 'must stay on the same button just pressed')
 
 
 class TestCustomLookupSites(unittest.TestCase):
@@ -15810,6 +16477,9 @@ class TestAggregationServerFetch(unittest.TestCase):
                         'Category': [{value: 'Trojan', count: 2}]
                     }) });
                 }
+                if (url.indexOf('/api/aggregation-totals') >= 0) {
+                    return Promise.resolve({ json: () => Promise.resolve({ 'Category': 2 }) });
+                }
                 return Promise.resolve({ json: () => Promise.resolve([]) });
             };
             currentMd5 = 'abc123';
@@ -17452,6 +18122,9 @@ class TestAllTabServerSideSortAndAggregation(unittest.TestCase):
                         'Type': [{value: 'FLOW', count: 3}],
                         'Detail': [{value: 'sig1', count: 1}]
                     }) });
+                }
+                if (url.indexOf('/api/aggregation-totals') >= 0) {
+                    return Promise.resolve({ json: () => Promise.resolve({ 'Type': 3, 'Detail': 1 }) });
                 }
                 return Promise.resolve({ json: () => Promise.resolve([]) });
             };
