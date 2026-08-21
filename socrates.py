@@ -59,7 +59,7 @@ from ai_summary_lookup import get_ai_summary
 import config
 import tomllib
 
-VERSION = '4.0.0'
+VERSION = '4.1.0'
 GITHUB_RELEASES_API = 'https://api.github.com/repos/dougburks/so-crates/releases/latest'
 PORT = int(os.environ.get('PORT', 8000))
 BIND_ADDRESS = os.environ.get('BIND_ADDRESS', '127.0.0.1')
@@ -2304,8 +2304,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # Only on this one-off GET (loadAnalysis/openReanalyzeModal), not
         # the hot-polled POST /api/check-status - both share
         # _build_status_response, but this extra query has no business
-        # running every 2s during active processing.
-        response['hasRowNotes'] = has_row_notes(os.path.join(dir_path, 'events.db'))
+        # running every 2s during active processing. Also skipped
+        # whenever the analysis itself isn't ready yet (definitely no
+        # notes yet either) - has_row_notes() is now safe to call
+        # regardless (see its own comment), but there's still no reason
+        # to open a connection at all before there's anything to find.
+        if response['status'] == 'ready':
+            response['hasRowNotes'] = has_row_notes(os.path.join(dir_path, 'events.db'))
+        else:
+            response['hasRowNotes'] = False
         self._send_json(response)
 
     def handle_post_check_status(self):

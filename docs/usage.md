@@ -18,10 +18,10 @@ After analysis completes, the UI displays different views depending on the file 
 
 **For PCAP files:**
 
-- **Stats Grid** - clickable cards showing event counts by type (Alerts, DNS, HTTP, TLS, Flows, etc.). If you've enabled "Show protocol-anomaly noise alerts" (Gear Menu → Rules), those alerts get their own **Decoder Alerts** card instead of mixing into Network Alerts
+- **Stats Grid** - clickable cards showing event counts by type (Alerts, DNS, HTTP, TLS, Flows, etc.). If you've enabled "Show protocol-anomaly noise alerts" (Gear Menu → Rules), those alerts get their own **Decoder Alerts** card instead of mixing into Network Alerts. A **DNS Heuristics** card appears immediately before DNS whenever any domain in the capture trips a scoring flag; see [DNS Heuristics](#dns-heuristics) below
 - **Sankey Diagram** - expand the collapsible heading to visualize network flow relationships (Source IP → Dest IP → Dest Port)
 - **Aggregation Tables** - frequency counts for each column; click a value to open the [pivot menu](#pivot-menu)
-- **Data Table** - sortable table with expandable detail rows showing full event JSON, ASCII transcripts, and hexdumps
+- **Data Table** - sortable table with expandable detail rows showing full event JSON, ASCII transcripts, and hexdumps. Every row's flow carries a community ID, and a TLS row's detail panel includes JA3/JA3S/JA4 fingerprints whenever present - both computed by Suricata automatically, no configuration needed
 - **Search** - full-text search across all event data using SQLite FTS5 (falls back to `LIKE` if FTS5 is unavailable)
 - **Filtering** - filter via the pivot menu's Include/Exclude/Only actions on any table cell or aggregation value; filter chips show active filters; filters persist across all tabs and the Sankey diagram
 
@@ -37,6 +37,10 @@ After analysis completes, the UI displays different views depending on the file 
 - **File Info** - metadata extracted from the file
 - **YARA Matches** - any rules that matched, with tags and author attribution
 
+## DNS Heuristics
+
+When a capture contains DNS queries, a **DNS Heuristics** card appears on the Stats Grid immediately before the **DNS** card, but only once at least one domain in the capture trips a flag - it's simply absent otherwise. Opening it groups every DNS query by registrable domain and scores each one 0-100 against five independent signals: a high-entropy subdomain prefix under an otherwise ordinary parent domain (the classic DNS tunneling shape), a high-entropy/low-vowel-ratio registrable domain itself (the DGA - Domain Generation Algorithm - shape), 15 or more distinct subdomains queried under the same parent (fan-out, not just repeated lookups of the same name), an unusually long query name or label, and TXT/NULL query types, more associated with tunneling/exfil tooling than ordinary browsing. Known CDN domains are excluded before scoring to cut noise. A collapsible **About DNS Heuristics** info card at the top of the tab explains the scoring in place. Clicking a flagged domain's row searches for it and jumps straight to the real **DNS Queries** tab so you can see every individual query behind the score - unlike every other tab, a row here doesn't expand a detail panel in place. Treat a flag as a lead to investigate, not a confirmed verdict.
+
 ## Pivot Menu
 
 Clicking a value in a data table row, an expanded row's detail panel, or an aggregation table opens a pivot menu instead of immediately filtering or expanding the row:
@@ -45,6 +49,7 @@ Clicking a value in a data table row, an expanded row's detail panel, or an aggr
 - **Exclude** - narrow the current filter to hide this value
 - **Only** - start a new filter scoped to just this value, clearing every other filter
 - **Hunt** - a full-text search for this value across every field, replacing the whole search and clearing any active filters
+- **Correlate** - shown on any row whose flow has a community ID (computed for every PCAP analysis); searches for every other log across the whole capture sharing that same flow, protocol events and alerts alike. Not offered when the value you clicked is the community ID itself, since Hunt above already does the same search in that case
 - **Copy to Clipboard** - copy the value as-is
 - **Lookups** - one-click lookups against Google, VirusTotal, Shodan, AbuseIPDB, urlscan.io, and CyberChef, plus any custom lookup sites you've added in Settings
 - **Expand Row / Collapse Row** - expand or collapse the row's detail panel (the row's timestamp cell also does this directly on click, without opening the menu)

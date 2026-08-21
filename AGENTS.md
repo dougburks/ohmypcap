@@ -76,7 +76,7 @@ SO-CRATES supports themes via CSS custom properties. The full, current list (nam
 - **Don't define a variable in every theme block "for completeness" without a real consumer.** `--accent-rgb` and `--filter-bar-bg` were defined identically in all 23 theme blocks but never referenced via `var(--name)` anywhere in CSS/JS/HTML - removed as dead CSS (`test_dead_theme_vars_removed` locks this in). If you add a new per-theme variable, grep for `var(--your-name` before considering it done.
 - **`--bg-hover` and `--border-color` are deliberately separate variables.** `--bg-hover` is for hover-state background *fills* (table row hover, button hover); `--border-color` is for border/outline *decorations* (panel borders, header/footer dividers, input borders). Most themes set both to the same value since a muted color works fine for both roles, but don't assume they must match - CGA sets `--border-color` to a bright cyan (`#55ffff`, the real CGA light-cyan RGBI value) while keeping `--bg-hover` a much more muted teal (`#008080`), since a hover *fill* that bright would hurt text contrast but a 1px *border* reads fine at full brightness. `test_border_color_split_from_bg_hover` enforces that every theme defines both and that border declarations reference `var(--border-color)`, not `var(--bg-hover)`.
 - **A theme can override structural colors per-selector, not just per-variable, when a single shared variable can't express the look.** CGA's header/footer use `background: #55ffff` (bright light cyan) directly on `[data-theme="cga"] .app-header, [data-theme="cga"] .footer`, rather than repointing `--bg-secondary` (which every other panel/card also uses and would go bright cyan too), and override `--text-bright`/`--text-muted` scoped to the same selector for legibility against the new background. See `test_cga_header_footer_light_cyan`. **If you add an override like this, only reset the same variables on an element that is an actual DOM descendant of the overridden selector and that actually reads those variables** - CSS custom properties cascade strictly through DOM nesting, not visual/menu grouping, so a modal or panel that merely *opens from* the header (e.g. `#themesModal`, a top-level sibling in the DOM, not a child of `.app-header`) never inherits the override in the first place and needs no reset. A `#themesModal` reset rule existed here for exactly this non-reason - it silently duplicated the theme's own root values - and was removed once `test_cga_header_footer_light_cyan` was checked against the current markup and found to be a no-op.
-- **`--interactive-highlight` is an optional per-theme override for hover/focus/active border feedback.** Every hover/focus/active border rule (`.app-header-filename-input:focus`, `.stat-card:hover`, `.stat-card.tab-active`, `.pagination-page-input:focus`, `.settings-number-input:focus`, `.notes-textarea:focus`, `.settings-text-input:focus`, `.drop-zone-active`, `.view-tab.active`, `.search-input:focus`, `.sample-card:hover`, `.theme-tile:hover`, `.app-logo-text:focus-visible`, `.sample-card.keyboard-selected`, `.previous-analysis-row.keyboard-selected`, `tr[data-id].keyboard-selected`, `.theme-tile.keyboard-selected`, `.section-toggle-bar.keyboard-selected`, `.agg-row[data-agg-pivot].keyboard-selected`, `.pivot-menu-item.keyboard-selected`, `.filter-chip.keyboard-selected`, `.filter-clear-all.keyboard-selected`, `.stream-btn.keyboard-selected`, `.view-tab.keyboard-selected`, `.row-note-edit-link.keyboard-selected`, `.packet-header.keyboard-selected`, `.packet-control-btn.keyboard-selected`, `.detail-value-pivot.keyboard-selected`, `.autocomplete-item.keyboard-selected`) reads `var(--interactive-highlight, var(--accent))` - a CSS fallback, so themes that don't define `--interactive-highlight` get exactly the old behavior (`--accent`) with zero risk. A theme needs this when its `--accent` is intentionally identical to `--border-color`/`--text-primary` (a deliberate flat, monochrome look) - without a separate highlight color, hovering/focusing would produce no visible change at all. Breadbin Blue (the original case, formerly named C64), Luna Blue, and DOS Blue all define this for exactly that reason, each to a distinct color from their own palette rather than a jarring color swap. If you add a new theme where `--accent` intentionally matches `--border-color`, check whether it needs `--interactive-highlight` too.
+- **`--interactive-highlight` is an optional per-theme override for hover/focus/active border feedback.** Every hover/focus/active border rule (`.app-header-filename-input:focus`, `.stat-card:hover`, `.stat-card.tab-active`, `.pagination-page-input:focus`, `.settings-number-input:focus`, `.notes-textarea:focus`, `.settings-text-input:focus`, `.drop-zone-active`, `.view-tab.active`, `.search-input:focus`, `.sample-card:hover`, `.theme-tile:hover`, `.app-logo-text:focus-visible`, `.stat-card.keyboard-selected`, `.sample-card.keyboard-selected`, `.previous-analysis-row.keyboard-selected`, `tr[data-id].keyboard-selected`, `.theme-tile.keyboard-selected`, `.section-toggle-bar.keyboard-selected`, `.agg-row[data-agg-pivot].keyboard-selected`, `.pivot-menu-item.keyboard-selected`, `.filter-chip.keyboard-selected`, `.filter-clear-all.keyboard-selected`, `.stream-btn.keyboard-selected`, `.view-tab.keyboard-selected`, `.row-note-edit-link.keyboard-selected`, `.packet-header.keyboard-selected`, `.packet-control-btn.keyboard-selected`, `.detail-value-pivot.keyboard-selected`, `.autocomplete-item.keyboard-selected`) reads `var(--interactive-highlight, var(--accent))` - a CSS fallback, so themes that don't define `--interactive-highlight` get exactly the old behavior (`--accent`) with zero risk. A theme needs this when its `--accent` is intentionally identical to `--border-color`/`--text-primary` (a deliberate flat, monochrome look) - without a separate highlight color, hovering/focusing would produce no visible change at all. Breadbin Blue (the original case, formerly named C64), Luna Blue, and DOS Blue all define this for exactly that reason, each to a distinct color from their own palette rather than a jarring color swap. If you add a new theme where `--accent` intentionally matches `--border-color`, check whether it needs `--interactive-highlight` too.
 - **Use `currentColor`** for inline SVG icons so they inherit the surrounding text color and adapt automatically.
 - **Avoid emojis** for UI icons when possible - use inline SVGs instead, since emojis render as full-color system glyphs that ignore CSS `color` and may be invisible in one theme.
 
@@ -137,60 +137,103 @@ Preview changes locally before pushing: `pip install -r requirements-docs.txt &&
 
 Before cutting a release:
 
-1. **Regenerate screenshots.** Start the server (`python3 socrates.py`), then run
-   `pip install -r requirements-screenshots.txt && python3 scripts/capture_screenshots.py`.
-   This refreshes all 7 `docs/images/so-crates-*.png` (Home page) and all 35
+1. Update `docs/release-notes.md` (the single source of truth - `README.md`
+   links directly to it, there's no separate root-level stub) and bump the
+   version in `socrates.py`'s `VERSION` constant / `docs/api.md`'s
+   `/api/version` example if it changed. Do this *before* building the
+   container in the next step - `VERSION` is baked into the image at build
+   time, so bumping it after would leave the built image (and every
+   screenshot/video captured from it) reporting the old version.
+2. **Build the container image and use it for screenshot/video generation.**
+   From the repo root, prefer `podman build -t so-crates:local -f Dockerfile .`
+   when `podman` is on PATH; fall back to the equivalent `docker build -t
+   so-crates:local -f Dockerfile .` otherwise. Run it (`podman run -d --rm
+   -p <port>:8000 so-crates:local`) - `/data` is a Dockerfile `VOLUME` with
+   no bind-mount given, so podman/docker creates a fresh anonymous volume
+   for it automatically, giving a genuinely clean installation (no
+   Previous Analyses clutter) with none of local dev's gaps: real baked-in
+   Suricata/YARA/Sigma rules and, critically, real Playbook/AI Summary
+   content (`PLAYBOOKS_DIR`/`AI_SUMMARIES_DIR` are baked into the image
+   from the `resources-builder` stage - a bare local checkout has neither,
+   which silently skips the Playbook screenshot below with a warning
+   instead of capturing it). Confirm it started cleanly (`podman logs
+   <container>`, look for "Baked-in rules copied successfully") and that
+   `GET /api/version` reports the version you just bumped to, before using
+   it for the next two steps.
+3. **Regenerate the demo video first** - before screenshots, not after (see
+   why at the end of this step). Run `python3 -m playwright install ffmpeg`
+   (one-time; Playwright's video muxing needs its own bundled ffmpeg,
+   separate from any system ffmpeg) then `python3 scripts/record_demo.py
+   --base-url http://127.0.0.1:<port>/socrates.html` against the container
+   from step 2. This re-records the workflow end-to-end (sample pcap → each
+   data type → All Events → Aggregation Tables filtering → drill-down →
+   ASCII Transcript → Hexdump) and publishes `docs/videos/demo.mp4` (silent,
+   H.264 video only - Playwright's page recording has no audio source, so
+   there is no audio track to re-encode) and `docs/videos/demo-poster.jpg`
+   (a still frame grabbed from the same raw capture, used as the `<video
+   poster>` so the embed doesn't show a blank white square before
+   playback), both re-encoded/extracted via a system `ffmpeg` binary from
+   Playwright's raw WebM capture - MP4 is used rather than WebM since it's
+   universally browser-supported and is also the format required to upload
+   the same clip directly to X/Instagram/LinkedIn/Facebook. `demo.mp4`'s
+   encode trims a fraction of a second (`MP4_TRIM_START_SECONDS`) off the
+   very start, since Playwright's raw recording's first frame can be
+   captured before the page has fully painted into the configured viewport -
+   left untrimmed, that showed up as the thumbnail X/LinkedIn/etc.
+   auto-extract when someone uploads `demo.mp4` directly (small upper-left
+   region of real content against an otherwise flat grey frame). The video
+   is embedded on the Home page just above Screenshots. If `ffmpeg` isn't on
+   PATH, it falls back to publishing the raw `docs/videos/demo.webm` instead
+   with a warning - see the script's module docstring. Re-run whenever the
+   recorded workflow's on-screen text/labels change (e.g. a renamed button
+   or tab) even if nothing else about the release does - the captions are
+   hardcoded to match specific UI strings and will look wrong (or the script
+   will fail to find an element) if those drift.
+
+   **Must run before `capture_screenshots.py`, on a container/volume
+   neither script has touched yet - confirmed by hitting this for real, not
+   theoretical.** `record_demo.py`'s captions are keyed to exact strings
+   from the sample's own analysis (e.g. a specific aggregation-row value);
+   running `capture_screenshots.py` against the same container first (its
+   own "Sample pcap file" click triggers the identical analysis) left that
+   value's own locator un-findable within `record_demo.py`'s wait window
+   once run second - `Locator.scroll_into_view_if_needed: Timeout 30000ms
+   exceeded` on an `.agg-row` lookup, even though the exact same analysis
+   completed successfully and the value genuinely was in the data. The
+   reverse order (video against an untouched container, then screenshots
+   after) worked without issue. If you must re-run either script a second
+   time for any reason, remove and recreate the container first rather than
+   reusing one either script has already driven a real analysis against.
+4. **Regenerate screenshots.** Run `pip install -r requirements-screenshots.txt
+   && python3 scripts/capture_screenshots.py --base-url
+   http://127.0.0.1:<port>/socrates.html` against the same container, now
+   that step 3's video is done with it. This refreshes all 7
+   `docs/images/so-crates-*.png` (Home page) and all 35
    `docs/images/themes/*.png` (Themes page) against the app's own default
    sample pcap (`DEFAULT_SAMPLE_URL` in `static/socrates.js` - a one-click
-   convenience link to an external pcap on malware-traffic-analysis.net,
-   not something bundled with the app) - no local
-   fixture or hardcoded MD5 needed, works on a clean checkout with an empty
-   `DATA_DIR`. Run this on every release, not just when the UI visibly
-   changes - stale screenshots (e.g. showing an old default value in the
-   Welcome modal) are easy to miss otherwise. If a new theme was added since
-   the last release, make sure it was also added to the separate hardcoded
+   convenience link to an external pcap on malware-traffic-analysis.net, not
+   something bundled with the app) - no local fixture or hardcoded MD5
+   needed. Run this on every release, not just when the UI visibly changes -
+   stale screenshots (e.g. showing an old default value in the Welcome
+   modal) are easy to miss otherwise. If a new theme was added since the
+   last release, make sure it was also added to the separate hardcoded
    `THEMES` list in `scripts/capture_screenshots.py` (see step 5 under "To
    add a new theme" above) - it is not derived from the registry, so a
    theme missing from it silently produces no screenshot rather than an
-   error.
-2. **Regenerate the demo video.** With the server still running, run
-   `python3 -m playwright install ffmpeg` (one-time; Playwright's video
-   muxing needs its own bundled ffmpeg, separate from any system ffmpeg)
-   then `python3 scripts/record_demo.py`. This re-records the workflow
-   end-to-end (sample pcap → each data type → All Events → Aggregation
-   Tables filtering → drill-down → ASCII Transcript → Hexdump) and
-   publishes `docs/videos/demo.mp4` (silent, H.264 video only - Playwright's
-   page recording has no audio source, so there is no audio track to
-   re-encode) and `docs/videos/demo-poster.jpg` (a still frame grabbed from
-   the same raw capture, used as the `<video poster>` so the embed doesn't
-   show a blank white square before playback), both re-encoded/extracted via
-   a system `ffmpeg` binary from Playwright's raw WebM capture - MP4 is used
-   rather than WebM since it's universally browser-supported and is also the
-   format required to upload the same clip directly to
-   X/Instagram/LinkedIn/Facebook. `demo.mp4`'s encode trims a fraction of a
-   second (`MP4_TRIM_START_SECONDS`) off the very start, since Playwright's
-   raw recording's first frame can be captured before the page has fully
-   painted into the configured viewport - left untrimmed, that showed up
-   as the thumbnail X/LinkedIn/etc. auto-extract when someone uploads
-   `demo.mp4` directly (small upper-left region of real content against an
-   otherwise flat grey frame). The video is embedded on the Home page
-   just above Screenshots. If `ffmpeg` isn't on PATH, it falls back to
-   publishing the raw `docs/videos/demo.webm` instead with a warning - see
-   the script's module docstring. Re-run whenever the recorded workflow's
-   on-screen
-   text/labels change (e.g. a renamed button or tab) even if nothing else
-   about the release does - the captions are hardcoded to match specific
-   UI strings and will look wrong (or the script will fail to find an
-   element) if those drift.
-3. **Review the diff** of the regenerated PNGs (`git diff --stat docs/images/`)
+   error. This is also the run that captures `so-crates-playbook.png` -
+   local dev has neither `PLAYBOOKS_DIR` nor `AI_SUMMARIES_DIR` baked in, so
+   it silently skips that one screenshot with a warning instead of
+   capturing it; the container has both, so confirm the script's own output
+   says "captured playbook", not a "no playbook available" warning.
+
+   Stop and remove this container (`podman rm -f <container>`) once both
+   captures succeed - it's served its purpose; step 9 builds and
+   smoke-tests a fresh one at the very end as the final pre-push gate.
+5. **Review the diff** of the regenerated PNGs (`git diff --stat docs/images/`)
    before committing - a near-identical diff for every file usually means
    nothing meaningful changed; a few files changing more than the rest is
    worth a manual look to confirm it's an intended UI change, not a bug.
-4. Update `docs/release-notes.md` (the single source of truth - `README.md`
-   links directly to it, there's no separate root-level stub) and bump the
-   version shown in the app footer / `docs/api.md`'s `/api/version` example
-   if it changed.
-5. **Go through each page of the docs - including `AGENTS.md` and
+6. **Go through each page of the docs - including `AGENTS.md` and
    `README.md`, not just the MkDocs site under `docs/*.md` - and make sure
    it is accurate.** Don't just proofread - verify claims (endpoint shapes,
    config defaults, file layouts, dependency lists, test counts) directly
@@ -201,22 +244,6 @@ Before cutting a release:
    them, and even a hardcoded *count* standing in for a full list (event
    types, columns, tests) goes stale the same way a full list would - see
    `docs/filtering.md`'s "Per-type columns are not enumerated here" note.
-6. **Build the container image.** From the repo root, prefer `podman build
-   -t so-crates:local -f Dockerfile .` when `podman` is on PATH; fall back
-   to the equivalent `docker build -t so-crates:local -f Dockerfile .`
-   otherwise. This is the only checklist step that actually exercises the
-   full multi-stage Dockerfile end-to-end (the Zircolite venv build, the
-   `resources-builder` stage's Playbooks/AI Summaries bake, the Suricata
-   rule bake loop, final image assembly) - local dev's env-var overrides
-   (`PLAYBOOKS_DIR`, `AI_SUMMARIES_DIR`, `DATA_DIR`, etc.) never touch this
-   path, so a broken `COPY` line or bake step can go unnoticed until here
-   (a missing `ai_summary_lookup.py` in the final stage's `COPY` line once
-   slipped through exactly this way, caught only by a Dockerfile-parsing
-   test, not by local testing). A clean build alone isn't proof it works -
-   smoke-test it: `podman run -d --rm -p 18000:8000 so-crates:local`,
-   confirm it starts without crashing (`podman logs <container>`), and hit
-   `/socrates.html` plus any endpoint tied to this release's changes before
-   stopping it.
    **A claim about UI structure or behavior - which element renders what,
    what order things appear in, what runs in response to what - is not
    verified by confirming the data it's built from still exists.** Checking
@@ -242,14 +269,14 @@ Before cutting a release:
    latest section for the list), explicitly confirm `docs/usage.md`
    describes it - not just that everything already in `docs/usage.md` is
    still true.
-6. **Review all source and docs** for spelling errors, grammar issues, logic
+7. **Review all source and docs** for spelling errors, grammar issues, logic
    issues, security issues, orphaned code, and code that needs refactoring.
    Cover the whole tree, not just what changed since the last release -
    issues introduced several releases back are just as worth catching. Fix
    what's clearly correct to fix; for anything that implies a design
    decision (e.g. removing a function with no caller vs. wiring it up),
    flag it and confirm before acting rather than guessing.
-7. Run the full test suite (`python3 -m unittest discover -v`) and
+8. Run the full test suite (`python3 -m unittest discover -v`) and
    `mkdocs build --strict` before pushing. `tests/jsdom_helper.py` sets
    `JSDOM_TEST_ORIGIN` (`http://localhost:19999`) as the JSDOM page origin -
    deliberately not the app's real dev-server port (8000), so a manually-running
@@ -265,9 +292,15 @@ Before cutting a release:
    `TestRenameAnalysis` was the class most likely to trip on it back when
    this pointed at port 8000. If a full run ever reports a handful of
    failures you can't otherwise explain, check for a listener on
-   `JSDOM_TEST_ORIGIN`'s port before assuming a real regression.
-8. **Build the container image locally and smoke-test it** (`podman build -t
-   socrates-buildtest .` or the `docker` equivalent). The test suite's
+   `JSDOM_TEST_ORIGIN`'s port before assuming a real regression. This run
+   can legitimately take 10+ minutes for the full suite (2000+ tests across
+   every `tests/test_*.py` module) - give it a generous timeout rather than
+   killing it early and mistaking a still-running suite for a hang.
+9. **Build the container image locally and smoke-test it, one more time.**
+   Same command as step 2, but this is a distinct pass, not a rerun of
+   that one - it validates the *final* code state (post docs/source-review
+   fixes from steps 6-8), and its purpose is different: catching a build
+   that fails to execute, not generating assets. The test suite's
    Dockerfile checks are all static string/regex matching against its text -
    they cannot catch a build that actually fails to execute, and this is not
    hypothetical: two separate real CI failures (a missing `ca-certificates`
@@ -281,15 +314,15 @@ Before cutting a release:
    when the Dockerfile changed. After a successful build, run it
    (`podman run -d -p <port>:8000 <tag>`) and confirm: the container starts
    and logs "Baked-in rules copied successfully", `GET /api/version`
-   responds, `GET /api/rules-info` shows the expected baked-in Suricata
-   source count, and `/usr/share/playbooks/` has both `.json.gz` indexes
-   (`podman exec <container> ls /usr/share/playbooks/
+   responds with the version you bumped to, `GET /api/rules-info` shows the
+   expected baked-in Suricata source count, and `/usr/share/playbooks/` has
+   both `.json.gz` indexes (`podman exec <container> ls /usr/share/playbooks/
    /usr/share/suricata/rules-available/`). Clean up the test container and
    image afterward (`podman rm -f`/`podman rmi`) rather than leaving it
    alongside the deployment's real image.
-9. **Remove any stray `tmp*` directories or files** left in the project root
-   (e.g. `tmp-********` dirs, `tmp*.js` files) - both patterns are already
-   gitignored, so they won't show up in `git status`, but they're debris
-   from interrupted test runs or agent sandboxes (see `tests/jsdom_helper.py`'s
-   `run_jsdom()`, which writes then unlinks a temp `.js` file per JS test)
-   and are easy to miss with `find . -maxdepth 1 -iname 'tmp*'`.
+10. **Remove any stray `tmp*` directories or files** left in the project root
+    (e.g. `tmp-********` dirs, `tmp*.js` files) - both patterns are already
+    gitignored, so they won't show up in `git status`, but they're debris
+    from interrupted test runs or agent sandboxes (see `tests/jsdom_helper.py`'s
+    `run_jsdom()`, which writes then unlinks a temp `.js` file per JS test)
+    and are easy to miss with `find . -maxdepth 1 -iname 'tmp*'`.

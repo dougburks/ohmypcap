@@ -1335,6 +1335,15 @@
         .stat-card { background: var(--bg-secondary); padding: 20px; border-radius: 10px; border: 1px solid var(--border-color); text-align: center; cursor: pointer; container-type: inline-size; position: relative; }
         .stat-card:hover { border-color: var(--interactive-highlight, var(--accent)); }
         .stat-card.tab-active { border-color: var(--interactive-highlight, var(--accent)); background: var(--bg-tertiary); }
+        /* The one stat-card that ever receives .keyboard-selected (Down/Up
+           wrapping past a table's last/first row - see navigateVertical's
+           getVerticalNavItems) is always the active tab's own card, i.e.
+           always already carrying .tab-active - reusing that same
+           border-color signal here would be invisible (nothing actually
+           changes to look at), so this needs a genuinely different
+           treatment layered on top, same outline-based idiom every other
+           .keyboard-selected element in this file already uses. */
+        .stat-card.keyboard-selected { outline: 2px solid var(--interactive-highlight, var(--accent)); outline-offset: 2px; }
         /* HUD-style corner-bracket accent (theme-agnostic - pulls from
            --accent like every other decoration, no new per-theme variable):
            a targeting-reticle frame that appears on the active/hovered stat

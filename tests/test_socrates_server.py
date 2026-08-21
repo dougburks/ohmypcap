@@ -4378,6 +4378,37 @@ bright_magenta = "#D9B9D9"
         self.assertEqual(status, 200)
         self.assertNotIn('hasRowNotes', json.loads(body))
 
+    def test_get_status_while_processing_does_not_create_events_db(self):
+        """REGRESSION GUARD (real bug report): GET /api/status used to call
+        has_row_notes(events.db) unconditionally, even while an analysis
+        was still 'processing' (a .phase file present, events.db not yet
+        created by create_sqlite_db) - sqlite3.connect() creates an empty
+        file at that path as a side effect of merely opening a connection,
+        even a read-only one. Polling /api/status during an active
+        reanalyze (real repro: the app's own openReanalyzeModal, or a
+        script polling status) would pre-create events.db before Suricata
+        finished, so create_sqlite_db()'s own `not os.path.exists(db_file)`
+        guard then skipped real ingestion entirely - permanently leaving
+        an empty database. GET /api/status must not touch events.db at
+        all while still processing."""
+        import hashlib
+        md5 = hashlib.md5(b'status_processing_no_db_create_test').hexdigest()
+        dir_path = os.path.join(server.DATA_DIR, md5)
+        os.makedirs(dir_path, exist_ok=True)
+        with open(os.path.join(dir_path, 'name.txt'), 'w') as f:
+            f.write('test.pcap')
+        # Still "processing": a .phase file exists and events.db does not.
+        with open(os.path.join(dir_path, '.phase'), 'w') as f:
+            f.write('network')
+        db_path = os.path.join(dir_path, 'events.db')
+
+        status, body = self._get('/api/status?md5=' + md5)
+        self.assertEqual(status, 200)
+        parsed = json.loads(body)
+        self.assertEqual(parsed['status'], 'processing')
+        self.assertFalse(parsed['hasRowNotes'])
+        self.assertFalse(os.path.exists(db_path), 'GET /api/status must not create events.db as a side effect while the analysis is still processing')
+
     @unittest.mock.patch('socrates.threading.Thread', new=SyncThread)
     @unittest.mock.patch('socrates.setup_suricata_config')
     def test_update_rules_single_ruleset_returns_started_and_status_reflects_progress(self, mock_suricata):
@@ -5802,6 +5833,77 @@ class TestSuricataProtocolEnable(unittest.TestCase):
 '''
         result = suricata_analyzer._enable_eve_log_arp(sample)
         self.assertEqual(result, sample)
+
+    def test_enable_community_id_flips_false_to_true(self):
+        sample = '''      community-id: false
+      community-id-seed: 0
+'''
+        result = suricata_analyzer._enable_community_id(sample)
+        self.assertIn('community-id: true', result)
+        self.assertIn('community-id-seed: 0', result,
+                       'must not also match/mangle the neighboring seed line')
+
+    def test_enable_community_id_is_idempotent(self):
+        sample = '''      community-id: true
+      community-id-seed: 0
+'''
+        result = suricata_analyzer._enable_community_id(sample)
+        self.assertEqual(result, sample)
+
+    def test_enable_community_id_enabled_unconditionally_by_setup(self):
+        """REGRESSION GUARD: unlike arp (a real volume/signal tradeoff kept
+        opt-in - see TestSuricataArpStaysDisabledByDefault), community-id
+        just adds one deterministic field and must be force-enabled for
+        every install, with no opt-out parameter."""
+        with unittest.mock.patch('suricata_analyzer.has_internet_access', return_value=False):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                suricata_analyzer.setup_suricata_config(tmpdir)
+                with open(os.path.join(tmpdir, 'suricata', 'suricata.yaml')) as f:
+                    content = f.read()
+        self.assertIn('community-id: true', content)
+
+    def test_enable_ja3_ja4_fingerprints_flips_commented_auto_to_yes(self):
+        sample = '''      #ja3-fingerprints: auto
+      #ja4-fingerprints: auto
+'''
+        result = suricata_analyzer._enable_ja3_ja4_fingerprints(sample)
+        self.assertIn('ja3-fingerprints: yes', result)
+        self.assertIn('ja4-fingerprints: yes', result)
+        self.assertNotIn('#ja3-fingerprints', result)
+        self.assertNotIn('#ja4-fingerprints', result)
+
+    def test_enable_ja3_ja4_fingerprints_is_idempotent(self):
+        sample = '''      ja3-fingerprints: yes
+      ja4-fingerprints: yes
+'''
+        result = suricata_analyzer._enable_ja3_ja4_fingerprints(sample)
+        self.assertEqual(result, sample)
+
+    def test_enable_ja3_ja4_fingerprints_does_not_clobber_operator_override(self):
+        """REGRESSION GUARD: the regex must anchor on the commented-out
+        `#...: auto` form specifically - an operator who already
+        explicitly set ja3-fingerprints: no (uncommented) must not have
+        that choice silently overwritten on the next setup_suricata_config()
+        call (e.g. every server restart)."""
+        sample = '''      ja3-fingerprints: no
+      #ja4-fingerprints: auto
+'''
+        result = suricata_analyzer._enable_ja3_ja4_fingerprints(sample)
+        self.assertIn('ja3-fingerprints: no', result)
+        self.assertIn('ja4-fingerprints: yes', result)
+
+    def test_ja3_ja4_fingerprints_enabled_unconditionally_by_setup(self):
+        """REGRESSION GUARD: like community-id, JA3/JA4 are cheap
+        per-handshake fields (not a real volume/signal tradeoff like arp),
+        so they must be force-enabled for every install with no opt-out
+        parameter."""
+        with unittest.mock.patch('suricata_analyzer.has_internet_access', return_value=False):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                suricata_analyzer.setup_suricata_config(tmpdir)
+                with open(os.path.join(tmpdir, 'suricata', 'suricata.yaml')) as f:
+                    content = f.read()
+        self.assertIn('ja3-fingerprints: yes', content)
+        self.assertIn('ja4-fingerprints: yes', content)
 
 
 class TestProtocolEventUI(unittest.TestCase):

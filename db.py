@@ -658,7 +658,20 @@ def has_row_notes(db_path):
     which deletes events.db (and therefore every row_notes row) entirely -
     see socrates.py's handle_get_status. Same read-path convention as
     get_row_notes: no _init_db call, since a missing/empty events.db or a
-    row_notes-less old one both just mean no notes yet, not an error."""
+    row_notes-less old one both just mean no notes yet, not an error.
+
+    The os.path.exists guard is required, not just an optimization:
+    sqlite3.connect() creates an empty file at db_path as a side effect
+    if it doesn't exist yet, even for a connection that's only ever read
+    from - _db_connection() below has no way to open read-only. A caller
+    hitting this while an analysis is still mid-ingest (real bug report:
+    /api/status, polled during processing, called this unconditionally)
+    would pre-create events.db before create_sqlite_db() gets a chance
+    to, and that function's own `not os.path.exists(db_file)` guard would
+    then skip real ingestion entirely - silently leaving a permanently
+    empty database behind."""
+    if not os.path.exists(db_path):
+        return False
     with _db_connection(db_path) as conn:
         try:
             cursor = conn.execute('SELECT 1 FROM row_notes LIMIT 1')
