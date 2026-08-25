@@ -2125,6 +2125,27 @@
             SANKEY_MAX_NODES_PER_COLUMN: 50,
             TABLE_PAGE_SIZE: 100,
         };
+        // Page size for every Aggregation Table's Prev/Next pagination
+        // (matches Security Onion's own aggregation-table UX) - user-
+        // adjustable via the "Items per page" selector (changeAggPageSize),
+        // persisted across sessions the same way theme/collapse-state
+        // preferences already are. db.py's AGGREGATION_TOP_N is only the
+        // fallback default the server uses if a request omits page_size
+        // entirely; the actual page size for every real request is always
+        // whatever this is set to.
+        const AGG_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+        const AGG_PAGE_SIZE_STORAGE_KEY = 'socrates_aggPageSize';
+        // var (not let/const) like every other piece of mutable top-level
+        // state in this file (hiddenAggregations, aggPage, currentMd5,
+        // advancedMode, ...) - only var/function declarations attach to the
+        // real global object, so a jsdom test's own separate indirect-eval
+        // invocation (see tests/jsdom_helper.py, window["eval"]) can
+        // actually see and mutate it; a let here would be invisible outside
+        // whichever indirect eval originally loaded this file.
+        var AGG_PAGE_SIZE = (() => {
+            const stored = parseInt(safeStorageGet(localStorage, AGG_PAGE_SIZE_STORAGE_KEY), 10);
+            return AGG_PAGE_SIZE_OPTIONS.includes(stored) ? stored : CONFIG.AGGREGATION_TOP_N;
+        })();
         const DEFAULT_SAMPLE_URL = 'https://www.malware-traffic-analysis.net/2026/02/03/2026-02-03-GuLoader-for-AgentTesla-style-infection-with-FTP-data-exfil.pcap.zip';
         const SAMPLE_LOG_URL = 'https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES/raw/refs/heads/master/Defense%20Evasion/apt10_jjs_sideloading_prochollowing_persist_as_service_sysmon_1_7_8_13.evtx';
         const SAMPLE_BINARY_URL = 'https://secure.eicar.org/eicar.com';
@@ -2155,6 +2176,7 @@
         const CALENDAR_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>';
         const NOTES_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><path d="M14 3v4a1 1 0 0 0 1 1h4"></path><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"></path><line x1="9" y1="9" x2="10" y2="9"></line><line x1="9" y1="13" x2="15" y2="13"></line><line x1="9" y1="17" x2="15" y2="17"></line></svg>';
         const EXPAND_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
+        const LINK_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>';
         const NOTES_MAX_LENGTH = 10000;
         const ROW_NOTE_MAX_LENGTH = 500; // mirrors config.MAX_ROW_NOTE_LENGTH
         function getWelcomeHelpContent() { return `
@@ -2389,8 +2411,27 @@
             document.querySelectorAll('.section').forEach(s => s.classList.add('section-hidden'));
             document.getElementById(sectionId).classList.remove('section-hidden');
             document.querySelectorAll('.stat-card').forEach(c => c.classList.remove('tab-active'));
-            if (el) el.classList.add('tab-active');
-            
+            if (el) {
+                el.classList.add('tab-active');
+                // A plain mouse click on a different card than whatever's
+                // currently keyboard-selected (a Left/Right preview, or a
+                // prior Down/Up landing) leaves that ring stuck on a now-
+                // unrelated card, since nothing else clears it on this
+                // path - navigateStatTabs()'s own cards[nextIndex].click()
+                // always targets the SAME card it just rang, so this is a
+                // no-op there. activeColumnStatCards() trusts
+                // verticalNavSelection as the current column's reference
+                // card (see its own comment), so leaving a stray ring
+                // uncleared would point Down/Up at the wrong column after
+                // a real tab change like this one.
+                document.querySelectorAll('.stat-card.keyboard-selected').forEach(card => {
+                    if (card !== el) {
+                        card.classList.remove('keyboard-selected');
+                        if (verticalNavSelection === card) verticalNavSelection = null;
+                    }
+                });
+            }
+
             const eventType = sectionId.replace('section-', '');
             loadTabData(eventType, el);
         }
@@ -2416,7 +2457,15 @@
                 document.querySelectorAll('.stat-card').forEach(card => {
                     const onclick = card.getAttribute('onclick');
                     if (onclick && onclick.includes(eventType)) {
-                        const match = onclick.match(/showTab\('section-([^']+)'\)/);
+                        // Every real stat card's onclick is actually
+                        // showTab('section-x', this), per buildStats'
+                        // own template. Matching through to the real
+                        // closing paren wherever it falls, rather than
+                        // requiring one immediately after the captured
+                        // id, tolerates that trailing ", this" second
+                        // argument - the old, stricter pattern never
+                        // actually matched anything in practice.
+                        const match = onclick.match(/showTab\('section-([^']+)'.*\)/);
                         if (match && match[1] === eventType) {
                             card.classList.add('tab-active');
                         }
@@ -2424,8 +2473,42 @@
                 });
             }
 
+            // #sankeyPanel/#aggregations are single, page-level panels
+            // shared across every tab (not per-section - see
+            // socrates.html). #sankeyPanel is toggled visible once for the
+            // whole PCAP-mode session (see the analysis-load code that
+            // sets sankeyPanel.style.display = '') rather than per tab
+            // switch, and #aggregations is only ever touched by the
+            // generic branches below when advancedMode is true (see
+            // buildAggregationsSection's call sites) - with advancedMode
+            // false, nothing downstream ever rewrites it at all. Both are
+            // defaulted back to normal here, before any of the branches
+            // below, so none of them need to remember to do it - only the
+            // dns_heuristics branch turns them off, for the one tab whose
+            // data (aggregated per-domain heuristic scores, not raw flow
+            // events) doesn't fit either model. Without resetting
+            // #aggregations here too, leaving dns_heuristics with
+            // advancedMode off left even the collapsed "▸ Aggregation
+            // Tables" bar permanently missing, not just its expanded
+            // content. Every other branch either doesn't touch these
+            // (acknowledged - a pre-existing gap, not addressed here) or
+            // overwrites their content itself (updateSankeyDiagram(),
+            // buildAggregationsSection()).
+            const sankeyPanel = document.getElementById('sankeyPanel');
+            if (sankeyPanel && !isLogAnalysisMode) sankeyPanel.style.display = '';
+            const aggContainer = document.getElementById('aggregations');
+            if (aggContainer) aggContainer.innerHTML = AGG_COLLAPSED_HTML;
+
             if (eventType === 'acknowledged') {
                 await buildAcknowledgedAlertsSection();
+                updateFilterBarVisibility();
+                return;
+            }
+
+            if (eventType === 'dns_heuristics') {
+                if (sankeyPanel) sankeyPanel.style.display = 'none';
+                if (aggContainer) aggContainer.innerHTML = '';
+                if (sectionEl) await buildDnsHeuristicsSection();
                 updateFilterBarVisibility();
                 return;
             }
@@ -2562,7 +2645,7 @@
             // ancestor of the row/cell that was clicked) and immediately
             // remove it again before the user ever sees it.
             event.stopPropagation();
-            showPivotMenu(event, 'section-' + tr.dataset.eventType, pair[0], pair[1], false, tr);
+            showPivotMenu(event, 'section-' + tr.dataset.eventType, pair[0], pair[1], false, tr, tr.dataset.communityId);
             return true;
         }
 
@@ -2621,6 +2704,45 @@
             return getColumnsForType(eventType);
         }
 
+        // Real user report: most detail-panel fields don't get the full
+        // Include/Exclude/Only menu even though a table-cell click on the
+        // very same underlying data does - because the detail panel's own
+        // labels (htmlRowText's first argument, all over the render*Details
+        // functions below) are more descriptive prose than the terse
+        // column-header strings getColumnsForType() returns and
+        // extract*Value()'s own column-keyed switches expect (e.g. DNS's
+        // detail label 'Query Name' vs the column 'Query'; HTTP's 'User
+        // Agent' vs 'User-Agent'). This maps each such label to its real
+        // column, per event type, so those fields get the full menu too -
+        // filtering on the mapped column name, not the prose label, since
+        // that's what extract*Value()'s switch statements actually key on.
+        // Deliberately NOT exhaustive: only includes a mapping once
+        // verified against the matching extract*Value() case that both
+        // read the exact same underlying field (see the mapping's own
+        // construction notes) - a wrong guess here would produce a
+        // full-looking menu whose Include/Exclude/Only silently filter on
+        // the wrong data, which is worse than the current trimmed menu.
+        // 'Timestamp' (used by every renderer via _formatEventCommon) is
+        // deliberately excluded even though every event type's own 'Time'
+        // column exists in getColumnsForType()'s array - extractValue()
+        // has no matching 'Time' case (falls through to its log-analysis-
+        // only default branch), so a table-cell click on the Time column
+        // already offers a silently-nonfunctional Include/Exclude/Only;
+        // mapping 'Timestamp' here would just reproduce that same existing
+        // gap in a second place rather than close it.
+        const DETAIL_LABEL_TO_COLUMN = {
+            alert: { 'Signature': 'Alert' },
+            protocol_decode: { 'Signature': 'Alert' },
+            dns: { 'Query Name': 'Query', 'Query Type': 'Type' },
+            http: { 'User Agent': 'User-Agent' },
+            tls: { 'SNI': 'SNI / Host' },
+            flow: { 'Pkts to Server': 'Pkts →', 'Pkts to Client': 'Pkts ←', 'Bytes to Server': 'Bytes →', 'Bytes to Client': 'Bytes ←' },
+            filealerts: { 'Rule': 'Rule Name' },
+            dnp3: { 'Source Address': 'Source Addr', 'Destination Address': 'Dest Addr', 'Application Function': 'Function' },
+            pgsql: { 'Command Completed': 'Command', 'Data Rows': 'Rows', 'SSL Accepted': 'SSL' },
+            sigmaalert: { 'Rule Title': 'Rule' },
+        };
+
         // Delegated (not a per-value onclick) since htmlRowText returns a
         // plain HTML string, not a DOM node addEventListener could attach
         // to directly - same reasoning as showPivotMenu's own closures
@@ -2640,14 +2762,45 @@
             } catch (e) {
                 return;
             }
-            const [label, value] = pair;
+            const [label, value, isDynamicField] = pair;
             const detailRow = pivotEl.closest('tr.detail-row');
             const collapsedRow = detailRow ? detailRow.previousElementSibling : null;
             const eventType = collapsedRow ? collapsedRow.dataset.eventType : null;
             const columns = detailColumnsForEventType(eventType);
-            const trimmed = !eventType || !columns.includes(label);
+            // A label already matching a real column (e.g. 'Source IP')
+            // is used as-is. Log/Sigma Alert rows are a different case
+            // entirely, not covered by DETAIL_LABEL_TO_COLUMN below: their
+            // detail panel (formatLogEventDetail) labels values with the
+            // RAW json_data field name (e.g. 'SourceIp', 'CommandLine'),
+            // while getColumnsForType('log')'s own columns (via
+            // discoverLogColumns) are the human LABEL for that same field
+            // (e.g. 'Source IP') - _getLabelForField is the exact
+            // conversion extractLogValue()/extractSigmaValue() themselves
+            // already do in reverse, so this must mirror it to land on a
+            // column those functions actually recognize. A harmless no-op
+            // for every other event type's already-real labels, since
+            // LOG_FIELD_LABELS has no matching key for any of them (real
+            // user report: log analysis's own detail panel showed only
+            // Hunt for the same reason the PCAP one originally did).
+            const fieldLabel = _getLabelForField(label);
+            // isDynamicField (see htmlRowText's own comment): a field like
+            // 'Computer' rarely makes discoverLogColumns' own top-6 cut
+            // (getColumnsForType('log')/('sigmaalert') never lists it), so
+            // the columns.includes() checks above would always trim it -
+            // yet extractLogValue()/extractSigmaValue()'s default case
+            // resolves ANY json_data field generically, columns list or
+            // not (real user report: many Matched Event fields on a sigma
+            // alert, e.g. Computer, offered only Hunt for exactly this
+            // reason). Takes priority over the alias map below since it's
+            // a stronger signal - this field is verifiably a real,
+            // generically-filterable json_data key, not a guess.
+            const mappedColumn = columns.includes(label) ? label
+                : columns.includes(fieldLabel) ? fieldLabel
+                : isDynamicField ? fieldLabel
+                : (eventType && DETAIL_LABEL_TO_COLUMN[eventType]?.[label]);
+            const trimmed = !eventType || !mappedColumn;
             event.stopPropagation();
-            showPivotMenu(event, eventType ? 'section-' + eventType : null, label, value, trimmed);
+            showPivotMenu(event, eventType ? 'section-' + eventType : null, mappedColumn || label, value, trimmed, null, collapsedRow ? collapsedRow.dataset.communityId : null);
         });
 
         // Aggregation-table rows (see _renderAggTablesHtml) always carry a
@@ -2765,7 +2918,7 @@
         // only way its panel could be visible to click in). "Expand Row"
         // is only offered when expandRowEl actually has a collapsible
         // detail-row sibling.
-        function showPivotMenu(event, sectionId, col, value, trimmed, expandRowEl) {
+        function showPivotMenu(event, sectionId, col, value, trimmed, expandRowEl, communityId) {
             closePivotMenu();
             const menu = document.createElement('div');
             menu.className = 'pivot-menu';
@@ -2827,12 +2980,25 @@
                 <button type="button" class="pivot-menu-item" data-pivot-action="include" title="${escapeHtml(includeTitle)}"><span class="pivot-menu-icon pivot-menu-icon-include">${SEARCH_ICON_SVG}</span>Include</button>
                 <button type="button" class="pivot-menu-item" data-pivot-action="exclude" title="${escapeHtml(excludeTitle)}"><span class="pivot-menu-icon pivot-menu-icon-exclude">${SEARCH_ICON_SVG}</span>Exclude</button>
                 <button type="button" class="pivot-menu-item" data-pivot-action="only" title="${escapeHtml(onlyTitle)}"><span class="pivot-menu-icon pivot-menu-icon-only">${SEARCH_ICON_SVG}</span>Only</button>`;
+            // Only offered when this row actually carries a community_id
+            // (see the data-community-id attribute baked in by
+            // rowPrefixCells/buildAllEventRow) - most rows do, but e.g.
+            // stats/anomaly events don't. Suppressed when the clicked
+            // value already IS the community_id (clicking the Community ID
+            // field itself) since Hunt right above already does the exact
+            // same whole-analysis search in that case - offering both
+            // would just be two identical buttons.
+            const correlateTitle = `Show all logs sharing this flow's Community ID (${communityId})`;
+            const correlateHtml = (communityId && String(value) !== String(communityId))
+                ? `<button type="button" class="pivot-menu-item" data-pivot-action="correlate" title="${escapeHtml(correlateTitle)}"><span class="pivot-menu-icon">${LINK_ICON_SVG}</span>Correlate</button>`
+                : '';
             menu.innerHTML = `
                 <div class="pivot-menu-label" title="${escapeHtml(fullLabel)}">${escapeHtml(col)}: ${escapeHtml(valueLabel)}</div>
                 ${expandRowHtml}
                 ${ackHtml}
                 ${filterButtonsHtml}
                 <button type="button" class="pivot-menu-item" data-pivot-action="hunt" title="${escapeHtml(huntTitle)}"><span class="pivot-menu-icon">${SEARCH_ICON_SVG}</span>Hunt</button>
+                ${correlateHtml}
                 <div class="pivot-menu-divider"></div>
                 <button type="button" class="pivot-menu-item" data-pivot-action="copy"><span class="pivot-menu-icon">${COPY_ICON_SVG}</span>Copy to Clipboard</button>
                 ${lookupSitesHtml}
@@ -2877,6 +3043,12 @@
                 closePivotMenu();
                 huntFilterValue(value);
             });
+            if (correlateHtml) {
+                menu.querySelector('[data-pivot-action="correlate"]').addEventListener('click', function() {
+                    closePivotMenu();
+                    huntFilterValue(communityId);
+                });
+            }
             menu.querySelector('[data-pivot-action="copy"]').addEventListener('click', function() {
                 closePivotMenu();
                 copyValueToClipboard(value);
@@ -3203,10 +3375,24 @@
         // An empty value has nothing meaningful to pivot on, so it's left
         // as plain (unwrapped) text, matching pivotDataAttrsHtml's own
         // choice to exclude empty values from the row-cell menu too.
-        function htmlRowText(label, text, className, style) {
+        // dynamicField: true only for formatLogEventDetail's own two call
+        // sites (the log/sigma alert "raw event fields" section) - those
+        // labels are literal json_data keys (e.g. 'CommandLine'), not
+        // members of any fixed column list the way every other event
+        // type's detail fields are, but extractLogValue()/
+        // extractSigmaValue()'s own default case already resolves ANY
+        // such field generically (see the detail-panel click handler's
+        // own comment for why that makes columns.includes() the wrong
+        // gate here). Encoding it into the pivot payload itself - rather
+        // than re-deriving "was this a dynamic field" from the label text
+        // in the click handler - avoids guessing: a label that HAPPENS to
+        // collide with something read genuinely doesn't need to worry
+        // about it, since only these two call sites ever set it.
+        function htmlRowText(label, text, className, style, dynamicField) {
             const value = String(text || '');
             if (!value) return htmlRow(label, '', className, style);
-            const encoded = encodeURIComponent(JSON.stringify([label, value]));
+            const pivotPayload = dynamicField ? [label, value, true] : [label, value];
+            const encoded = encodeURIComponent(JSON.stringify(pivotPayload));
             return htmlRow(label, `<span class="detail-value-pivot" data-detail-pivot="${encoded}">${escapeHtml(value)}</span>`, className, style);
         }
 
@@ -3239,6 +3425,7 @@
             html += htmlRow('Event Type', `${valueDotSpan(COLORS.EVENT[e.event_type])}${escapeHtml(e.event_type || '')}`);
             if (e.proto) html += htmlRowText('Protocol', e.proto);
             if (e.flow_id) html += htmlRowText('Flow ID', e.flow_id);
+            if (e.community_id) html += htmlRowText('Community ID', e.community_id, 'mono');
             if (e.pcap_cnt) html += htmlRowText('PCAP Count', e.pcap_cnt);
             if (e.src_ip || e.src_port || e.dest_ip || e.dest_port) {
                 html += htmlSection('Connection', COLORS.EVENT.connection);
@@ -3352,6 +3539,9 @@
             let html = htmlSection('TLS Details', COLORS.EVENT.tls);
             html += htmlRowText('SNI', e.tls?.sni, 'mono');
             html += htmlRow('Version', `${valueDotSpan(tlsVersionColor(e.tls?.version))}${escapeHtml(e.tls?.version || '')}`);
+            if (e.tls?.ja3?.hash) html += htmlRowText('JA3', e.tls.ja3.hash, 'mono');
+            if (e.tls?.ja3s?.hash) html += htmlRowText('JA3S', e.tls.ja3s.hash, 'mono');
+            if (e.tls?.ja4) html += htmlRowText('JA4', e.tls.ja4, 'mono');
             html += htmlRowText('Subject', e.tls?.subject, 'mono');
             html += htmlRowText('Issuer', e.tls?.issuerdn, 'mono');
             html += htmlRowText('Not Before', e.tls?.notbefore);
@@ -4254,6 +4444,54 @@
             });
         }
 
+        // The filter bar (search-term/filter-value chips, plus one
+        // trailing Clear All button - see buildFilterBarHtml()) in DOM
+        // order.
+        function filterBarRowItems() {
+            return Array.from(document.querySelectorAll('#filterBarContainer .filter-chip, #filterBarContainer .filter-clear-all'));
+        }
+
+        // Down/Up must treat the whole filter bar row as ONE stop (real
+        // bug report: with several chips active, Down used to step
+        // through each one individually before ever reaching the stat-
+        // card grid below - "moving between an active filter chip and
+        // Clear All should be Left/Right", not Down) - Left/Right is what
+        // cycles within the row instead (see navigateFilterBarItems).
+        // Contributes whichever item is currently selected if Left/Right
+        // has already moved within the row (mirrors activeColumnStatCards'
+        // own "follow the current ring" reference-picking, one level up),
+        // else defaults to the first chip - so a fresh Down/Up always
+        // lands on a predictable, visible entry point into the row.
+        function filterBarRowAnchor() {
+            const items = filterBarRowItems();
+            if (items.length === 0) return [];
+            const current = (verticalNavSelection && verticalNavSelection.isConnected && items.includes(verticalNavSelection))
+                ? verticalNavSelection : items[0];
+            return [current];
+        }
+
+        // Left/Right's own handling for the filter bar row, mirroring
+        // navigateStreamControls()/navigatePacketControls()'s established
+        // horizontal-group idiom one level up - only active while the
+        // current selection is actually inside the row; Down/Up
+        // (navigateVertical(), via filterBarRowAnchor() above) is what
+        // moves out of it entirely.
+        function currentFilterBarSelection() {
+            if (!(verticalNavSelection && verticalNavSelection.isConnected && verticalNavSelection.offsetParent !== null)) return null;
+            if (!(verticalNavSelection.classList.contains('filter-chip') || verticalNavSelection.classList.contains('filter-clear-all'))) return null;
+            return verticalNavSelection;
+        }
+
+        function navigateFilterBarItems(direction) {
+            const current = currentFilterBarSelection();
+            if (!current) return false;
+            const items = filterBarRowItems();
+            if (items.length < 2) return false;
+            const index = items.indexOf(current);
+            moveStreamControlSelectionTo(items[(index + direction + items.length) % items.length]);
+            return true;
+        }
+
         // The Sankey/Aggregation toggle bars sit directly above the data
         // table in the DOM (#sankeyPanel, #aggregations, #sections in that
         // order - see socrates.html), so prepending them here extends the
@@ -4271,32 +4509,179 @@
         const TOGGLE_BAR_SELECTORS = {
             sankey: '#sankeyPanel > .section-toggle-bar',
             agg: '#aggregations .section-toggle-bar',
+            dnsHeuristicsInfo: '#section-dns_heuristics .dns-heuristics-info-toggle',
         };
 
-        // Aggregation-table value rows (tr.agg-row[data-agg-pivot], see
-        // _renderAggTablesHtml) are included in strict DOM order once the
-        // panel is expanded - the agg-grid can lay several tables out
-        // side by side, but there's no per-table row-count to key a real
-        // 2D Up/Down-within-a-column/Left-Right-between-tables scheme off
-        // of (unlike the themes modal's fixed-column tile grid), so this
-        // just walks the flat document order like every other list here.
-        // Collapsed panels naturally contribute nothing since
-        // #aggregations then has no .agg-row elements to find at all.
+        // Groups the currently-visible aggregation tables into visual rows
+        // by rendered top position - the flex-wrap agg-grid has no fixed
+        // column count the way #statsGrid's CSS Grid does (read via
+        // statsGridColumnCount()), so row membership can only come from
+        // actual layout, not arithmetic. Real bug report: DOM order alone
+        // (every table's rows back to back) makes Down from a table's last
+        // row land on the very next table in DOM order - almost always the
+        // sibling immediately to its right, same visual row - when the
+        // expectation is "next VISUAL row of tables, or the Data Table if
+        // this was the last row"; Left/Right (navigateAggTables) is what's
+        // supposed to move sideways within a row, not Down.
+        function aggTableRowGroups() {
+            const tables = Array.from(document.querySelectorAll('#aggregations .agg-section')).filter(t => t.offsetParent !== null);
+            const rows = [];
+            for (const table of tables) {
+                const top = table.offsetTop;
+                let row = rows.find(r => Math.abs(r.top - top) < 4); // sub-pixel tolerance
+                if (!row) { row = { top, tables: [] }; rows.push(row); }
+                row.tables.push(table);
+            }
+            rows.sort((a, b) => a.top - b.top);
+            return rows.map(r => r.tables);
+        }
+
+        // A table's own value rows (tr.agg-row[data-agg-pivot], see
+        // _renderAggTablesHtml) plus its Prev/Next pagination row collapsed
+        // to one stop, if it has one (mirrors filterBarRowAnchor's own
+        // reasoning exactly) - contributes whichever button is already
+        // selected if Left/Right has moved within it
+        // (navigateAggPaginationButtons), else defaults to the first
+        // non-disabled one (page 1 has no Prev - landing on it by default
+        // would need an extra Left/Right press before Enter could do
+        // anything).
+        function aggTableOwnItems(table) {
+            const rows = Array.from(table.querySelectorAll('tr.agg-row[data-agg-pivot]'));
+            const pageButtons = Array.from(table.querySelectorAll('.agg-page-btn'));
+            if (pageButtons.length === 0) return rows;
+            const current = (verticalNavSelection && verticalNavSelection.isConnected && pageButtons.includes(verticalNavSelection))
+                ? verticalNavSelection : (pageButtons.find(b => !b.disabled) || pageButtons[0]);
+            return rows.concat([current]);
+        }
+
+        // Down/Up walks the reference table's own rows/pagination stop,
+        // bridging to the first table of the next visual row once it runs
+        // out (or the last table of the previous row, moving the other
+        // direction) - recomputed fresh on every keypress from wherever
+        // verticalNavSelection actually landed, so chaining across several
+        // rows in a row (so to speak) falls out for free without needing
+        // to pre-build the whole multi-row sequence in one call. Left/Right
+        // jumps directly to a different table instead of stepping through
+        // every intervening row (see navigateAggTables) - the same
+        // "Down/Up walks the flat list, Left/Right jumps within/between
+        // groups" split every other section here already uses. Collapsed
+        // panels naturally contribute nothing since #aggregations then has
+        // no .agg-section elements to find at all.
+        function aggTableAndPaginationItems() {
+            const rowGroups = aggTableRowGroups();
+            if (rowGroups.length === 0) return [];
+            let referenceTable = (verticalNavSelection && verticalNavSelection.isConnected)
+                ? verticalNavSelection.closest('#aggregations .agg-section') : null;
+            let rowIndex = referenceTable ? rowGroups.findIndex(row => row.includes(referenceTable)) : -1;
+            if (rowIndex === -1) {
+                // verticalNavSelection isn't currently inside the agg block
+                // at all (a toggle bar/filter chip/stat card, a Data Table
+                // row, or nothing selected yet) - which end of the block to
+                // offer as the entry point depends on which side we're
+                // approaching from. Real bug report: with 3+ rows, Up from
+                // the Data Table always re-entered at row 0 regardless of
+                // how many rows actually existed below it, since this used
+                // to default to the first row unconditionally - only a Data
+                // Table row means "arriving from below" (Up); every other
+                // case (including the very first Down of a fresh page) means
+                // "arriving from above" (Down), so the first row is still
+                // the right default there.
+                const fromBelow = verticalNavSelection && verticalNavSelection.isConnected
+                    && getVisibleDataTableRows().includes(verticalNavSelection);
+                rowIndex = fromBelow ? rowGroups.length - 1 : 0;
+                referenceTable = rowGroups[rowIndex][0];
+            }
+            let items = aggTableOwnItems(referenceTable);
+            const prevRow = rowGroups[rowIndex - 1];
+            if (prevRow) items = aggTableOwnItems(prevRow[prevRow.length - 1]).concat(items);
+            const nextRow = rowGroups[rowIndex + 1];
+            if (nextRow) items = items.concat(aggTableOwnItems(nextRow[0]));
+            return items;
+        }
+
         function getVerticalNavItems() {
-            // #filterBarContainer (search-term/filter-value chips, plus
-            // Clear All) sits before #statsGrid/#sankeyPanel/#aggregations
-            // in the DOM (see socrates.html) - a single combined selector
-            // keeps chips and the Clear All button in their real document
-            // order rather than needing two arrays concatenated by hand.
-            const filterBarItems = Array.from(document.querySelectorAll('#filterBarContainer .filter-chip, #filterBarContainer .filter-clear-all'));
+            // The filter bar (search-term/filter-value chips, plus Clear
+            // All) is a single horizontal row - see filterBarRowAnchor()'s
+            // own comment for why it contributes only ONE entry here
+            // rather than one per chip.
+            const filterBarItems = filterBarRowAnchor();
             const toggleBars = [
                 document.querySelector(TOGGLE_BAR_SELECTORS.sankey),
                 document.querySelector(TOGGLE_BAR_SELECTORS.agg),
+                document.querySelector(TOGGLE_BAR_SELECTORS.dnsHeuristicsInfo),
             ];
-            const aggRows = Array.from(document.querySelectorAll('#aggregations tr.agg-row[data-agg-pivot]'));
-            return filterBarItems.concat(toggleBars, aggRows)
+            const aggRows = aggTableAndPaginationItems();
+            // Positioned right after the filter chips, matching where
+            // #statsGrid actually sits on the page (see socrates.html:
+            // #filterBarContainer, #statsGrid, #sankeyPanel,
+            // #aggregations, #dataPanel, in that order) - Down/Up walking
+            // this list is meant to move "straight down the page", and
+            // burying the stat-card grid at the very end (reachable only
+            // after a full wraparound) put it out of that order entirely.
+            // Includes every row in the active tab's own column (not just
+            // the active card itself), so a multi-row grid's other rows
+            // are ordinary stops along the same path rather than a
+            // separate mechanism bolted onto one end of it - Down from
+            // the last table row still wraps to this same block (now via
+            // plain wraparound, landing on its first entry, the active
+            // card, with no special-casing needed), and Up from the first
+            // filter chip (or the active card, if there are no chips)
+            // symmetrically retraces it in reverse for free.
+            const gridRowCards = activeColumnStatCards();
+            return filterBarItems.concat(gridRowCards, toggleBars, aggRows)
                 .filter(el => el && el.offsetParent !== null)
                 .concat(getVisibleDataTableRows());
+        }
+
+        // Left/Right's own handling once the current selection is actually
+        // one of the two Prev/Next buttons (i.e. Down has already entered
+        // the pagination stop aggTableAndPaginationItems() collapses to one
+        // entry) - mirrors currentFilterBarSelection/navigateFilterBarItems
+        // exactly. navigateAggTables (below) handles Left/Right for every
+        // OTHER agg-area selection (an ordinary row, not yet on Prev/Next).
+        function currentAggPaginationSelection() {
+            if (!(verticalNavSelection && verticalNavSelection.isConnected && verticalNavSelection.offsetParent !== null)) return null;
+            if (!verticalNavSelection.classList.contains('agg-page-btn')) return null;
+            return verticalNavSelection;
+        }
+
+        function navigateAggPaginationButtons(direction) {
+            const current = currentAggPaginationSelection();
+            if (!current) return false;
+            const table = current.closest('.agg-section');
+            const buttons = table ? Array.from(table.querySelectorAll('.agg-page-btn')) : [];
+            if (buttons.length < 2) return false;
+            const index = buttons.indexOf(current);
+            moveStreamControlSelectionTo(buttons[(index + direction + buttons.length) % buttons.length]);
+            return true;
+        }
+
+        // Left/Right jumps straight to a different aggregation table
+        // instead of stepping through every intervening row via Down - only
+        // active while the current selection is actually inside one (an
+        // agg-row or one of its Prev/Next buttons); Down/Up
+        // (navigateVertical(), via aggTableAndPaginationItems() above) is
+        // what walks within/between tables one row at a time. Lands on the
+        // target table's first row (matching navigateStatTabs' own
+        // "preview, don't require a second Down" landing behavior) - every
+        // rendered table has at least one row (_renderOneAggTableHtml is
+        // never called with zero entries), so a null first-row can't happen
+        // in practice.
+        function navigateAggTables(direction) {
+            const current = (verticalNavSelection && verticalNavSelection.isConnected)
+                ? verticalNavSelection.closest('#aggregations tr.agg-row, #aggregations .agg-page-btn')
+                : null;
+            if (!current) return false;
+            const currentTable = current.closest('.agg-section');
+            if (!currentTable) return false;
+            const tables = Array.from(document.querySelectorAll('#aggregations .agg-section')).filter(t => t.offsetParent !== null);
+            const index = tables.indexOf(currentTable);
+            if (index === -1 || tables.length < 2) return false;
+            const nextTable = tables[(index + direction + tables.length) % tables.length];
+            const target = nextTable.querySelector('tr.agg-row[data-agg-pivot]');
+            if (!target) return false;
+            moveStreamControlSelectionTo(target);
+            return true;
         }
 
         // Which toggle bar (if any) is the current keyboard selection,
@@ -4325,16 +4710,110 @@
         // these two containers.
         new MutationObserver(reapplyToggleBarSelection).observe(document.getElementById('sankeyPanel'), { childList: true });
         new MutationObserver(reapplyToggleBarSelection).observe(document.getElementById('aggregations'), { childList: true });
+        // #section-dns_heuristics (unlike #sankeyPanel/#aggregations,
+        // static elements always present in socrates.html) doesn't exist
+        // until buildSections() first creates it, so observing it
+        // directly here at script-init time would call .observe(null,
+        // ...) and throw. #sections is the stable, always-present
+        // ancestor buildSections() renders every tab's section into -
+        // subtree: true catches buildDnsHeuristicsSectionContent()'s own
+        // container.innerHTML replacement several levels down (sections >
+        // section-dns_heuristics > section-content > agg-panel > toggle
+        // bar) without needing to re-attach a new observer on every visit
+        // to this tab. reapplyToggleBarSelection() is a cheap no-op
+        // whenever verticalNavToggleBarKind isn't currently set, so the
+        // wider subtree scope firing on unrelated tab/pagination changes
+        // elsewhere in #sections costs nothing in practice.
+        new MutationObserver(reapplyToggleBarSelection).observe(document.getElementById('sections'), { childList: true, subtree: true });
 
         function navigateStatTabs(direction) {
             const cards = Array.from(document.querySelectorAll('#statsGrid .stat-card'));
             if (cards.length === 0) return false;
-            const activeIndex = cards.findIndex(c => c.classList.contains('tab-active'));
-            const currentIndex = activeIndex === -1 ? 0 : activeIndex;
+            // Continue from a live preview selection if one exists, not
+            // necessarily .tab-active - repeated Left/Right (like Down/Up
+            // below) only moves the preview ring one card at a time, so
+            // each press must pick up from wherever the ring already is,
+            // not restart from whatever's still really active underneath
+            // it.
+            let currentIndex = (verticalNavSelection && verticalNavSelection.isConnected && cards.includes(verticalNavSelection))
+                ? cards.indexOf(verticalNavSelection) : -1;
+            if (currentIndex === -1) {
+                const activeIndex = cards.findIndex(c => c.classList.contains('tab-active'));
+                currentIndex = activeIndex === -1 ? 0 : activeIndex;
+            }
             const nextIndex = (currentIndex + direction + cards.length) % cards.length;
-            cards[nextIndex].click();
-            scrollKeyboardSelectionIntoView(cards[nextIndex]);
+            // Preview only, same as Down/Up's own handling of the active
+            // tab's grid column (see activeColumnStatCards) -
+            // deliberately does NOT click()/activate the card. Left/Right
+            // used to switch tabs immediately on every press; now every
+            // arrow key uses the same preview-then-Enter-to-commit model
+            // (mirroring navigateThemeTiles' own established idiom for
+            // grid navigation), so a user browsing with arrow keys never
+            // gets dropped onto a different tab's data mid-browse without
+            // meaning to.
+            cards.forEach(c => c.classList.remove('keyboard-selected'));
+            verticalNavSelection = cards[nextIndex];
+            verticalNavSelection.classList.add('keyboard-selected');
+            scrollKeyboardSelectionIntoView(verticalNavSelection);
             return true;
+        }
+
+        // .stats-grid is a responsive CSS grid (repeat(auto-fit,
+        // minmax(140px, 1fr))) with no fixed column count - mirrors
+        // themeTileGridColumnCount()'s own technique of reading the
+        // browser's already-resolved column list back via
+        // getComputedStyle rather than trying to compute it by hand from
+        // container width/card width.
+        function statsGridColumnCount() {
+            const grid = document.getElementById('statsGrid');
+            if (!grid) return 1;
+            const columns = getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length;
+            return columns > 0 ? columns : 1;
+        }
+
+        // Every card in the CURRENT column, top to bottom - just
+        // [referenceCard] for a single-row grid or when no reference card
+        // is found. Used by getVerticalNavItems() to fold the stat-card
+        // grid into the same flat Down/Up sequence as everything else
+        // (filter chips, Sankey/Aggregation Tables, the data table) -
+        // earlier this was a separate preemptive interceptor
+        // (navigateStatTabsVertical) bolted onto one end of that
+        // sequence, which produced asymmetric, surprising wrap behavior
+        // (Up not retracing the same path Down took) and skipped the
+        // grid entirely whenever filter chips were the first real item in
+        // the list. Folding every row into the ordinary list at its real
+        // page position (see getVerticalNavItems' own comment) fixes both
+        // for free via the exact same wraparound logic every other item
+        // here already uses, with no stat-card-specific case needed.
+        //
+        // The reference card is whichever stat card is currently ringed
+        // (verticalNavSelection), not necessarily .tab-active - Left/
+        // Right (navigateStatTabs) can preview a DIFFERENT column's card
+        // without committing it, and Down/Up must continue straight down
+        // *that* column (real bug report: previewing a card via Right and
+        // then pressing Down landed back on the still-active tab's own
+        // column instead, reading as Down having gone "left"). Falls back
+        // to .tab-active only when nothing is currently ringed (e.g. right
+        // after a tab switch, before any arrow key has been pressed) -
+        // showTab() clears any stray ring left on a different card by a
+        // plain mouse click (see its own comment), so verticalNavSelection
+        // never drifts out of sync with reality once a real click commits
+        // a different tab.
+        function activeColumnStatCards() {
+            const referenceCard = (verticalNavSelection && verticalNavSelection.isConnected && verticalNavSelection.classList.contains('stat-card'))
+                ? verticalNavSelection
+                : document.querySelector('.stat-card.tab-active');
+            if (!referenceCard) return [];
+            const cards = Array.from(document.querySelectorAll('#statsGrid .stat-card'));
+            const columnCount = statsGridColumnCount();
+            const referenceIndex = cards.indexOf(referenceCard);
+            if (referenceIndex === -1) return [];
+            const columnStart = referenceIndex % columnCount;
+            const column = [];
+            for (let i = columnStart; i < cards.length; i += columnCount) {
+                column.push(cards[i]);
+            }
+            return column;
         }
 
         // True for the 3 controls that behave as one horizontal group within
@@ -4531,13 +5010,48 @@
                 index = (index + direction + items.length) % items.length;
             }
             verticalNavSelection = items[index];
+            // Landing on one of the active tab's own stat cards (see
+            // getVerticalNavItems'/activeColumnStatCards' own comments -
+            // the whole grid column lives at its real page position in
+            // this same list now, not bolted onto one end of it) - hand
+            // control back to Left/Right immediately, overriding the
+            // leftRightSwitchesStatTabs = false just set above, so a
+            // different data type is reachable right away without
+            // needing a second Up/Down press first.
+            if (!isWelcome && verticalNavSelection.classList.contains('stat-card')) {
+                leftRightSwitchesStatTabs = true;
+            }
             verticalNavToggleBarKind = isWelcome ? null
                 : verticalNavSelection.matches(TOGGLE_BAR_SELECTORS.sankey) ? 'sankey'
                 : verticalNavSelection.matches(TOGGLE_BAR_SELECTORS.agg) ? 'agg'
+                : verticalNavSelection.matches(TOGGLE_BAR_SELECTORS.dnsHeuristicsInfo) ? 'dnsHeuristicsInfo'
                 : null;
             verticalNavSelection.classList.add('keyboard-selected');
             scrollKeyboardSelectionIntoView(verticalNavSelection);
             return true;
+        }
+
+        // Whenever a rebuild (opening an analysis, applying/clearing a
+        // search or filter, acknowledging an alert, ...) replaces the DOM
+        // node verticalNavSelection was pointing at, the very next arrow
+        // press would otherwise hit navigateVertical()'s own "nothing
+        // selected" fallback and land ON the new top-of-list item instead
+        // of moving relative to it (real bug reports, several rounds:
+        // this happened both right after opening an analysis - landing on
+        // the default tab's own card - and after applying a search filter
+        // - landing on the new chip - when in both cases that item should
+        // already read as the current position, so the first press moves
+        // past it). Called after every such rebuild completes; re-seeds
+        // with no visible ring (a starting reference point, not something
+        // the user asked to see highlighted) so the first real arrow
+        // press behaves exactly as if the user had already arrowed onto
+        // whatever's now first. Guarded on staleness (isConnected) so an
+        // ACTUAL, still-valid selection elsewhere - a re-glued toggle bar,
+        // a table row that survived the rebuild - is left untouched
+        // rather than yanked back to the top.
+        function seedVerticalNavSelectionIfStale() {
+            if (verticalNavSelection && verticalNavSelection.isConnected) return;
+            verticalNavSelection = getVerticalNavItems()[0] || null;
         }
 
         let themeTileNavSelection = null;
@@ -4779,10 +5293,10 @@
             { code: 'pcap samples', label: 'PCAP samples', action: () => { closeAutocompleteModal(); window.open('https://malware-traffic-analysis.net', '_blank', 'noopener,noreferrer'); } },
             { code: 'log samples', label: 'Log samples', action: () => { closeAutocompleteModal(); window.open('https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES', '_blank', 'noopener,noreferrer'); } },
             { code: 'binary samples', label: 'Binary samples', action: () => { closeAutocompleteModal(); window.open('https://www.eicar.org/', '_blank', 'noopener,noreferrer'); } },
-            { code: 'themes', label: 'Open Themes', action: () => { closeAutocompleteModal(); showThemesModal(); } },
-            { code: 'rules', label: 'Open Rules', action: () => { closeAutocompleteModal(); showRulesModal(); } },
-            { code: 'settings', label: 'Open Settings', action: () => { closeAutocompleteModal(); showSettingsModal(); } },
-            { code: 'notes', label: 'Open Notes', analysisOnly: true, action: () => { closeAutocompleteModal(); showNotesModal(); } },
+            { code: 'themes', label: 'Themes', action: () => { closeAutocompleteModal(); showThemesModal(); } },
+            { code: 'rules', label: 'Rules', action: () => { closeAutocompleteModal(); showRulesModal(); } },
+            { code: 'settings', label: 'Settings', action: () => { closeAutocompleteModal(); showSettingsModal(); } },
+            { code: 'notes', label: 'Notes', analysisOnly: true, action: () => { closeAutocompleteModal(); showNotesModal(); } },
             // openDeleteAnalysis() only opens the confirmation modal (see
             // its own definition) - it still requires clicking Delete
             // there to actually delete anything, same "no action until the
@@ -4793,7 +5307,7 @@
             // display:none until showAnalysisUI() reveals it, so
             // analysisOnly keeps this out of the candidate list entirely on
             // the welcome screen rather than focusing a hidden input.
-            { code: 'search', label: 'Go to Search bar', analysisOnly: true, action: () => { closeAutocompleteModal(); document.getElementById('searchInput').focus(); } },
+            { code: 'search', label: 'Search', analysisOnly: true, action: () => { closeAutocompleteModal(); document.getElementById('searchInput').focus(); } },
             { code: 'clear', label: 'Clear all search filters', analysisOnly: true, action: () => { closeAutocompleteModal(); clearAllFilters(); } },
             { code: 'sankey', label: 'Toggle Sankey Diagram section', analysisOnly: true, action: () => { closeAutocompleteModal(); toggleDiagram(); } },
             { code: 'aggregation', label: 'Toggle Aggregation Tables section', analysisOnly: true, action: () => { closeAutocompleteModal(); toggleAggregations(); } },
@@ -4812,7 +5326,12 @@
             { code: 'copy md5 hash to clipboard', label: 'Copy MD5 hash to clipboard', analysisOnly: true, action: () => { closeAutocompleteModal(); copyMd5ToClipboard(currentMd5); } },
             { code: 'rename analysis', label: 'Rename Analysis', analysisOnly: true, action: () => { closeAutocompleteModal(); startRenameAnalysis(); } },
             ...Object.entries(THEMES).map(([key, theme]) => ({
-                code: theme.label.toLowerCase(),
+                // 'theme' is appended to code (not just present in label)
+                // so typing "theme" surfaces every individual theme-switch
+                // command, not just the "Themes" modal-opener above -
+                // autocompleteMatchesQuery/autocompleteMatchScore only
+                // ever look at code, never label.
+                code: `${theme.label.toLowerCase()} theme`,
                 label: `${theme.label} theme`,
                 action: () => { closeAutocompleteModal(); setTheme(key); showToast(`Switched to ${theme.label} theme.`); },
             })),
@@ -4879,7 +5398,7 @@
                 const label = card.querySelector('.stat-label').textContent;
                 return {
                     code: label.toLowerCase(),
-                    label: `Go to ${label}`,
+                    label: label,
                     action: () => { closeAutocompleteModal(); card.click(); },
                 };
             });
@@ -5046,12 +5565,12 @@
             // switch tabs (rebuilding the very table the open menu's row
             // belongs to) while the menu is still sitting on screen.
             if (e.key === 'ArrowRight' && isNavigableKeyContext(e)) {
-                if (!activePivotMenuEl && (navigateThemeTiles(1) || navigateStreamControls(1) || navigatePacketControls(1) || (leftRightSwitchesStatTabs && navigateStatTabs(1)) || navigateSampleCards(1))) {
+                if (!activePivotMenuEl && (navigateThemeTiles(1) || navigateStreamControls(1) || navigatePacketControls(1) || navigateFilterBarItems(1) || navigateAggPaginationButtons(1) || navigateAggTables(1) || (leftRightSwitchesStatTabs && navigateStatTabs(1)) || navigateSampleCards(1))) {
                     e.preventDefault();
                 }
             }
             if (e.key === 'ArrowLeft' && isNavigableKeyContext(e)) {
-                if (!activePivotMenuEl && (navigateThemeTiles(-1) || navigateStreamControls(-1) || navigatePacketControls(-1) || (leftRightSwitchesStatTabs && navigateStatTabs(-1)) || navigateSampleCards(-1))) {
+                if (!activePivotMenuEl && (navigateThemeTiles(-1) || navigateStreamControls(-1) || navigatePacketControls(-1) || navigateFilterBarItems(-1) || navigateAggPaginationButtons(-1) || navigateAggTables(-1) || (leftRightSwitchesStatTabs && navigateStatTabs(-1)) || navigateSampleCards(-1))) {
                     e.preventDefault();
                 }
             }
@@ -5798,11 +6317,10 @@
             const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
             if (!visibleSection) {
                 // Binary analysis mode: no tab sections, rebuild aggregations directly
-                const fileAlerts = allEvents.filter(e => e.event_type === 'filealerts');
-                const filtered = fileAlerts.filter(e => matchesCurrentFilters(e, (ev, col) => extractValue(ev, col, -1)));
                 if (advancedMode) {
                     hiddenAggregations = new Set();
-                    buildBinaryAggregations(filtered);
+                    aggPage = {}; aggFullCountsCache = {}; aggTotalsCache = {};
+                    await rebuildVisibleAggregations();
                 } else {
                     const aggContainer = document.getElementById('aggregations');
                     if (aggContainer) aggContainer.innerHTML = AGG_COLLAPSED_HTML;
@@ -5810,30 +6328,10 @@
                 updateFilterBarVisibility();
                 return;
             }
-            const eventType = visibleSection.id.replace('section-', '');
             if (advancedMode) {
-                // needsFullBatch (not an unconditional ensureCappedBatch) so
-                // opening the aggregation view for an eligible pcap per-type
-                // tab with no active filter goes straight through
-                // buildAggregationsSection's own server-aggregation branch
-                // instead of always eagerly fetching the full capped batch.
-                if (needsFullBatch(eventType)) await ensureCappedBatch(eventType);
                 hiddenAggregations = new Set();
-                if (eventType === 'all') {
-                    await buildAggregationsSectionAll();
-                } else if (isLogAnalysisMode && eventType === 'log') {
-                    const events = tabDataCache['log'] || [];
-                    const filtered = getFilteredLogEvents(events);
-                    buildLogAggregations(filtered, visibleSection.id);
-                } else if (isLogAnalysisMode && eventType === 'sigmaalert') {
-                    const alerts = tabDataCache['sigmaalert'] || [];
-                    const filtered = getFilteredSigmaAlerts(alerts);
-                    buildSigmaAlertAggregations(filtered, visibleSection.id);
-                } else {
-                    const events = tabDataCache[eventType] || [];
-                    const filtered = getFilteredEvents(visibleSection.id, events, eventType);
-                    await buildAggregationsSection(eventType, filtered);
-                }
+                aggPage = {}; aggFullCountsCache = {}; aggTotalsCache = {};
+                await rebuildVisibleAggregations();
             } else {
                 const aggContainer = document.getElementById('aggregations');
                 if (aggContainer) {
@@ -5848,6 +6346,7 @@
             anomaly: 'Anomalies',
             protocol_decode: 'Decoder Alerts',
             dns: 'DNS Queries',
+            dns_heuristics: 'DNS Heuristics',
             filealerts: 'File Alerts',
             fileinfo: 'File Info',
             flow: 'Flows',
@@ -6343,7 +6842,13 @@
             const identityAttr = eventType === 'alert'
                 ? ` data-alert-identity="${escapeHtml(String(e.alert?.signature_id || e.alert?.signature || ''))}"`
                 : '';
-            return `<tr data-id="${escapeHtml(String(e.id))}"${pivotAttrs}${identityAttr} onclick="toggleRow(this, event)"><td class="timestamp">${escapeHtml(ts)}</td><td>${valueDotSpan(DOT_COLORS.PROTO[proto.toUpperCase()])}${escapeHtml(proto)}</td><td class="mono-fixed" title="${escapeHtml(srcIp)}">${escapeHtml(srcIp)}</td><td class="mono-fixed">${escapeHtml(String(srcPort))}</td><td class="mono-fixed" title="${escapeHtml(dstIp)}">${escapeHtml(dstIp)}</td><td class="mono-fixed">${escapeHtml(String(dstPort))}</td>`;
+            // Carries this row's own community_id (see showPivotMenu's
+            // Correlate entry), independent of pivotAttrs above - Correlate
+            // must work from ANY field's pivot menu on this row, not just
+            // one clicked directly on the Community ID value itself, so it
+            // can't rely on that value having been the one clicked.
+            const communityIdAttr = e.community_id ? ` data-community-id="${escapeHtml(e.community_id)}"` : '';
+            return `<tr data-id="${escapeHtml(String(e.id))}"${pivotAttrs}${identityAttr}${communityIdAttr} onclick="toggleRow(this, event)"><td class="timestamp">${escapeHtml(ts)}</td><td>${valueDotSpan(DOT_COLORS.PROTO[proto.toUpperCase()])}${escapeHtml(proto)}</td><td class="mono-fixed" title="${escapeHtml(srcIp)}">${escapeHtml(srcIp)}</td><td class="mono-fixed">${escapeHtml(String(srcPort))}</td><td class="mono-fixed" title="${escapeHtml(dstIp)}">${escapeHtml(dstIp)}</td><td class="mono-fixed">${escapeHtml(String(dstPort))}</td>`;
         }
 
         function buildRowForEvent(e) {
@@ -6729,7 +7234,7 @@
             }
             const columns = ['Rule Name', 'Tags', 'Author'];
             const html = buildAggregationTablesCore(events, columns, 'section-binary', extractValue);
-            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + html + '</div></div>';
+            aggContainer.innerHTML = _wrapAggPanel(html);
         }
 
         function buildBinaryAnalysisView(events, baseEvents) {
@@ -7105,6 +7610,360 @@
             return alerts.filter(a => matchesCurrentFilters(a, extractSigmaValue));
         }
 
+        // DNS Heuristics - a derived, client-computed view over the same
+        // 'dns' event batch the real DNS tab uses (see buildDnsHeuristicsSection
+        // below), grouping queries by registrable domain and flagging ones
+        // that look like DGA/tunneling activity. Not a rule engine match
+        // (unlike Suricata/Sigma alerts) - a heuristic score meant to
+        // narrow an analyst's attention, so it's surfaced as its own tab
+        // rather than folded into the acknowledge/playbook alert pipeline
+        // built for real rule matches.
+
+        // A short, deliberately non-exhaustive allowlist of CDN/cloud
+        // suffixes that legitimately generate long, random-looking
+        // subdomains as part of normal operation (asset hashes, edge PoP
+        // routing, etc.) - without this, those would dominate the flagged
+        // list and drown out real signal. Reduces noise, doesn't eliminate
+        // it - an analyst in an unusual environment may still see false
+        // positives from CDNs not on this list.
+        const DNS_HEURISTICS_CDN_SUFFIXES = [
+            'amazonaws.com', 'cloudfront.net', 'akamaiedge.net', 'akamaitechnologies.com',
+            'akamai.net', 'azureedge.net', 'azurewebsites.net', 'windows.net',
+            'googleusercontent.com', 'gstatic.com', 'googleapis.com', 'googlesyndication.com',
+            'doubleclick.net', 'fastly.net', 'fastlylb.net', 'cloudflare.net',
+            'edgekey.net', 'edgesuite.net', 'edgecastcdn.net', 'msedge.net',
+            'trafficmanager.net', 'cdn77.org', 'stackpathdns.com',
+        ];
+
+        function _isKnownCdnSuffix(suffix) {
+            return DNS_HEURISTICS_CDN_SUFFIXES.some(s => suffix === s || suffix.endsWith('.' + s));
+        }
+
+        // Common two-label public suffixes (co.uk, com.au, ...) that need a
+        // third label pulled in to reach the real registrable domain - not
+        // a full Public Suffix List implementation (that's a large,
+        // frequently-updated dataset, at odds with this app's offline/
+        // self-contained design - see AGENTS.md's detection-rule-freshness
+        // reasoning for the same tradeoff elsewhere), just enough common
+        // cases to keep the biggest offenders from being mis-grouped.
+        const DNS_HEURISTICS_MULTI_PART_SUFFIXES = new Set([
+            'co.uk', 'org.uk', 'gov.uk', 'ac.uk', 'me.uk', 'ltd.uk', 'net.uk',
+            'com.au', 'net.au', 'org.au', 'com.br', 'com.cn', 'com.mx', 'com.tr',
+            'co.jp', 'co.nz', 'co.in', 'co.za', 'co.kr', 'com.sg', 'co.id',
+        ]);
+
+        function dnsRegistrableSuffix(domain) {
+            const labels = domain.toLowerCase().replace(/\.$/, '').split('.').filter(Boolean);
+            if (labels.length < 2) return domain.toLowerCase();
+            const lastTwo = labels.slice(-2).join('.');
+            if (labels.length >= 3 && DNS_HEURISTICS_MULTI_PART_SUFFIXES.has(lastTwo)) {
+                return labels.slice(-3).join('.');
+            }
+            return lastTwo;
+        }
+
+        function shannonEntropyBits(str) {
+            if (!str) return 0;
+            const counts = {};
+            for (const ch of str) counts[ch] = (counts[ch] || 0) + 1;
+            let entropy = 0;
+            for (const ch in counts) {
+                const p = counts[ch] / str.length;
+                entropy -= p * Math.log2(p);
+            }
+            return entropy;
+        }
+
+        // Fraction of characters that are a/e/i/o/u - digits and
+        // consonants both count as "not a vowel", so this naturally
+        // penalizes both digit-heavy strings (classic DGA output like
+        // "08kcbghk807qtl9") and pure-random consonant strings alike,
+        // without needing a separate digit-specific check. English
+        // words/word-mashups (even long, unusual-looking ones like
+        // "furtheringthemagic") sit around 30-40%; a uniformly random
+        // string over the full alnum charset sits far lower.
+        function vowelRatio(str) {
+            if (!str) return 0;
+            return (str.match(/[aeiou]/g) || []).length / str.length;
+        }
+
+        // Only scored above this length - entropy on short strings is
+        // noisy (a handful of characters can look "random" by chance),
+        // which is exactly the false-positive mode a length floor exists
+        // to cut off.
+        const DNS_HEURISTICS_MIN_ENTROPY_PREFIX_LENGTH = 10;
+        const DNS_HEURISTICS_ENTROPY_THRESHOLD = 3.5;
+        // Below random-uniform-lowercase's own expected ~19% (5/26) and
+        // comfortably below ordinary English's ~30-40% - see
+        // vowelRatio's own comment for why this, not a digit-presence
+        // check, is what actually separates "furtheringthemagic" (0.33)
+        // from "08kcbghk807qtl9" (0.0) despite their nearly identical
+        // entropy (3.50 vs 3.51).
+        const DNS_HEURISTICS_DGA_MAX_VOWEL_RATIO = 0.20;
+        const DNS_HEURISTICS_LONG_NAME_LENGTH = 60;
+        const DNS_HEURISTICS_LONG_LABEL_LENGTH = 50;
+        // Distinct subdomains under one suffix, not raw query count - a
+        // chatty app repeatedly resolving the SAME name isn't suspicious,
+        // but many unique names under one suffix is a much more specific
+        // tunneling/DGA signal.
+        const DNS_HEURISTICS_FANOUT_THRESHOLD = 15;
+
+        // Groups `events` (a 'dns' event array) by registrable domain,
+        // scores each group against a handful of independent heuristics,
+        // and returns only the ones that tripped at least one - sorted
+        // highest score first. Each event contributes to its own suffix
+        // group regardless of which specific query it is; scoring happens
+        // once per group afterward, not per event.
+        function computeDnsHeuristics(events) {
+            const bySuffix = new Map();
+
+            events.forEach(e => {
+                const domain = (e.dns?.rrname || e.dns?.queries?.[0]?.rrname || '').toLowerCase();
+                if (!domain) return;
+                const qtype = (e.dns?.rrtype || e.dns?.queries?.[0]?.rrtype || '').toUpperCase();
+                const suffix = dnsRegistrableSuffix(domain);
+                if (_isKnownCdnSuffix(suffix)) return;
+
+                let rec = bySuffix.get(suffix);
+                if (!rec) {
+                    rec = {
+                        suffix, queryCount: 0, names: new Map(), srcIps: new Set(),
+                        maxEntropy: 0, maxEntropyName: '', maxNameLength: 0,
+                        maxLabelLength: 0, txtNullCount: 0, firstSeen: null, lastSeen: null,
+                    };
+                    bySuffix.set(suffix, rec);
+                }
+
+                rec.queryCount++;
+                rec.names.set(domain, (rec.names.get(domain) || 0) + 1);
+                if (e.src_ip) rec.srcIps.add(e.src_ip);
+                rec.maxNameLength = Math.max(rec.maxNameLength, domain.length);
+                rec.maxLabelLength = Math.max(rec.maxLabelLength, ...domain.split('.').map(l => l.length));
+
+                const suffixWithDot = '.' + suffix;
+                const prefix = domain.endsWith(suffixWithDot)
+                    ? domain.slice(0, domain.length - suffixWithDot.length)
+                    : (domain === suffix ? '' : domain);
+                const prefixCompact = prefix.replace(/\./g, '');
+                if (prefixCompact.length >= DNS_HEURISTICS_MIN_ENTROPY_PREFIX_LENGTH) {
+                    const ent = shannonEntropyBits(prefixCompact);
+                    if (ent > rec.maxEntropy) {
+                        rec.maxEntropy = ent;
+                        rec.maxEntropyName = domain;
+                    }
+                }
+
+                if (qtype === 'TXT' || qtype === 'NULL') rec.txtNullCount++;
+
+                const ts = e.timestamp || '';
+                if (ts) {
+                    if (!rec.firstSeen || ts < rec.firstSeen) rec.firstSeen = ts;
+                    if (!rec.lastSeen || ts > rec.lastSeen) rec.lastSeen = ts;
+                }
+            });
+
+            const results = [];
+            bySuffix.forEach(rec => {
+                const reasons = [];
+                let score = 0;
+
+                if (rec.maxEntropy > DNS_HEURISTICS_ENTROPY_THRESHOLD) {
+                    reasons.push('High-entropy subdomain');
+                    score += 35;
+                }
+                // Separate from the subdomain-prefix check above, and
+                // scored against the registrable label itself (the first
+                // label of rec.suffix, e.g. "08kcbghk807qtl9" from
+                // "08kcbghk807qtl9.top") - DNS tunneling and DGA malware
+                // put their randomness in different places. Tunneling
+                // fans many random subdomains out under one fixed,
+                // otherwise-ordinary parent domain (caught above); a DGA
+                // instead generates the base domain itself, usually
+                // queried once with nothing distinctive in front of it -
+                // exactly the case the prefix-only check above computes
+                // an empty prefix for and silently skips.
+                //
+                // Entropy alone isn't enough here: a long lowercase
+                // word-mashup domain (e.g. "furtheringthemagic.com", a
+                // real false positive this shipped with briefly) can land
+                // right next to genuine DGA output in raw entropy - 3.50
+                // vs 3.51 for "08kcbghk807qtl9", practically tied. Vowel
+                // ratio is what actually tells them apart (0.33 vs 0.0 -
+                // see vowelRatio's own comment), so it's required
+                // alongside entropy, not scored as its own separate
+                // reason.
+                const suffixLabel = rec.suffix.split('.')[0];
+                if (suffixLabel.length >= DNS_HEURISTICS_MIN_ENTROPY_PREFIX_LENGTH
+                        && shannonEntropyBits(suffixLabel) > DNS_HEURISTICS_ENTROPY_THRESHOLD
+                        && vowelRatio(suffixLabel) < DNS_HEURISTICS_DGA_MAX_VOWEL_RATIO) {
+                    reasons.push('High-entropy domain name (possible DGA)');
+                    score += 35;
+                }
+                if (rec.maxNameLength > DNS_HEURISTICS_LONG_NAME_LENGTH || rec.maxLabelLength > DNS_HEURISTICS_LONG_LABEL_LENGTH) {
+                    reasons.push('Unusually long query name');
+                    score += 15;
+                }
+                const distinctNames = rec.names.size;
+                if (distinctNames >= DNS_HEURISTICS_FANOUT_THRESHOLD) {
+                    reasons.push('High distinct-subdomain fan-out');
+                    score += 30;
+                }
+                if (rec.txtNullCount > 0) {
+                    reasons.push('TXT/NULL query type');
+                    score += 20;
+                }
+
+                if (score === 0) return;
+
+                results.push({
+                    domain: rec.suffix,
+                    score: Math.min(100, score),
+                    reasons,
+                    queryCount: rec.queryCount,
+                    distinctNames,
+                    sampleQuery: rec.maxEntropyName || Array.from(rec.names.keys())[0] || rec.suffix,
+                    sourceCount: rec.srcIps.size,
+                    firstSeen: rec.firstSeen,
+                    lastSeen: rec.lastSeen,
+                });
+            });
+
+            results.sort((a, b) => b.score - a.score);
+            return results;
+        }
+
+        const DNS_HEURISTIC_COLUMNS = ['Domain', 'Score', 'Reasons', 'Sample Query', 'Queries', 'Distinct Names', 'First Seen'];
+
+        function extractDnsHeuristicValue(item, col) {
+            switch (col) {
+                case 'Domain': return item.domain;
+                case 'Score': return item.score;
+                case 'Reasons': return item.reasons.join(', ');
+                case 'Sample Query': return item.sampleQuery;
+                case 'Queries': return item.queryCount;
+                case 'Distinct Names': return item.distinctNames;
+                case 'First Seen': return (item.firstSeen || '').slice(0, 19);
+                default: return '';
+            }
+        }
+
+        function dnsHeuristicRowHtml(item) {
+            const domainJs = escapeJsString(item.domain);
+            const scoreColor = item.score >= 60 ? 'var(--badge-danger-text)' : item.score >= 35 ? 'var(--badge-warning-text)' : 'var(--text-muted)';
+            // data-id is what getVisibleDataTableRows() (the Up/Down
+            // keyboard nav item list) selects on - tr[data-id] - without
+            // it these rows are invisible to keyboard navigation entirely.
+            // computeDnsHeuristics() already groups by registrable domain,
+            // so item.domain is guaranteed unique within one table's rows,
+            // same uniqueness property a real numeric event id has. The
+            // only other reader of data-id (acknowledgeableRowInfo, for
+            // the pivot menu's Acknowledge button) never runs against
+            // these rows - they have no pivot menu at all, just this plain
+            // onclick - so a non-numeric value here is safe.
+            return `<tr class="dns-heuristic-row" data-id="${escapeHtml(item.domain)}" onclick="viewDnsHeuristicDomain('${domainJs}')" style="cursor:pointer;" title="Click to view matching DNS queries">` +
+                `<td class="mono">${escapeHtml(item.domain)}</td>` +
+                `<td>${valueDotSpan(scoreColor)}${item.score}</td>` +
+                `<td>${escapeHtml(item.reasons.join(', '))}</td>` +
+                `<td class="mono">${escapeHtml(item.sampleQuery)}</td>` +
+                `<td>${item.queryCount.toLocaleString()}</td>` +
+                `<td>${item.distinctNames.toLocaleString()}</td>` +
+                `<td class="timestamp">${escapeHtml((item.firstSeen || '').slice(0, 19))}</td>` +
+                `<td></td>` +
+                `</tr>`;
+        }
+
+        // Jumps to the real DNS tab, scoped to this suffix - a free-text
+        // search (huntFilterValue), not a column filter (onlyFilterValue),
+        // since `domain` here is the grouping suffix (e.g. "example.com"),
+        // not a single query's exact name - a phrase search still matches
+        // "xk3f9.example.com" (FTS5 tokenizes on the dots, so "example"
+        // immediately followed by "com" matches regardless of what
+        // precedes it), where an exact-equality column filter would not.
+        // Goes through huntFilterValue (not a hand-rolled shortcut) so its
+        // tabDataCache invalidation runs too - the DNS tab may already be
+        // cached from an earlier, differently-scoped visit.
+        async function viewDnsHeuristicDomain(domain) {
+            await huntFilterValue(domain);
+            const card = Array.from(document.querySelectorAll('.stat-card'))
+                .find(c => c.getAttribute('onclick') === "showTab('section-dns', this)");
+            showTab('section-dns', card || null);
+        }
+
+        const DNS_HEURISTICS_INFO_COLLAPSED_KEY = 'socrates_dnsHeuristicsInfoCollapsed';
+
+        // This tab behaves nothing like any other data-type tab - rows are
+        // aggregated per-domain (not raw events), clicking one navigates
+        // away entirely instead of expanding a detail panel, and the
+        // scoring criteria aren't visible anywhere in the column headers -
+        // so unlike every other tab, it gets its own explanatory card.
+        // Collapsible (reusing the same .agg-panel/.section-toggle-bar
+        // look as the Sankey/Aggregation Tables panels) rather than a
+        // permanent fixture, since re-reading the same explanation on
+        // every visit is just clutter once an analyst already knows it -
+        // state persists across visits via localStorage, defaulting open
+        // the first time.
+        function dnsHeuristicsInfoCardHtml() {
+            const collapsed = safeStorageGet(localStorage, DNS_HEURISTICS_INFO_COLLAPSED_KEY) === 'true';
+            const arrow = collapsed ? '▸' : '▾';
+            const display = collapsed ? 'none' : 'block';
+            return `<div class="agg-panel" style="margin-bottom: 15px;">
+                <div class="section-toggle-bar dns-heuristics-info-toggle" onclick="toggleDnsHeuristicsInfo(this)">${arrow} About DNS Heuristics</div>
+                <div class="dns-heuristics-info-body" style="display:${display}; padding: 16px 20px; color: var(--text-muted); font-size: 0.85rem; line-height: 1.7;">
+                    <p style="margin:0 0 10px 0;">This tab groups DNS queries by registrable domain and flags ones that look like DNS tunneling or DGA (Domain Generation Algorithm) malware, based on patterns in <em>this capture only</em>. It's a heuristic, not a rule match - treat a flag as a lead to investigate, not a confirmed verdict.</p>
+                    <p style="margin:0 0 6px 0; color: var(--text-bright);">A domain is flagged when it trips one or more of:</p>
+                    <ul style="margin:0 0 10px 0; padding-left: 20px;">
+                        <li><strong>High-entropy subdomain</strong> - a random-looking label (10+ characters) under an otherwise ordinary parent domain, the classic DNS tunneling shape.</li>
+                        <li><strong>High-entropy domain name (possible DGA)</strong> - the registrable domain itself looks algorithmically generated (high character entropy, few vowels) rather than a real word or brand.</li>
+                        <li><strong>High distinct-subdomain fan-out</strong> - 15 or more unique subdomains queried under the same parent, not just repeated lookups of the same name.</li>
+                        <li><strong>Unusually long query name</strong> - an overall name or single label far longer than typical.</li>
+                        <li><strong>TXT/NULL query type</strong> - record types more associated with tunneling/exfil tooling than ordinary browsing.</li>
+                    </ul>
+                    <p style="margin:0 0 10px 0;">Common CDN/cloud domains (Amazon, Akamai, Cloudflare, Google, Fastly, and similar) are excluded up front, since they legitimately generate random-looking subdomains as part of normal operation.</p>
+                    <p style="margin:0;">Clicking a row jumps to the real <strong>DNS Queries</strong> tab, searched for that domain, so you can see every individual query behind the score.</p>
+                </div>
+            </div>`;
+        }
+
+        function toggleDnsHeuristicsInfo(bar) {
+            const body = bar.nextElementSibling;
+            const collapsed = body.style.display === 'none';
+            body.style.display = collapsed ? 'block' : 'none';
+            bar.textContent = (collapsed ? '▾' : '▸') + ' About DNS Heuristics';
+            if (collapsed) {
+                safeStorageRemove(localStorage, DNS_HEURISTICS_INFO_COLLAPSED_KEY);
+            } else {
+                safeStorageSet(localStorage, DNS_HEURISTICS_INFO_COLLAPSED_KEY, 'true');
+            }
+        }
+
+        function buildDnsHeuristicsSectionContent(sectionId, items) {
+            const container = document.getElementById(sectionId);
+            if (!container) return;
+            let html = '<div class="section-content">';
+            html += dnsHeuristicsInfoCardHtml();
+            if (items.length === 0) {
+                html += `<div class="no-matches">No suspicious DNS activity detected${currentSearch.length > 0 ? ' for the current search' : ''}</div>`;
+            } else {
+                html += renderPaginatedTable({
+                    sectionKey: sectionId,
+                    columns: DNS_HEURISTIC_COLUMNS,
+                    items,
+                    extractFn: extractDnsHeuristicValue,
+                    rowRenderer: dnsHeuristicRowHtml,
+                    rerender: () => buildDnsHeuristicsSectionContent(sectionId, items),
+                });
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        async function buildDnsHeuristicsSection() {
+            await ensureCappedBatch('dns');
+            const events = tabDataCache['dns'] || [];
+            const items = computeDnsHeuristics(events);
+            buildDnsHeuristicsSectionContent('section-dns_heuristics', items);
+        }
+
         function buildLogSectionContent(sectionId, events) {
             const container = document.getElementById(sectionId);
             if (!container) return;
@@ -7191,46 +8050,158 @@
             container.innerHTML = html;
         }
 
-        // Shared aggregation-table renderer: countsByColumn maps column label ->
-        // {value: count}; columns control display order. Hidden columns and
-        // empty columns are skipped.
-        function _renderAggTablesHtml(countsByColumn, columns, sectionId) {
+        // Builds one column's whole <div class="agg-section">...</div>
+        // block - header/close button, the current page's rows, and
+        // Prev/Next controls if there's more than one page. `entries` is
+        // already the exact [value, count] pairs to display, in display
+        // order; `total`/`page` drive the pagination controls only, no
+        // further slicing happens here. Shared by both the full-section
+        // renderer below (_renderAggTablesHtml) and changeAggPage's
+        // single-table patch, so the two can never render this markup
+        // differently from each other.
+        function _renderOneAggTableHtml(sectionId, col, entries, total, page) {
+            let html = `<div class="section agg-section" data-col="${escapeHtml(col)}"><div class="section-content"><div class="agg-table">
+                <div class="agg-header"><span>${escapeHtml(col)}</span><button class="agg-close" onclick="hideAggregationTable('${sectionId}', '${escapeJsString(col)}')" title="Hide">&times;</button></div>
+                <table><thead><tr><th style="width:60px;text-align:right;">Count</th><th>Value</th></tr></thead><tbody>`;
+            for (const [val, count] of entries) {
+                const escapedVal = escapeHtml(val);
+                const filterVal = val === '(empty)' ? '' : val;
+                // data-agg-pivot (delegated, see the pivot-menu click
+                // listener below), not a direct call to the old
+                // (now-removed) single-value applyFilter helper - val is
+                // arbitrary field content, and the pivot menu needs the raw
+                // value for Hunt/Copy/the lookup sites, not just a
+                // JS-string-escaped one for a single hardcoded call. The
+                // "(empty)" bucket has nothing meaningful to pivot on
+                // (matches pivotDataAttrsHtml/htmlRowText's own empty-value
+                // exclusion) - left without the attribute, so it's not
+                // clickable at all.
+                const pivotAttr = filterVal
+                    ? ` data-agg-pivot="${encodeURIComponent(JSON.stringify([sectionId, col, filterVal]))}"`
+                    : '';
+                html += `<tr class="agg-row"${pivotAttr}>
+                    <td style="text-align:right;color:var(--text-muted);">${count}</td><td class="agg-cell" title="${escapedVal}">${escapedVal}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            if (total > AGG_PAGE_SIZE) {
+                const totalPages = Math.max(1, Math.ceil(total / AGG_PAGE_SIZE));
+                html += `<div class="agg-pagination">
+                    <button type="button" class="agg-page-btn" onclick="changeAggPage('${sectionId}', '${escapeJsString(col)}', -1)" ${page <= 1 ? 'disabled' : ''}>&larr; Prev</button>
+                    <span class="agg-page-info">Page ${page} of ${totalPages}</span>
+                    <button type="button" class="agg-page-btn" onclick="changeAggPage('${sectionId}', '${escapeJsString(col)}', 1)" ${page >= totalPages ? 'disabled' : ''}>Next &rarr;</button>
+                </div>`;
+            }
+            html += '</div></div></div>';
+            return html;
+        }
+
+        // Shared aggregation-table renderer: columns control display order,
+        // hidden columns are skipped. countsByColumn shape depends on the
+        // caller:
+        //
+        // - Client-computed callers (log/sigmaalert/binary/'all' client-
+        //   fallback) pass the FULL {value: count} map for every column -
+        //   `totals` is omitted, so this derives each column's total from
+        //   the map's own size and slices out the current page itself. The
+        //   full map is also stashed in aggFullCountsCache so changeAggPage
+        //   can re-slice later without recomputing from events.
+        // - Server-aggregated callers (buildAggregationsSection/
+        //   buildAggregationsSectionAll) pass `totals` (from
+        //   fetchAggregationTotals) plus a countsByColumn that already only
+        //   holds page 1's rows per column (from the bulk
+        //   /api/aggregation-data fetch) - no slicing needed, just render.
+        function _renderAggTablesHtml(countsByColumn, columns, sectionId, totals) {
+            if (!totals) aggFullCountsCache[sectionId] = countsByColumn;
             let html = '';
             for (const col of columns) {
                 if (hiddenAggregations.has(sectionId + ':' + col)) continue;
                 const colCounts = countsByColumn[col] || {};
-                const entries = Object.entries(colCounts).sort((a, b) => b[1] - a[1]).slice(0, CONFIG.AGGREGATION_TOP_N);
-                if (entries.length === 0) continue;
-                html += `<div class="section agg-section" data-col="${escapeHtml(col)}"><div class="section-content"><div class="agg-table">
-                    <div class="agg-header"><span>${escapeHtml(col)}</span><button class="agg-close" onclick="hideAggregationTable('${sectionId}', '${escapeJsString(col)}')" title="Hide">&times;</button></div>
-                    <table><thead><tr><th style="width:60px;text-align:right;">Count</th><th>Value</th></tr></thead><tbody>`;
-                for (const [val, count] of entries) {
-                    const escapedVal = escapeHtml(val);
-                    const filterVal = val === '(empty)' ? '' : val;
-                    // data-agg-pivot (delegated, see the pivot-menu click
-                    // listener below), not a direct call to the old
-                    // (now-removed) single-value applyFilter helper -
-                    // val is arbitrary field content, and the pivot menu
-                    // needs the raw value for Hunt/Copy/the lookup sites,
-                    // not just a JS-string-escaped one for a single
-                    // hardcoded call. The "(empty)" bucket has nothing
-                    // meaningful to pivot on (matches pivotDataAttrsHtml/
-                    // htmlRowText's own empty-value exclusion) - left
-                    // without the attribute, so it's not clickable at all.
-                    const pivotAttr = filterVal
-                        ? ` data-agg-pivot="${encodeURIComponent(JSON.stringify([sectionId, col, filterVal]))}"`
-                        : '';
-                    html += `<tr class="agg-row"${pivotAttr}>
-                        <td style="text-align:right;color:var(--text-muted);">${count}</td><td class="agg-cell" title="${escapedVal}">${escapedVal}</td>
-                    </tr>`;
+                const page = aggPage[sectionId + ':' + col] || 1;
+                let entries, total;
+                if (totals) {
+                    total = totals[col] || 0;
+                    // Re-sorted here too (not just trusted as "already in
+                    // server order") - plain-object key iteration order in
+                    // JS reorders integer-like string keys (e.g. a Dest
+                    // Port column's "443"/"80") numerically ascending ahead
+                    // of every other key, regardless of insertion order, so
+                    // trusting Object.entries() to preserve the server's
+                    // count-descending order would silently misorder any
+                    // numeric-looking value column.
+                    entries = Object.entries(colCounts).sort((a, b) => b[1] - a[1]);
+                } else {
+                    const sorted = Object.entries(colCounts).sort((a, b) => b[1] - a[1]);
+                    total = sorted.length;
+                    const start = (page - 1) * AGG_PAGE_SIZE;
+                    entries = sorted.slice(start, start + AGG_PAGE_SIZE);
                 }
-                html += '</tbody></table></div></div></div>';
+                if (total === 0) continue;
+                html += _renderOneAggTableHtml(sectionId, col, entries, total, page);
             }
             return html;
         }
 
+        function _aggPageSizeSelectorHtml() {
+            const options = AGG_PAGE_SIZE_OPTIONS.map(n =>
+                `<option value="${n}"${n === AGG_PAGE_SIZE ? ' selected' : ''}>${n}</option>`
+            ).join('');
+            return `<div class="agg-page-size-bar"><label for="aggPageSizeSelect">Items per page</label>
+                <select id="aggPageSizeSelect" onchange="changeAggPageSize(this.value)">${options}</select></div>`;
+        }
+
         function _wrapAggPanel(innerHtml) {
-            return '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + innerHtml + '</div></div>';
+            return '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">'
+                + _aggPageSizeSelectorHtml() + innerHtml + '</div></div>';
+        }
+
+        // Rebuilds whichever Aggregation Tables view currently applies -
+        // binary analysis mode (no tab sections at all) or the visible
+        // tab's own section - shared by toggleAggregations() (opening the
+        // panel) and changeAggPageSize() (page size changed while already
+        // open), so the section/eventType routing logic can't drift between
+        // the two call sites.
+        async function rebuildVisibleAggregations() {
+            const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
+            if (!visibleSection) {
+                const fileAlerts = allEvents.filter(e => e.event_type === 'filealerts');
+                const filtered = fileAlerts.filter(e => matchesCurrentFilters(e, (ev, col) => extractValue(ev, col, -1)));
+                buildBinaryAggregations(filtered);
+                return;
+            }
+            const eventType = visibleSection.id.replace('section-', '');
+            // needsFullBatch (not an unconditional ensureCappedBatch) so
+            // opening the aggregation view for an eligible pcap per-type tab
+            // with no active filter goes straight through
+            // buildAggregationsSection's own server-aggregation branch
+            // instead of always eagerly fetching the full capped batch.
+            if (needsFullBatch(eventType)) await ensureCappedBatch(eventType);
+            if (eventType === 'all') {
+                await buildAggregationsSectionAll();
+            } else if (isLogAnalysisMode && eventType === 'log') {
+                const events = tabDataCache['log'] || [];
+                buildLogAggregations(getFilteredLogEvents(events), visibleSection.id);
+            } else if (isLogAnalysisMode && eventType === 'sigmaalert') {
+                const alerts = tabDataCache['sigmaalert'] || [];
+                buildSigmaAlertAggregations(getFilteredSigmaAlerts(alerts), visibleSection.id);
+            } else {
+                const events = tabDataCache[eventType] || [];
+                const filtered = getFilteredEvents(visibleSection.id, events, eventType);
+                await buildAggregationsSection(eventType, filtered);
+            }
+        }
+
+        // "Items per page" selector's onchange handler (see
+        // _aggPageSizeSelectorHtml) - applies to every Aggregation Table at
+        // once, not per-column like the old escalating "Show more" tiers
+        // this pagination feature replaced, since a per-table selector
+        // would mean one selector per column and real UI clutter.
+        async function changeAggPageSize(newSize) {
+            const parsed = parseInt(newSize, 10);
+            AGG_PAGE_SIZE = AGG_PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : CONFIG.AGGREGATION_TOP_N;
+            safeStorageSet(localStorage, AGG_PAGE_SIZE_STORAGE_KEY, String(AGG_PAGE_SIZE));
+            aggPage = {}; aggFullCountsCache = {}; aggTotalsCache = {};
+            await rebuildVisibleAggregations();
         }
 
         function buildLogAggregations(events, sectionId) {
@@ -7375,7 +8346,7 @@
                 for (const field of section.fields) {
                     const val = jsonData[field];
                     if (val !== undefined && val !== null && val !== '') {
-                        sectionHtml += htmlRowText(field, String(val), 'mono');
+                        sectionHtml += htmlRowText(field, String(val), 'mono', undefined, true);
                     }
                 }
                 if (sectionHtml) {
@@ -7393,7 +8364,7 @@
             if (remaining.length > 0) {
                 html += htmlSection('Raw Data', '#8b949e');
                 for (const [k, v] of remaining) {
-                    html += htmlRowText(k, String(v), 'mono');
+                    html += htmlRowText(k, String(v), 'mono', undefined, true);
                 }
                 hasAny = true;
             }
@@ -7524,18 +8495,22 @@
             const sectionId = `section-${eventType}`;
 
             if (canUseServerAggregation(eventType)) {
-                const data = await fetchAggregationData(eventType);
+                const [data, totals] = await Promise.all([
+                    fetchAggregationData(eventType),
+                    fetchAggregationTotals(eventType),
+                ]);
+                aggTotalsCache[sectionId] = totals;
                 const countsByColumn = {};
                 for (const [col, entries] of Object.entries(data)) {
                     countsByColumn[col] = {};
                     for (const { value, count } of entries) countsByColumn[col][value] = count;
                 }
-                const html = '<div class="agg-grid">' + _renderAggTablesHtml(countsByColumn, getColumnsForType(eventType), sectionId) + '</div>';
-                aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + html + '</div></div>';
+                const html = '<div class="agg-grid">' + _renderAggTablesHtml(countsByColumn, getColumnsForType(eventType), sectionId, totals) + '</div>';
+                aggContainer.innerHTML = _wrapAggPanel(html);
                 return;
             }
 
-            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + buildAggregationTables(events, eventType) + '</div></div>';
+            aggContainer.innerHTML = _wrapAggPanel(buildAggregationTables(events, eventType));
         }
         
         // Whether the row table/aggregations/diagram for the currently-visible
@@ -7548,7 +8523,13 @@
 
         function getVisibleEventType() {
             const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
-            return visibleSection ? visibleSection.id.replace('section-', '') : null;
+            const type = visibleSection ? visibleSection.id.replace('section-', '') : null;
+            // DNS Heuristics is a derived view over the same underlying
+            // 'dns' batch (see buildDnsHeuristicsSection) - truncation is
+            // tracked in truncatedTypes under 'dns', not a separate
+            // 'dns_heuristics' key, so this reuses the existing truncation
+            // banner instead of needing a second one.
+            return type === 'dns_heuristics' ? 'dns' : type;
         }
 
         // Actual number of rows currently cached for eventType - used in the
@@ -7623,6 +8604,47 @@
         // own several call sites by hand.
         let acknowledgedAlertsCount = 0;
         let acknowledgedAlertsCountStale = true;
+
+        // The DNS Heuristics stat card's count - same lazy-refresh shape
+        // as acknowledgedAlertsCount just above (see its own comment) and
+        // for the same underlying reason: the real number (how many
+        // domains actually scored above 0, see computeDnsHeuristics)
+        // isn't in eventStats at all, and computing it requires the full
+        // 'dns' batch fetched and scored, not just a count. Without this,
+        // the card would have to show the raw DNS event count instead -
+        // which it did briefly, and which reads as "157 suspicious
+        // things" on a card literally labeled DNS Heuristics when only a
+        // handful (or zero) actually scored.
+        let dnsHeuristicsFlaggedCount = 0;
+        let dnsHeuristicsCountStale = true;
+
+        async function refreshDnsHeuristicsCount() {
+            if (isLogAnalysisMode || !currentMd5) {
+                dnsHeuristicsFlaggedCount = 0;
+                return;
+            }
+            try {
+                // A dedicated fetch, not ensureCappedBatch('dns')/
+                // tabDataCache - this runs fire-and-forget from inside
+                // buildStats() (see the lazy self-refresh block below),
+                // triggered from the FIRST buildStats() call inside
+                // refreshAnalysisData(), which only clears tabDataCache
+                // AFTER that call returns. ensureCappedBatch's cache check
+                // runs synchronously ahead of any real fetch, so it used
+                // to race ahead of that clear and see a stale, narrower
+                // (sometimes even empty) tabDataCache['dns'] left over
+                // from an earlier search-filtered tab visit - scoring the
+                // wrong dataset and then sticking with the wrong count
+                // once dnsHeuristicsCountStale flipped back to false.
+                const qParam = buildSearchQuery();
+                const resp = await fetch(`/api/events?md5=${encodeURIComponent(currentMd5)}&type=dns&limit=${getUserQueryLimit()}${qParam}&t=${Date.now()}`);
+                const events = await resp.json();
+                dnsHeuristicsFlaggedCount = computeDnsHeuristics(events).length;
+            } catch (e) {
+                dnsHeuristicsFlaggedCount = 0;
+            }
+            buildStats(await computeFilteredStats());
+        }
 
         async function refreshAcknowledgedAlertsCount() {
             if (isLogAnalysisMode || !currentMd5) {
@@ -7739,9 +8761,32 @@
         function buildStats(filteredStats) {
             const grid = document.getElementById('statsGrid');
             const stats = [];
+            let allFiltered = 0;
 
             eventTypes.forEach(type => {
                 const filtered = filteredStats ? (filteredStats[type] || 0) : (eventStats[type] || 0);
+                allFiltered += filtered;
+                // Inserted immediately before the real DNS Queries card
+                // (rather than appended after every other card, with
+                // 'all'/'acknowledged') so it reads as "the DNS-specific
+                // view" sitting right next to "DNS Queries", not a
+                // catch-all tacked onto the end of the whole row. Gated on
+                // the lazily-computed flagged-domain count (see
+                // dnsHeuristicsFlaggedCount/refreshDnsHeuristicsCount
+                // below and dnsHeuristicsCountStale's own comment) - NOT
+                // the raw DNS event count, which would read as "this many
+                // suspicious things" on a card literally labeled DNS
+                // Heuristics. Guarded by !isLogAnalysisMode for parity
+                // with 'all'/'acknowledged' below even though 'dns' can't
+                // actually occur in log-analysis mode in practice.
+                if (type === 'dns' && !isLogAnalysisMode) {
+                    stats.push({
+                        id: 'dns_heuristics',
+                        label: 'DNS Heuristics',
+                        count: dnsHeuristicsFlaggedCount,
+                        color: '#ff9800'
+                    });
+                }
                 stats.push({
                     id: type,
                     label: typeLabels[type] || type.toUpperCase(),
@@ -7751,7 +8796,6 @@
             });
 
             if (!isLogAnalysisMode) {
-                const allFiltered = stats.reduce((a, s) => a + s.count, 0);
                 stats.push({
                     id: 'all',
                     label: 'All Events',
@@ -7773,7 +8817,16 @@
             }
 
             const visibleSection = document.querySelector('.section:not(.section-hidden):not(.agg-section)');
-            const activeType = visibleSection ? visibleSection.id.replace('section-', '') : (stats[0] && stats[0].id);
+            // find(s => s.count > 0), not just stats[0] - a zero-count
+            // entry (e.g. log analysis with sigma alerts disabled/absent,
+            // sorted ahead of 'log' by priority - see sortEventTypes) gets
+            // filtered out of the actual rendered grid below and so can
+            // never really be "active" - falling back to it left NO card
+            // marked tab-active at all (real user report: keyboard
+            // navigation broke identically to the PCAP-mode bugs already
+            // fixed, because activeColumnStatCards()'s own .tab-active
+            // fallback then found nothing either).
+            const activeType = visibleSection ? visibleSection.id.replace('section-', '') : (stats.find(s => s.count > 0) || {}).id;
             // A type only ever reaches eventTypes because it had at least
             // one event in the unfiltered sample (see eventTypes' own
             // derivation from baseEventStats), so count === 0 here only
@@ -7815,6 +8868,13 @@
                 acknowledgedAlertsCountStale = false;
                 refreshAcknowledgedAlertsCount();
             }
+
+            // Lazy self-refresh for the DNS Heuristics card - same
+            // pattern as Acknowledged Alerts just above, same reason.
+            if (dnsHeuristicsCountStale) {
+                dnsHeuristicsCountStale = false;
+                refreshDnsHeuristicsCount();
+            }
         }
 
         function buildSections() {
@@ -7828,6 +8888,7 @@
             
             html += '<div class="section section-hidden" id="section-all"><div class="section-header">All Events</div><div class="loading">Loading...</div></div>';
             html += '<div class="section section-hidden" id="section-acknowledged"><div class="section-header">Acknowledged Alerts</div><div class="loading">Loading...</div></div>';
+            html += '<div class="section section-hidden" id="section-dns_heuristics"><div class="section-header">DNS Heuristics</div><div class="loading">Loading...</div></div>';
             sectionsEl.innerHTML = html;
             
         }
@@ -7848,7 +8909,8 @@
             const detail = extractValue(e, 'Detail', -1);
             const formatted = formatEvent(e);
             const pivotAttrs = pivotDataAttrsHtml(e, 'all', ALL_EVENTS_COLUMNS, extractAllValue);
-            return `<tr data-id="${escapeHtml(String(e.id))}"${pivotAttrs} onclick="toggleRow(this, event)"><td class="timestamp">${escapeHtml(ts)}</td><td>${valueDotSpan(COLORS.EVENT[etype])}${escapeHtml(etype.toUpperCase())}</td><td>${valueDotSpan(DOT_COLORS.PROTO[proto.toUpperCase()])}${escapeHtml(proto)}</td><td class="mono-fixed" title="${escapeHtml(srcIp)}">${escapeHtml(srcIp)}</td><td class="mono-fixed">${escapeHtml(String(srcPort))}</td><td class="mono-fixed" title="${escapeHtml(dstIp)}">${escapeHtml(dstIp)}</td><td class="mono-fixed">${escapeHtml(String(dstPort))}</td><td class="mono">${escapeHtml(detail)}</td>${rowNoteIconHtml('events', e.id, e.row_note)}</tr><tr class="detail-row"><td colspan="9"><div class="detail-content">${formatted}</div></td></tr>`;
+            const communityIdAttr = e.community_id ? ` data-community-id="${escapeHtml(e.community_id)}"` : '';
+            return `<tr data-id="${escapeHtml(String(e.id))}"${pivotAttrs}${communityIdAttr} onclick="toggleRow(this, event)"><td class="timestamp">${escapeHtml(ts)}</td><td>${valueDotSpan(COLORS.EVENT[etype])}${escapeHtml(etype.toUpperCase())}</td><td>${valueDotSpan(DOT_COLORS.PROTO[proto.toUpperCase()])}${escapeHtml(proto)}</td><td class="mono-fixed" title="${escapeHtml(srcIp)}">${escapeHtml(srcIp)}</td><td class="mono-fixed">${escapeHtml(String(srcPort))}</td><td class="mono-fixed" title="${escapeHtml(dstIp)}">${escapeHtml(dstIp)}</td><td class="mono-fixed">${escapeHtml(String(dstPort))}</td><td class="mono">${escapeHtml(detail)}</td>${rowNoteIconHtml('events', e.id, e.row_note)}</tr><tr class="detail-row"><td colspan="9"><div class="detail-content">${formatted}</div></td></tr>`;
         }
 
         async function buildAllEvents() {
@@ -8021,14 +9083,18 @@
             const sectionId = 'section-all';
 
             if (canUseServerAggregation('all')) {
-                const data = await fetchAggregationData('all');
+                const [data, totals] = await Promise.all([
+                    fetchAggregationData('all'),
+                    fetchAggregationTotals('all'),
+                ]);
+                aggTotalsCache[sectionId] = totals;
                 const countsByColumn = {};
                 for (const [col, entries] of Object.entries(data)) {
                     countsByColumn[col] = {};
                     for (const { value, count } of entries) countsByColumn[col][value] = count;
                 }
-                const html = '<div class="agg-grid">' + _renderAggTablesHtml(countsByColumn, allColumns, sectionId) + '</div>';
-                aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + html + '</div></div>';
+                const html = '<div class="agg-grid">' + _renderAggTablesHtml(countsByColumn, allColumns, sectionId, totals) + '</div>';
+                aggContainer.innerHTML = _wrapAggPanel(html);
                 return;
             }
 
@@ -8038,7 +9104,7 @@
                 filteredEvents = sortedAll.filter(e => matchesCurrentFilters(e, (ev, col) => extractAllValue(ev, col, allColumns.indexOf(col))));
             }
 
-            aggContainer.innerHTML = '<div class="agg-panel"><div class="section-toggle-bar" onclick="toggleAggregations()">▾ Aggregation Tables</div><div class="agg-content">' + buildAggregationTablesAll(filteredEvents, allColumns) + '</div></div>';
+            aggContainer.innerHTML = _wrapAggPanel(buildAggregationTablesAll(filteredEvents, allColumns));
         }
         
         function extractAllValue(e, col, colIndex) {
@@ -8543,10 +9609,33 @@
                 && (currentSort === null || canServerSortEventType(eventType));
         }
 
-        async function fetchAggregationData(eventType) {
+        // column/page omitted -> the original bulk "every column, page 1"
+        // fetch. column+page together restrict to just that one column's
+        // one page - used by changeAggPage so paging one table doesn't
+        // reset every other column in the section back to page 1. Always
+        // sends the current AGG_PAGE_SIZE (the "Items per page" selector) -
+        // the server has its own fallback default, but every real request
+        // must be explicit so a page-size change and a page-navigation
+        // fetch can never disagree on how many rows a "page" is.
+        async function fetchAggregationData(eventType, column, page) {
             const qParam = buildSearchQuery();
             const typeParam = (eventType && eventType !== 'all') ? `&type=${eventType}` : '';
-            const resp = await fetch(`/api/aggregation-data?md5=${encodeURIComponent(currentMd5)}${typeParam}${qParam}&t=${Date.now()}`);
+            const columnParam = column ? `&column=${encodeURIComponent(column)}` : '';
+            const pageParam = page ? `&page=${page}` : '';
+            const resp = await fetch(`/api/aggregation-data?md5=${encodeURIComponent(currentMd5)}${typeParam}${columnParam}${pageParam}&page_size=${AGG_PAGE_SIZE}${qParam}&t=${Date.now()}`);
+            return await resp.json();
+        }
+
+        // Distinct-value COUNT per column, for the Prev/Next page-count math
+        // in _renderOneAggTableHtml - fetched once per section open/filter
+        // change (see buildAggregationsSection/buildAggregationsSectionAll),
+        // not on every Prev/Next click. See get_aggregation_totals_sqlite's
+        // own docstring for why this is a separate request from the page
+        // data itself.
+        async function fetchAggregationTotals(eventType) {
+            const qParam = buildSearchQuery();
+            const typeParam = (eventType && eventType !== 'all') ? `&type=${eventType}` : '';
+            const resp = await fetch(`/api/aggregation-totals?md5=${encodeURIComponent(currentMd5)}${typeParam}${qParam}&t=${Date.now()}`);
             return await resp.json();
         }
 
@@ -8630,6 +9719,21 @@
         }
 
         var hiddenAggregations = new Set();
+        // sectionId+':'+col -> current 1-indexed page for that one table's
+        // Prev/Next pagination. Reset alongside hiddenAggregations at every
+        // site that resets it - same "starts fresh each time the panel
+        // (re)opens" lifecycle.
+        var aggPage = {};
+        // sectionId -> {col: {value: count}} - the full, unpaged counts map
+        // for client-computed sections only (log/sigmaalert/binary/'all'
+        // client-fallback). Stashed by _renderAggTablesHtml so changeAggPage
+        // can re-slice a new page locally instead of recomputing from
+        // events/tabDataCache on every click.
+        var aggFullCountsCache = {};
+        // sectionId -> {col: totalDistinctValueCount} - for server-aggregated
+        // sections, whose countsByColumn only ever holds the current page
+        // (see fetchAggregationTotals/get_aggregation_totals_sqlite).
+        var aggTotalsCache = {};
         let baseEventStats = {};
         var isLogAnalysisMode = false;
         const ALL_EVENTS_COLUMNS = ['Time', 'Type', 'Protocol', 'Source IP', 'Source Port', 'Dest IP', 'Dest Port', 'Detail'];
@@ -8825,6 +9929,80 @@
             }
         }
 
+        // Prev/Next for one table: server-aggregated sections fetch just
+        // that one column's new page (its own single-column request - see
+        // fetchAggregationData's column param); client-computed sections
+        // re-slice the full counts map _renderAggTablesHtml already stashed
+        // in aggFullCountsCache. Either way this patches only that one
+        // table's DOM node in place (via _renderOneAggTableHtml), not a
+        // full section rebuild - the whole point of paging in place is to
+        // keep the surrounding layout (and the user's scroll position)
+        // completely stable across clicks.
+        async function changeAggPage(sectionId, col, delta) {
+            const key = sectionId + ':' + col;
+            const newPage = (aggPage[key] || 1) + delta;
+            if (newPage < 1) return;
+
+            const eventType = sectionId.replace('section-', '');
+            let entries, total;
+            if (sectionId !== 'section-binary' && canUseServerAggregation(eventType)) {
+                const data = await fetchAggregationData(eventType, col, newPage);
+                entries = (data[col] || []).map(e => [e.value, e.count]);
+                const totals = aggTotalsCache[sectionId] || {};
+                total = totals[col] || 0;
+            } else {
+                const fullCounts = (aggFullCountsCache[sectionId] || {})[col] || {};
+                const sorted = Object.entries(fullCounts).sort((a, b) => b[1] - a[1]);
+                total = sorted.length;
+                const start = (newPage - 1) * AGG_PAGE_SIZE;
+                entries = sorted.slice(start, start + AGG_PAGE_SIZE);
+            }
+            // Guards against a stale double-click landing past the last
+            // page (e.g. Next clicked twice before the first response
+            // returns) - Prev/Next are disabled at the true last page in
+            // the rendered controls, so this should be unreachable in
+            // practice, not just a cosmetic clamp.
+            if (newPage > Math.max(1, Math.ceil(total / AGG_PAGE_SIZE))) return;
+
+            aggPage[key] = newPage;
+            const newTableHtml = _renderOneAggTableHtml(sectionId, col, entries, total, newPage);
+            // A keyboard-driven Prev/Next (Enter on a keyboard-selected
+            // button, via activateKeyboardSelection's generic .click()
+            // fallback) has verticalNavSelection pointing at the very
+            // button outerHTML below destroys - without re-pointing it at
+            // the replacement, isConnected goes false and the next arrow
+            // press would self-heal onto the top of the whole flat nav
+            // list (the stat-card grid) instead of staying right where the
+            // user just was (real bug report).
+            const hadFocus = verticalNavSelection && verticalNavSelection.isConnected
+                && verticalNavSelection.classList.contains('agg-page-btn')
+                && verticalNavSelection.closest('.agg-section')?.getAttribute('data-col') === col;
+            // col can contain quotes (attacker-controlled log field names),
+            // so compare attributes directly instead of building a CSS
+            // selector - same technique as hideAggregationTable.
+            document.querySelectorAll('.agg-section').forEach(el => {
+                if (el.getAttribute('data-col') === col) {
+                    el.outerHTML = newTableHtml;
+                }
+            });
+            if (hadFocus) {
+                const replacementTable = Array.from(document.querySelectorAll('.agg-section')).find(t => t.getAttribute('data-col') === col);
+                const buttons = replacementTable ? Array.from(replacementTable.querySelectorAll('.agg-page-btn')) : [];
+                // Same button just pressed (index 1 = Next for delta > 0,
+                // index 0 = Prev for delta < 0) - stays there even if that
+                // button is now disabled (e.g. Next after reaching the
+                // last page), rather than guessing the user wants Prev
+                // instead; Left/Right (navigateAggPaginationButtons) is
+                // already how they'd move off a disabled button.
+                const target = buttons[delta > 0 ? 1 : 0];
+                if (target) {
+                    verticalNavSelection = target;
+                    target.classList.add('keyboard-selected');
+                    scrollKeyboardSelectionIntoView(target);
+                }
+            }
+        }
+
         function getColumnNameFromSankeyColumn(col) {
             return ['Source IP', 'Dest IP', 'Dest Port'][col] || '';
         }
@@ -8866,6 +10044,12 @@
                 await ensureBinaryEventsBatch();
                 buildBinaryAnalysisView(allEvents);
                 updateFilterBarVisibility();
+                // Real user report: this early-return path (binary/file
+                // analysis's own Include/Exclude/Only, from the YARA-match
+                // table's pivot menu) was missing the same chip-focus fix
+                // the normal path below already has - see
+                // focusNewestFilterChip's own comment.
+                focusNewestFilterChip();
                 return;
             }
             const eventType = sectionId.replace('section-', '');
@@ -8875,6 +10059,56 @@
             updateFilterBarVisibility();
             buildStats(await computeFilteredStats());
             await updateSankeyDiagram();
+            focusNewestFilterChip();
+        }
+
+        // Real user report: a column filter added via the pivot menu
+        // (Include/Exclude/Only - all routed through applyFilters() above,
+        // not refreshAnalysisData()/huntFilterValue()) produced a chip
+        // with no keyboard focus at all, unlike a typed search -
+        // applyFilters() updates the current tab and stat cards in place
+        // rather than tearing down and rebuilding #statsGrid/#sections
+        // wholesale, so nothing ever disconnects the previous selection
+        // for seedVerticalNavSelectionIfStale() to catch here either.
+        // Always rings the LAST chip in the row (search terms render
+        // first, then column filters, in buildFilterBarHtml()'s own
+        // order) rather than trying to identify exactly which chip
+        // Include/Exclude/Only just added - correct in the common case (a
+        // single active filter) and a reasonable "whatever's newest reads
+        // last" default otherwise. Shared with huntFilterValue(), which
+        // calls this same helper after its own, differently-shaped
+        // rebuild (refreshAnalysisData(), a full teardown) completes.
+        function focusNewestFilterChip() {
+            const chips = filterBarRowItems().filter(el => el.classList.contains('filter-chip'));
+            const chip = chips[chips.length - 1];
+            if (!chip) return;
+            document.querySelectorAll('.keyboard-selected').forEach(el => el.classList.remove('keyboard-selected'));
+            verticalNavSelection = chip;
+            chip.classList.add('keyboard-selected');
+            scrollKeyboardSelectionIntoView(chip);
+        }
+
+        // The clear-a-filter counterpart to focusNewestFilterChip() above -
+        // real user report: after clearing search filters, keyboard focus
+        // should go back to the first data type card (#statsGrid's own
+        // first .stat-card, not necessarily whichever tab happens to be
+        // active), mirroring how adding a filter focuses its own chip.
+        // Falls back to ringing whatever chip remains when the clear was
+        // only partial (e.g. clearFilterValue() removing one Include
+        // among several) - the row is still the current position in that
+        // case, not the top of the page.
+        function focusFilterBarOrFirstCard() {
+            const chips = filterBarRowItems().filter(el => el.classList.contains('filter-chip'));
+            if (chips.length > 0) {
+                focusNewestFilterChip();
+                return;
+            }
+            const firstCard = document.querySelector('#statsGrid .stat-card');
+            if (!firstCard) return;
+            document.querySelectorAll('.keyboard-selected').forEach(el => el.classList.remove('keyboard-selected'));
+            verticalNavSelection = firstCard;
+            firstCard.classList.add('keyboard-selected');
+            scrollKeyboardSelectionIntoView(firstCard);
         }
 
         async function clearFilter(columnName) {
@@ -8886,6 +10120,10 @@
                 await ensureBinaryEventsBatch();
                 buildBinaryAnalysisView(allEvents);
                 updateFilterBarVisibility();
+                // Real user report: same fix as the normal path below (see
+                // focusFilterBarOrFirstCard's own comment) - this early-
+                // return path was missing it.
+                focusFilterBarOrFirstCard();
                 return;
             }
             const eventType = visibleSection.id.replace('section-', '');
@@ -8893,6 +10131,7 @@
             updateFilterBarVisibility();
             buildStats(await computeFilteredStats());
             await updateSankeyDiagram();
+            focusFilterBarOrFirstCard();
         }
 
         // Row-cell pivot menu (Include/Exclude/Only) support below. These
@@ -8964,14 +10203,23 @@
         // keep narrowing the results underneath the new search term,
         // which reads as "Hunt is combining with whatever I had before"
         // even though only currentSearch actually changed.
-        function huntFilterValue(value) {
+        async function huntFilterValue(value) {
             const term = String(value).trim();
             if (!term) return;
             resetPagination();
             currentSearch = [term];
             currentFilters = {};
             updateFilterBarVisibility();
-            return refreshAnalysisData();
+            await refreshAnalysisData();
+            // Real user report: performing a search is a deliberate
+            // action, and its result should already visibly have keyboard
+            // focus - see focusNewestFilterChip's own comment (shared with
+            // applyFilters(), Include/Exclude/Only's own completion point)
+            // for why this is a separate step from
+            // seedVerticalNavSelectionIfStale() (already called inside
+            // refreshAnalysisData() above), which only ever seeds
+            // invisibly.
+            focusNewestFilterChip();
         }
 
         // Generalized form of copyMd5ToClipboard() below (kept separate,
@@ -9159,6 +10407,9 @@
                 await ensureBinaryEventsBatch();
                 buildBinaryAnalysisView(allEvents);
                 updateFilterBarVisibility();
+                // Real user report: same fix as clearFilter()'s own binary
+                // early-return above.
+                focusFilterBarOrFirstCard();
                 return;
             }
             const eventType = visibleSection.id.replace('section-', '');
@@ -9166,6 +10417,7 @@
             updateFilterBarVisibility();
             buildStats(await computeFilteredStats());
             await updateSankeyDiagram();
+            focusFilterBarOrFirstCard();
         }
 
         async function clearAllFilters() {
@@ -9176,6 +10428,12 @@
             if (input) input.value = '';
             updateFilterBarVisibility();
             await refreshAnalysisData();
+            // Real user report: after clearing search filters, keyboard
+            // focus should go back to the first data type card - see
+            // focusFilterBarOrFirstCard's own comment. currentFilters/
+            // currentSearch are both always empty here, so this always
+            // lands on the first stat card, never a remaining chip.
+            focusFilterBarOrFirstCard();
         }
         
         function getFilteredEvents(sectionId, events, eventType) {
@@ -9207,6 +10465,11 @@
             if (input) input.value = '';
             updateFilterBarVisibility();
             await refreshAnalysisData();
+            // Same fix as huntFilterValue() (the search box's own "Hunt"
+            // quick-action counterpart) - see focusNewestFilterChip's own
+            // comment for why a search result should already visibly have
+            // keyboard focus.
+            focusNewestFilterChip();
         }
 
         async function clearSearchTerm(index) {
@@ -9214,6 +10477,11 @@
             currentSearch.splice(index, 1);
             updateFilterBarVisibility();
             await refreshAnalysisData();
+            // Same fix as clearAllFilters()/clearFilter()/clearFilterValue() -
+            // see focusFilterBarOrFirstCard's own comment. Falls back to
+            // whichever chip remains (another search term, or a column
+            // filter) when this was only a partial clear.
+            focusFilterBarOrFirstCard();
         }
 
         // Fetch cheap log-event + sigma-alert *counts* in parallel, optionally
@@ -9274,6 +10542,7 @@
             // refresh through setAlertAcknowledged/acknowledgeAllInstances
             // themselves.
             acknowledgedAlertsCountStale = true;
+            dnsHeuristicsCountStale = true;
             const gen = bumpFetchGeneration();
             showLoading(currentSearch.length > 0 ? 'Searching...' : 'Loading events...');
 
@@ -9400,6 +10669,15 @@
             }
 
             updateFilterBarVisibility();
+            // See seedVerticalNavSelectionIfStale's own comment - a filter/
+            // search change, or any other action that routes through this
+            // function (acknowledging an alert, changing the query limit,
+            // ...), can destroy the DOM node the current keyboard selection
+            // was pointing at (real user report: after applying a search
+            // filter, the first Down landed ON the new chip instead of
+            // past it). Only re-seeds when the old selection is actually
+            // gone - a still-valid selection elsewhere is left alone.
+            seedVerticalNavSelectionIfStale();
             hideLoading();
             } catch(err) {
                 console.error('refreshAnalysisData error:', err);
@@ -9660,6 +10938,7 @@
                     currentSearch = [];
                     resetPagination();
                     hiddenAggregations = new Set();
+                    aggPage = {}; aggFullCountsCache = {}; aggTotalsCache = {};
                     tabDataCache = {};
                     clearAnalysisContainers();
                     document.getElementById('searchInput').value = '';
@@ -9730,6 +11009,15 @@
                                     const counts = await _fetchLogAnalysisCounts('');
                                     baseEventStats = counts;
                                     await _renderLogAnalysisView(counts);
+                                    // See seedVerticalNavSelectionIfStale's own
+                                    // comment - this branch (log analysis'
+                                    // own async IIFE, unlike the PCAP branch
+                                    // below) was missing this call entirely,
+                                    // so a freshly-opened log analysis's very
+                                    // first Down press landed ON the default
+                                    // tab's own card instead of past it (real
+                                    // user report).
+                                    seedVerticalNavSelectionIfStale();
                                 } catch(e) {
                                     console.error('Failed to load log analysis:', e);
                                     document.getElementById('sections').innerHTML = '<div class="log-events-section"><h3>📋 Log Events</h3><div class="no-matches">Error loading log events</div></div>';
@@ -9740,6 +11028,11 @@
                             await ensureBinaryEventsBatch();
                             baseAllEvents = allEvents;
                             buildBinaryAnalysisView(allEvents);
+                            // See seedVerticalNavSelectionIfStale's own
+                            // comment - same fix as the log-analysis branch
+                            // above, for a freshly-opened binary/file
+                            // analysis's own first Down press.
+                            seedVerticalNavSelectionIfStale();
                         }
                     } else {
 
@@ -9765,7 +11058,13 @@
                         } else if (sankeyPanel) {
                             await updateSankeyDiagram();
                         }
-                        
+                        // See seedVerticalNavSelectionIfStale's own comment -
+                        // right after opening an analysis, nothing is
+                        // keyboard-selected yet, so this seeds the starting
+                        // position (no visible ring) rather than requiring
+                        // an extra, wasted first arrow press.
+                        seedVerticalNavSelectionIfStale();
+
                         // loadTabData(eventTypes[0]) above already builds the
                         // aggregation table itself when advancedMode is true,
                         // scoped to that default tab (e.g. Alerts) - same as

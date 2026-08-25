@@ -21,7 +21,7 @@ Analysis View (analysis loaded)
   ├── Header (back button, name, path, date range)
   ├── Visualizations bar (Diagram toggle, Aggregation toggle)
   ├── Filter Bar (active search and filters as removable chips)
-  ├── Stats Grid (clickable event-type cards, shows filtered/total counts when active)
+  ├── Stats Grid (clickable event-type cards, shows the filtered count alone when a filter is active - see `buildStats()` in filtering.md)
   ├── Sankey Diagram (diagram mode — Source IP → Dest IP → Dest Port, reflects current filters)
   ├── Aggregations (frequency counts per column)
   └── Data Sections (tabbed tables)
@@ -50,7 +50,7 @@ let tabDataCache = {};       // cached event data per type
 | Group | Functions | Purpose |
 |---|---|---|
 | Navigation | `showWelcome()`, `loadAnalysis()`, `showTab()`, `showWelcomeUI()`, `showAnalysisUI()` | Screen/tab switching |
-| Keyboard Navigation | `navigateStatTabs()`, `navigateSampleCards()`, `navigateVertical()`, `navigateThemeTiles()`, `activateKeyboardSelection()`, `isNavigableKeyContext()` | Arrow-key/Enter navigation (see [Usage](../usage.md#keyboard-shortcuts)) |
+| Keyboard Navigation | `navigateStatTabs()`, `activeColumnStatCards()`, `navigateSampleCards()`, `navigateVertical()`, `seedVerticalNavSelectionIfStale()`, `navigateFilterBarItems()`, `focusNewestFilterChip()`, `focusFilterBarOrFirstCard()`, `navigateThemeTiles()`, `activateKeyboardSelection()`, `isNavigableKeyContext()` | Arrow-key/Enter navigation (see [Usage](../usage.md#keyboard-shortcuts)) |
 | Command Palette | `AUTOCOMPLETE_COMMANDS`, `openAutocompleteModal()`, `filterAutocomplete()`, `autocompleteMatchesQuery()`, `autocompleteMatchScore()`, `activateAutocompleteSelection()` | Type-anywhere command list (see [Usage](../usage.md#command-palette)) |
 | Data Loading | `loadTabData()`, `loadFromUrl()`, `uploadPcap()`, `checkStatus()` | Fetch data from API |
 | Rendering | `buildStats()`, `buildSections()`, `buildSection()`, `buildAllEvents()`, `buildRowForEvent()`, `updateSankeyDiagram()` | Build HTML |

@@ -26,7 +26,8 @@ from db import (
     create_file_analysis_db, insert_sigma_alerts, init_empty_db,
     query_sigma_alerts_sqlite, get_sigma_stats_sqlite,
     get_sigma_alert_count_sqlite, get_event_date_range_sqlite,
-    get_sankey_data_sqlite, get_aggregation_data_sqlite,
+    get_sankey_data_sqlite, get_aggregation_data_sqlite, get_aggregation_totals_sqlite,
+    AGGREGATION_TOP_N,
     set_row_note, has_row_notes,
     set_acknowledged, set_acknowledged_bulk,
 )
@@ -59,7 +60,7 @@ from ai_summary_lookup import get_ai_summary
 import config
 import tomllib
 
-VERSION = '4.0.0'
+VERSION = '4.1.0'
 GITHUB_RELEASES_API = 'https://api.github.com/repos/dougburks/so-crates/releases/latest'
 PORT = int(os.environ.get('PORT', 8000))
 BIND_ADDRESS = os.environ.get('BIND_ADDRESS', '127.0.0.1')
@@ -97,12 +98,13 @@ MAX_URL_REDIRECTS = 5
 # a no-op instead of a multi-hundred-ms SQL recomputation.
 _SANKEY_CACHE = {}
 _AGGREGATION_CACHE = {}
+_AGGREGATION_TOTALS_CACHE = {}
 _CACHE_LOCK = threading.Lock()
 
 
 def _evict_analysis_cache(md5):
     with _CACHE_LOCK:
-        for cache in (_SANKEY_CACHE, _AGGREGATION_CACHE):
+        for cache in (_SANKEY_CACHE, _AGGREGATION_CACHE, _AGGREGATION_TOTALS_CACHE):
             for key in [k for k in cache if k[0] == md5]:
                 del cache[key]
 
@@ -765,6 +767,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         '/api/count': 'handle_get_count',
         '/api/sankey-data': 'handle_get_sankey_data',
         '/api/aggregation-data': 'handle_get_aggregation_data',
+        '/api/aggregation-totals': 'handle_get_aggregation_totals',
         '/api/download-stream': 'handle_get_download_stream',
         '/api/ascii-stream': 'handle_get_ascii_stream',
         '/api/hexdump-stream': 'handle_get_hexdump_stream',
@@ -952,6 +955,64 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         event_type = params.get('type', [''])[0] or None
         q = self._parse_search_terms(params)
 
+        # Page number and page size are both client-controllable now - page
+        # size via the "Items per page" selector (AGG_PAGE_SIZE_OPTIONS in
+        # static/socrates.js; only those exact values are accepted here too,
+        # not just numerically clamped, so the two can never silently drift
+        # apart), page number for Prev/Next pagination through one column at
+        # a time (column omitted/page omitted -> the original bulk "every
+        # column, page 1" fetch). Anything non-numeric/not an allowed page
+        # size falls back to the original default rather than erroring.
+        column = params.get('column', [''])[0] or None
+        try:
+            page = int(params.get('page', [''])[0])
+        except (ValueError, TypeError):
+            page = 1
+        page = max(1, page)
+        try:
+            page_size = int(params.get('page_size', [''])[0])
+        except (ValueError, TypeError):
+            page_size = AGGREGATION_TOP_N
+        if page_size not in (10, 25, 50, 100):
+            page_size = AGGREGATION_TOP_N
+        offset = (page - 1) * page_size
+
+        db_file = os.path.join(dir_path, 'events.db')
+        if not os.path.exists(db_file):
+            self._send_json({})
+            return
+        try:
+            if q is None:
+                cache_key = (md5, event_type, column, page, page_size)
+                with _CACHE_LOCK:
+                    cached = _AGGREGATION_CACHE.get(cache_key)
+                if cached is not None:
+                    self._send_json(cached)
+                    return
+                data = get_aggregation_data_sqlite(db_file, event_type, q, top_n=page_size, offset=offset, column=column)
+                with _CACHE_LOCK:
+                    _AGGREGATION_CACHE[cache_key] = data
+            else:
+                data = get_aggregation_data_sqlite(db_file, event_type, q, top_n=page_size, offset=offset, column=column)
+        except Exception:
+            self._send_error(500, 'Database error')
+            return
+        self._send_json(data)
+
+    def handle_get_aggregation_totals(self, params):
+        """Distinct-value COUNT per column - a client fetches this once per
+        section open/filter change (not on every Prev/Next click) to compute
+        page counts for handle_get_aggregation_data's per-page results. See
+        get_aggregation_totals_sqlite's own docstring for why this is a
+        separate endpoint instead of folding a total into every page."""
+        md5 = params.get('md5', [''])[0]
+        dir_path, error = self._resolve_md5_dir(md5)
+        if error:
+            self._send_error(400, error)
+            return
+        event_type = params.get('type', [''])[0] or None
+        q = self._parse_search_terms(params)
+
         db_file = os.path.join(dir_path, 'events.db')
         if not os.path.exists(db_file):
             self._send_json({})
@@ -960,15 +1021,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if q is None:
                 cache_key = (md5, event_type)
                 with _CACHE_LOCK:
-                    cached = _AGGREGATION_CACHE.get(cache_key)
+                    cached = _AGGREGATION_TOTALS_CACHE.get(cache_key)
                 if cached is not None:
                     self._send_json(cached)
                     return
-                data = get_aggregation_data_sqlite(db_file, event_type, q)
+                data = get_aggregation_totals_sqlite(db_file, event_type, q)
                 with _CACHE_LOCK:
-                    _AGGREGATION_CACHE[cache_key] = data
+                    _AGGREGATION_TOTALS_CACHE[cache_key] = data
             else:
-                data = get_aggregation_data_sqlite(db_file, event_type, q)
+                data = get_aggregation_totals_sqlite(db_file, event_type, q)
         except Exception:
             self._send_error(500, 'Database error')
             return
@@ -2304,8 +2365,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # Only on this one-off GET (loadAnalysis/openReanalyzeModal), not
         # the hot-polled POST /api/check-status - both share
         # _build_status_response, but this extra query has no business
-        # running every 2s during active processing.
-        response['hasRowNotes'] = has_row_notes(os.path.join(dir_path, 'events.db'))
+        # running every 2s during active processing. Also skipped
+        # whenever the analysis itself isn't ready yet (definitely no
+        # notes yet either) - has_row_notes() is now safe to call
+        # regardless (see its own comment), but there's still no reason
+        # to open a connection at all before there's anything to find.
+        if response['status'] == 'ready':
+            response['hasRowNotes'] = has_row_notes(os.path.join(dir_path, 'events.db'))
+        else:
+            response['hasRowNotes'] = False
         self._send_json(response)
 
     def handle_post_check_status(self):

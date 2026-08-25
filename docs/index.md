@@ -12,7 +12,7 @@ A recorded walkthrough of analyzing a pcap: loading the sample file, reviewing e
 
 <video controls width="100%" src="videos/demo.mp4" poster="videos/demo-poster.jpg"></video>
 
-## Screenshots
+## Screenshot Tour
 
 When you first connect to SO-CRATES, a welcome window will appear with an overview of SO-CRATES:
 
@@ -25,6 +25,10 @@ When you dismiss the welcome window, the main screen allows you to upload a file
 After analysis, you can view network alerts, file alerts, network metadata, and extract streams:
 
 ![Analysis screen](images/so-crates-analysis.png)
+
+Clicking a value in the data table opens a pivot menu for Include/Exclude/Only filtering, Hunt, and Correlate - which searches for every other log across the capture sharing that row's community ID (Suricata's flow-correlation identifier, force-enabled in 4.1.0):
+
+![Pivot menu](images/so-crates-pivot-menu.png)
 
 Drilling into a Suricata, Sigma, or YARA alert shows an AI-generated summary of what the rule detects, plus a Playbook with plain-English investigation guidance for that specific detection:
 

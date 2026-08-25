@@ -193,6 +193,63 @@ def _enable_eve_log_arp(config_content):
     )
 
 
+def _enable_ja3_ja4_fingerprints(config_content):
+    """Enable JA3/JA3S/JA4 TLS client/server fingerprinting, which ships
+    as `auto` (commented out) by default - Suricata only computes them
+    when an active rule's signature keyword requires it, so without this
+    the fields are silently absent from `tls` events whenever none of the
+    currently-enabled curated rule sources happen to reference ja3/ja4.
+
+    Forced on unconditionally, like community-id (see _enable_community_id)
+    rather than gated behind a parameter like arp - JA3/JA4 are core
+    malware-family/C2 TLS fingerprints analysts rely on for hunting and
+    threat-intel matching, and computing them is cheap (per-handshake, not
+    a new event type), so there's no real volume/signal tradeoff to weigh
+    the way arp's live-network packet volume is.
+
+    The regex must anchor on the commented-out `#...: auto` form
+    specifically, not just the key name, so a re-run against an
+    already-enabled config (this function runs on every
+    setup_suricata_config() call, including every server restart) is a
+    harmless no-op instead of re-matching and clobbering an explicit
+    operator override.
+    """
+    config_content = re.sub(
+        r'(?m)^(\s+)#ja3-fingerprints:\s*auto$',
+        r'\1ja3-fingerprints: yes',
+        config_content
+    )
+    config_content = re.sub(
+        r'(?m)^(\s+)#ja4-fingerprints:\s*auto$',
+        r'\1ja4-fingerprints: yes',
+        config_content
+    )
+    return config_content
+
+
+def _enable_community_id(config_content):
+    """Enable Suricata's community-id output, which ships disabled by
+    default (`community-id: false`).
+
+    Unlike the arp eve-log entry (a real volume/signal tradeoff, kept
+    opt-in - see _enable_eve_log_arp), community-id adds a single
+    deterministic `community_id` field to flow/alert records rather than
+    new events, so it's forced on unconditionally like the other five
+    file-store tweaks below rather than gated behind a parameter. It lets
+    so-crates' output correlate against Zeek/other community-id-aware
+    tools without a user ever discovering the setting exists.
+
+    The regex must anchor on the trailing `: false` value, not just the
+    `community-id` key name, so it can never also match the neighboring
+    `community-id-seed: 0` line.
+    """
+    return re.sub(
+        r'(?m)^(\s+community-id:\s*)false$',
+        r'\1true',
+        config_content
+    )
+
+
 def get_suricata_enabled_sources(data_dir=None):
     """Return the list of currently-enabled suricata-update source names,
     filtered to SURICATA_RULE_SOURCES (so a curated entry removed in a
@@ -653,6 +710,8 @@ def setup_suricata_config(data_dir=None, enable_arp=False, on_progress=print, ne
         config_content = config_content.replace('/var/lib/suricata/rules', suricata_rules_dir)
         config_content = _enable_app_layer_protocols(config_content)
         config_content = _enable_eve_log_protocol_types(config_content)
+        config_content = _enable_community_id(config_content)
+        config_content = _enable_ja3_ja4_fingerprints(config_content)
         if enable_arp:
             config_content = _enable_eve_log_arp(config_content)
         # Enable file-store output for extracted file analysis

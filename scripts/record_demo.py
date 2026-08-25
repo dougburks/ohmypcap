@@ -8,15 +8,18 @@ ffmpeg, separate from any system ffmpeg). Also needs a running server
 Uses the app's own default "Sample pcap file" (DEFAULT_SAMPLE_URL in
 static/socrates.js - a one-click convenience link to an external pcap on
 malware-traffic-analysis.net, not something bundled with the app), same as
-scripts/capture_screenshots.py, so it needs no
-pre-existing local analysis or hardcoded MD5 - it works on a clean checkout
-with an empty DATA_DIR. Pointing the server's DATA_DIR at one that's already
-analyzed that same sample skips straight to the "ready" response (see
-_commit_file_or_return_ready in socrates.py) instead of re-running Suricata/
-Sigma/YARA, and is also the only way to get real Playbook/AI Summary
-content in the recording, since playbook_lookup.py/ai_summary_lookup.py
-read from PLAYBOOKS_DIR//usr/share/playbooks and AI_SUMMARIES_DIR//usr/
-share/ai-summaries (Docker-image-baked, not part of DATA_DIR).
+scripts/capture_screenshots.py, so it needs no pre-existing local analysis
+or hardcoded MD5 - it works on a clean checkout with an empty DATA_DIR.
+Before recording starts, main() pre-warms that exact sample via a plain
+/api/load-url POST (see _prewarm_sample_analysis) and blocks until it's
+ready - so the recorded click hits _commit_file_or_return_ready's dedup
+fast path (see socrates.py) instead of waiting through a real Suricata/
+YARA/Sigma run on camera. Running against a container's fresh volume (see
+AGENTS.md's Release Checklist) is also the only way to get real Playbook/
+AI Summary content in the recording, since playbook_lookup.py/
+ai_summary_lookup.py read from PLAYBOOKS_DIR//usr/share/playbooks and
+AI_SUMMARIES_DIR//usr/share/ai-summaries (Docker-image-baked, not part of
+DATA_DIR).
 
 Each caption() call can optionally take a target (a Playwright Locator) -
 see point_to()/DRAW_ARROW_JS - which draws an amber arrow from the caption
@@ -47,10 +50,14 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
 
 from playwright.async_api import async_playwright
 
@@ -256,7 +263,66 @@ async def clear_pointer(page):
     await page.evaluate(REMOVE_ARROW_JS)
 
 
+def _default_sample_url():
+    """Read DEFAULT_SAMPLE_URL straight from static/socrates.js rather than
+    hardcoding a second copy here - a second copy would silently drift out
+    of sync with the real one if it ever changed, quietly pre-warming the
+    wrong sample (or none at all) while the recorded click below still
+    requests whatever the frontend's own constant actually says."""
+    js_path = os.path.join(REPO_ROOT, 'static', 'socrates.js')
+    with open(js_path, 'r') as f:
+        content = f.read()
+    match = re.search(r"const DEFAULT_SAMPLE_URL = '([^']+)'", content)
+    if not match:
+        raise RuntimeError('Could not find DEFAULT_SAMPLE_URL in static/socrates.js')
+    return match.group(1)
+
+
+def _prewarm_sample_analysis(base_url):
+    """Trigger the same /api/load-url request the recorded 'Sample pcap
+    file' click below will make, and block until Suricata/YARA/Sigma
+    finish, before recording starts - so that click hits
+    _commit_file_or_return_ready's dedup fast path (see socrates.py) and
+    resolves in a second or two instead of however long the real analysis
+    takes (real repro: several visible seconds of "Downloading file..."/
+    analysis-in-progress spinner in the recorded video, dominated by
+    Suricata parsing the sample and loading the full ruleset, not the
+    small pcap's own download time). The download itself still happens
+    twice - this request downloads the sample as a real prerequisite, and
+    the recorded click downloads it again, since _fetch_url_safely has no
+    cache - but a several-hundred-KB pcap download is fast; it's the
+    Suricata/YARA/Sigma run this actually saves.
+
+    Plain urllib, not Playwright - this must run before the recorded
+    browser context is even created (see main() below), so none of it
+    shows up in the video."""
+    origin = base_url.rsplit('/socrates.html', 1)[0]
+    sample_url = _default_sample_url()
+    body = json.dumps({'url': sample_url}).encode('utf-8')
+    req = urllib.request.Request(
+        origin + '/api/load-url', data=body,
+        headers={'Content-Type': 'application/json'}, method='POST')
+    with urllib.request.urlopen(req, timeout=90) as resp:
+        result = json.loads(resp.read())
+    if result.get('status') == 'error':
+        raise RuntimeError(f"Pre-warm failed: {result.get('error')}")
+    md5 = result['md5']
+    print(f'Pre-warming sample analysis (md5={md5})...')
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        with urllib.request.urlopen(origin + '/api/status?md5=' + md5, timeout=10) as resp:
+            status = json.loads(resp.read())
+        if status.get('status') == 'ready':
+            print('Pre-warm complete - the recorded run will hit the dedup fast path.')
+            return
+        if status.get('status') == 'error':
+            raise RuntimeError(f"Pre-warm analysis failed: {status.get('message')}")
+        time.sleep(1)
+    raise RuntimeError('Pre-warm timed out waiting for analysis to become ready')
+
+
 async def main(base_url):
+    _prewarm_sample_analysis(base_url)
     os.makedirs(os.path.dirname(MP4_OUTPUT), exist_ok=True)
     tmp_video_dir = tempfile.mkdtemp(prefix='so-crates-demo-video-')
 
@@ -577,9 +643,25 @@ async def main(base_url):
         await page.wait_for_timeout(500)
         palette_results = page.locator('#autocompleteResults')
         await caption(page, 'Matching isn\'t limited to the start of a word - even a bare '
-                            'fragment like "eme" finds "Open Themes"', palette_results)
+                            'fragment like "eme" finds "Themes" and every individual theme '
+                            'by name', palette_results)
         await page.keyboard.type('me', delay=150)
         await page.wait_for_timeout(2800)
+        # "eme" now matches dozens of commands (see autocompleteMatchScore's
+        # own comment in static/socrates.js: every per-theme command's code
+        # deliberately ends in " theme" so a "theme" fragment surfaces them
+        # all) - Enter alone no longer commits with that many candidates
+        # still ambiguous (activateAutocompleteSelection requires exactly
+        # one match, or an explicit arrow-key selection first). "Themes"
+        # itself sorts first among the tied score-0 matches (stable sort
+        # preserves AUTOCOMPLETE_COMMANDS's own order, and "Themes" is
+        # declared before the generated per-theme entries), so one ArrowDown
+        # highlights it.
+        await page.keyboard.press('ArrowDown')
+        await page.wait_for_timeout(800)
+        await caption(page, 'Arrow keys highlight a result - Down lands on "Themes", '
+                            'first among the matches', palette_results)
+        await page.wait_for_timeout(1800)
         await page.keyboard.press('Enter')
         await page.wait_for_timeout(1000)
         themes_modal = page.locator('#themesModal.active .modal-content')

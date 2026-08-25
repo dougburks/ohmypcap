@@ -434,6 +434,21 @@ class TestSQLite(unittest.TestCase):
     def test_has_row_notes_false_when_db_file_missing(self):
         self.assertFalse(db.has_row_notes(self.db_file))
 
+    def test_has_row_notes_does_not_create_db_file_when_missing(self):
+        """REGRESSION GUARD (real bug report): sqlite3.connect() creates an
+        empty file at its path as a side effect, even for a read-only
+        query - has_row_notes() returning False correctly for a missing
+        db_file (see the previous test) isn't proof it left the
+        filesystem alone. A caller hitting this while an analysis is
+        still mid-ingest (real repro: GET /api/status, polled during
+        processing) would pre-create events.db before create_sqlite_db()
+        gets a chance to, and that function's own
+        `not os.path.exists(db_file)` guard then skips real ingestion
+        entirely - silently leaving a permanently empty database."""
+        self.assertFalse(os.path.exists(self.db_file), 'setup check: db_file must not already exist')
+        db.has_row_notes(self.db_file)
+        self.assertFalse(os.path.exists(self.db_file), 'has_row_notes() must not create the file as a side effect')
+
     def test_has_row_notes_false_when_no_row_notes_table(self):
         conn = sqlite3.connect(self.db_file)
         conn.execute('CREATE TABLE events (id INTEGER PRIMARY KEY)')

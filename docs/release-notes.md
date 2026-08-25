@@ -1,5 +1,131 @@
 # Release Notes
 
+## 4.1.0
+
+### DNS Heuristics
+
+A new **DNS Heuristics** tab groups every DNS query in the capture by
+registrable domain and flags the ones that look like DNS tunneling or DGA
+(Domain Generation Algorithm) malware, sitting right before DNS Queries
+whenever anything trips a flag. Five independent signals feed a 0-100
+score: a high-entropy subdomain prefix under an otherwise ordinary parent
+domain (the classic tunneling shape); a high-entropy, low-vowel-ratio
+registrable domain itself (the DGA shape - vowel ratio, not entropy
+alone, is what actually separates a random-looking-but-real word mashup
+like `furtheringthemagic.com` from genuine DGA output, which lands at
+nearly identical raw entropy); 15 or more distinct subdomains queried
+under the same parent (fan-out, not just repeated lookups of the same
+name); an unusually long query name or label; and TXT/NULL record types,
+more associated with tunneling/exfil tooling than ordinary browsing.
+Known CDN suffixes are allowlisted out before scoring to cut noise.
+Clicking a flagged domain searches for it and jumps straight to DNS
+Queries to see the underlying events. A collapsible "About DNS
+Heuristics" info card explains the scoring up front, since this tab
+behaves nothing like any other data-type tab - rows are aggregated
+per-domain rather than raw events, and clicking one navigates away
+rather than expanding a detail panel in place.
+
+### Community ID correlation and TLS fingerprinting
+
+Suricata's `community-id` output is now force-enabled on every analysis
+(it ships off by default) - a single deterministic `community_id` field
+on flow/alert records that lets so-crates' output correlate against
+Zeek and other community-id-aware tools without anyone needing to
+discover the setting exists. A new **Correlate** entry in the pivot
+menu puts that to use directly: click any field on a row that has a
+community ID and Correlate searches for every other log across the
+whole capture sharing that same flow, network protocol events and
+alerts alike. It's suppressed when the clicked value already *is* the
+community ID itself, since Hunt right above it already does the exact
+same whole-analysis search in that case. JA3/JA3S/JA4 TLS
+client/server fingerprinting is force-enabled the same way - Suricata
+only computes these when an active rule's signature keyword happens to
+require them, so without this the fields were silently absent from
+`tls` events whenever none of the currently-enabled curated rule
+sources referenced ja3/ja4. All three now show up as their own rows in
+a TLS row's detail panel whenever present.
+
+### Keyboard navigation refinements
+
+Several real gaps surfaced through actual use of 4.0.0's keyboard
+navigation, all fixed now. With a multi-row stat-card grid, Right/Down
+tracking follows whichever card is actually under the keyboard ring
+instead of always snapping back to the active tab's own column - Right
+into a different column, then Down, now continues straight down that
+column instead of jumping back to the original one. The filter bar's
+chips and Clear All button are a single Left/Right-cycled horizontal
+group now instead of separate Down/Up stops, so Down from a chip goes
+straight to the data-type cards rather than stepping through Clear All
+first. Opening a fresh analysis, applying a filter, or performing a
+search now seeds keyboard focus on the resulting position (the default
+tab's card, or the new filter chip) instead of requiring an extra,
+wasted first arrow press to "arrive" there - a typed search's own chip
+gets a visible ring immediately, matching how a deliberate action should
+read, while a passive rebuild (an acknowledge action, a query-limit
+change) seeds the same starting position invisibly. Clearing filters
+returns focus to the first data-type card once none remain, or stays on
+whatever chip is left after a partial clear. Log analysis and
+binary/file analysis now get all of the above too - they'd never gotten
+the same fresh-load seeding PCAP analysis had, and log analysis
+specifically had its own separate bug where a stat card could end up
+with no tab-active card at all whenever sigma alerts were absent (the
+common case), silently breaking Down/Up navigation on the grid entirely.
+
+### Pivot menu: Include/Exclude/Only inside expanded rows
+
+A field clicked inside an expanded row's detail panel now gets the same
+Include/Exclude/Only menu a table-cell click on the identical
+underlying data already did, for far more fields than before. Most
+detail-panel labels are more descriptive prose than the terse column
+header a table cell uses for the same field (DNS's "Query Name" vs. the
+column "Query", HTTP's "User Agent" vs. "User-Agent", and a dozen more
+like it across other event types) - a verified label-to-column mapping
+now bridges the gap. Log analysis had its own, more pervasive version of
+the same mismatch: every detail field is labeled with the raw underlying
+JSON field name (e.g. "CommandLine"), not the human column label
+("Command Line") table headers use - now converted automatically. A
+sigma alert's own "Matched Event" section goes further still, since none
+of its fields (e.g. Computer) have a fixed column at all - filtering on
+them now works via the same generic field lookup the underlying log
+extraction logic already supported internally, without guessing which
+fields are actually safe to allow through.
+
+### Aggregation Tables: pagination, page size, and keyboard navigation
+
+Aggregation Tables used to show only the top 10 values per column with no
+way to see more. Each table now pages through its values with Prev/Next
+controls instead of growing the page - so a table full of long, variable-
+width values (a DNS query column, say) never reflows the surrounding
+layout or shifts a Next button out from under your cursor as you click
+through it. An "Items per page" selector (10/25/50/100) applies to every
+table in the currently-open section at once and persists across
+sessions, matching how theme/collapse-state preferences already do.
+Pagination is keyboard-driven too: Left/Right jumps directly to a
+different table instead of stepping through every row to reach it; Down
+walks a table's own rows and, once it reaches the last one, its Prev/Next
+stop, then continues into the next *visual row* of tables (not just the
+next table in source order, which for a multi-column layout is usually a
+same-row sibling reachable via Left/Right instead) or the Data Table if
+there isn't one - Up retraces the same path in reverse, all the way back
+out through the Data Table if you page past the top. Left/Right toggles
+between Prev and Next once you've arrived at that stop, and Enter
+activates whichever one is highlighted without losing keyboard focus
+afterward.
+
+### Fixed while preparing this release
+
+- The command palette's "Open X"/"Go to Y" entries (Themes, Rules,
+  Settings, Notes, every data-type tab, Search) were trimmed to just
+  their target name, matching how every other entry already read -
+  "Go to Search bar" in particular shortened to just "Search".
+- A stray keyboard-selection ring could be left behind on a stat card
+  after a plain mouse click switched to a different tab, since nothing
+  previously cleared it outside the keyboard-driven navigation paths -
+  now cleared as part of the click itself.
+- Typing a theme's name into the command palette (e.g. `ethereal`)
+  matched the theme by name but not by "theme" itself, since only the
+  bare name was searchable text.
+
 ## 4.0.0
 
 ### Acknowledge alerts
